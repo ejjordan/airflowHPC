@@ -1,6 +1,6 @@
 from airflow import DAG
-from airflow.decorators import task
-from airflow.operators.bash import BashOperator
+from airflow.decorators import task, task_group
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflow import Dataset
 
@@ -8,21 +8,22 @@ from tasks import run_grompp
 
 
 @task.branch
-def check_condition(counter, **kwargs):
-    ti = kwargs["ti"]
-    time = ti.xcom_pull(task_ids="time_holder", key="time")
-    print(f"\nTime is {time}\n")
-    if counter == 0:
-        return "run_mdrun"
-    elif time < 4:
-        return "run_mdrun"
+def check_condition(counter, num_iterations):
+    import logging
+
+    logging.info(f"check_condition: counter {counter} iterations {num_iterations}")
+    if counter < num_iterations:
+        return "trigger_self"
     else:
         return "run_complete"
 
 
 @task
 def run_complete():
-    print("run complete")
+    import logging
+
+    logging.info("run_complete: done")
+    return "done"
 
 
 @task(multiple_outputs=True, max_active_tis_per_dag=1)
@@ -54,10 +55,6 @@ def run_mdrun(tpr_path: str, output_info) -> dict:
     results_dict = md.output.file.result()
     results_dict["simulation_id"] = simulation_id
     return results_dict
-
-
-def get_xtc(result):
-    return result["-x"]
 
 
 def get_dhdl(result):
@@ -109,21 +106,56 @@ def store_dhdl_results(dhdl, output_dir, iteration) -> Dataset:
     return Dataset(f"file:///{output_file}")
 
 
-with DAG(
-    "looper",
-    schedule=None,
-    start_date=timezone.utcnow(),
-    catchup=False,
-    render_template_as_native_obj=True,
-) as dag:
-    grompp_result = run_grompp("sys.gro", "outputs/grompp")
-    mdrun_outputs_info = [(f"outputs/sim_{i}", i) for i in range(2)]
-    mdrun_result = run_mdrun.partial(tpr_path=grompp_result["-o"]).expand(
+@task_group
+def run_iteration(tpr_ref, num_replicates, iteration):
+    mdrun_outputs_info = [(f"outputs/sim_{i}", i) for i in range(num_replicates)]
+    mdrun_result = run_mdrun.partial(tpr_path=tpr_ref["-o"]).expand(
         output_info=mdrun_outputs_info
     )
     dhdl = mdrun_result.map(get_dhdl)
     dhdl_result = extract_final_dhdl_info.expand(result=dhdl)
     state = dhdl_result.map(get_state)
     dhdl_store = store_dhdl_results.partial(
-        output_dir="outputs/dhdl", iteration=0
+        output_dir="outputs/dhdl", iteration=iteration
     ).expand(dhdl=state)
+    return dhdl_store
+
+
+@task(max_active_tis_per_dag=1)
+def increment_counter(output_dir):
+    import os
+
+    if not os.path.exists(output_dir):
+        raise FileNotFoundError("Output directory does not exist")
+    out_path = os.path.abspath(output_dir)
+    counter_file = os.path.join(out_path, "counter.txt")
+    # start at index 1 so that requesting n iterations will run n iterations
+    counter = 1
+    if os.path.exists(counter_file):
+        with open(counter_file, "r") as f:
+            counter = int(f.read())
+        with open(counter_file, "w") as f:
+            f.write(str(counter + 1))
+    else:
+        with open(counter_file, "w") as f:
+            f.write(str(counter + 1))
+    return counter
+
+
+with DAG(
+    "looper",
+    schedule=None,
+    start_date=timezone.utcnow(),
+    catchup=False,
+    render_template_as_native_obj=True,
+    max_active_runs=1,
+) as dag:
+    grompp_result = run_grompp("sys.gro", "outputs/grompp")
+    counter = increment_counter("outputs")
+    dhdl_store = run_iteration(grompp_result, 2, counter)
+    trigger = TriggerDagRunOperator(task_id="trigger_self", trigger_dag_id="looper")
+    condition = check_condition(counter, 2)
+    done = run_complete()
+    condition.set_upstream(dhdl_store)
+    trigger.set_upstream(condition)
+    done.set_upstream(condition)
