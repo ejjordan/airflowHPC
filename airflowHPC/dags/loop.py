@@ -7,6 +7,17 @@ from airflow import Dataset
 from tasks import run_grompp
 
 
+SHIFT_RANGE = 1
+NUM_ITERATIONS = 2
+NUM_SIMULATIONS = 4
+STATE_RANGES = [
+    [0, 1, 2, 3, 4, 5],
+    [1, 2, 3, 4, 5, 6],
+    [2, 3, 4, 5, 6, 7],
+    [3, 4, 5, 6, 7, 8],
+]
+
+
 @task.branch
 def check_condition(counter, num_iterations):
     import logging
@@ -70,7 +81,7 @@ def extract_final_dhdl_info(result) -> dict[str, int]:
     from alchemlyb.parsing.gmx import _get_headers as get_headers
     from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
 
-    shift_range = 1
+    shift_range = SHIFT_RANGE
     i = result["simulation_id"]
     dhdl = result["-dhdl"]
     headers = get_headers(dhdl)
@@ -85,6 +96,7 @@ def extract_final_dhdl_info(result) -> dict[str, int]:
 def store_dhdl_results(dhdl, output_dir, iteration) -> Dataset:
     import os
     import json
+    import logging
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -103,7 +115,69 @@ def store_dhdl_results(dhdl, output_dir, iteration) -> Dataset:
         with open(output_file, "w") as f:
             data = {"iteration": {str(iteration): [dhdl]}}
             json.dump(data, f, indent=4, separators=(",", ": "))
-    return Dataset(f"file:///{output_file}")
+    dataset = Dataset(uri=output_file)
+    logging.info(f"store_dhdl_results: iteration {iteration} dataset {dataset}")
+    return dataset
+
+
+@task
+def get_swaps(
+    iteration, dhdl_store, state_ranges=STATE_RANGES, neighbor_exchange=False
+):
+    from itertools import combinations
+    import numpy as np
+    import logging
+    import random
+    import json
+
+    # Only one dataset is actually used so it should be fine to just take the first one
+    store = list(dhdl_store)[0]
+    with open(store.uri, "r") as f:
+        data = json.load(f)
+
+    states = [
+        data["iteration"][str(iteration)][i]["state"]
+        for i in range(len(data["iteration"][str(iteration)]))
+    ]
+    sim_idx = [
+        data["iteration"][str(iteration)][i]["simulation_id"]
+        for i in range(len(data["iteration"][str(iteration)]))
+    ]
+
+    all_pairs = list(combinations(sim_idx, 2))
+
+    # First, we identify pairs of replicas with overlapping ranges
+    swappables = [
+        i
+        for i in all_pairs
+        if set(state_ranges[i[0]]).intersection(set(state_ranges[i[1]])) != set()
+    ]
+
+    # Next, we exclude the ones where the last sampled states are not present in both alchemical ranges
+    swappables = [
+        i
+        for i in swappables
+        if states[i[0]] in state_ranges[i[1]] and states[i[1]] in state_ranges[i[0]]
+    ]
+
+    if neighbor_exchange is True:
+        swappables = [i for i in swappables if np.abs(i[0] - i[1]) == 1]
+
+    logging.info(f"get_swaps: iteration {iteration} swappables {swappables}")
+
+    swap_pattern = sim_idx  # initialize with no swaps
+    swap = random.choices(swappables, k=1)[0]
+    swap_pattern[swap[0]], swap_pattern[swap[1]] = (
+        swap_pattern[swap[1]],
+        swap_pattern[swap[0]],
+    )
+    state_ranges[swap[0]], state_ranges[swap[1]] = (
+        state_ranges[swap[1]],
+        state_ranges[swap[0]],
+    )
+    logging.info(f"get_swaps: iteration {iteration} swap_pattern {swap_pattern}")
+
+    return swap_pattern
 
 
 @task_group
@@ -118,7 +192,8 @@ def run_iteration(tpr_ref, num_replicates, iteration):
     dhdl_store = store_dhdl_results.partial(
         output_dir="outputs/dhdl", iteration=iteration
     ).expand(dhdl=state)
-    return dhdl_store
+    swap_pattern = get_swaps(iteration=iteration, dhdl_store=dhdl_store)
+    return swap_pattern
 
 
 @task(max_active_tis_per_dag=1)
@@ -152,10 +227,10 @@ with DAG(
 ) as dag:
     grompp_result = run_grompp("sys.gro", "outputs/grompp")
     counter = increment_counter("outputs")
-    dhdl_store = run_iteration(grompp_result, 2, counter)
+    swap_pattern = run_iteration(grompp_result, NUM_SIMULATIONS, counter)
     trigger = TriggerDagRunOperator(task_id="trigger_self", trigger_dag_id="looper")
-    condition = check_condition(counter, 2)
+    condition = check_condition(counter, NUM_ITERATIONS)
     done = run_complete()
-    condition.set_upstream(dhdl_store)
+    condition.set_upstream(swap_pattern)
     trigger.set_upstream(condition)
     done.set_upstream(condition)
