@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0", "versioningit~=2.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airflowHPC"
+dynamic = ["version"]
+
+dependencies = [
+    "apache-airflow",
+    "gmxapi",
+]
+
+[project.urls]
+"Source" = "https://github.com/ejjordan/airflowHPC"
+
+[project.optional-dependencies]
+test = [
+    "build",
+    "packaging",
+]
+
+target-version = ['py39', 'py310', 'py311']
+
