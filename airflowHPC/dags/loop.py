@@ -4,7 +4,7 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflow import Dataset
 
-from tasks import run_grompp
+from tasks import InputHolder, prepare_input
 
 
 SHIFT_RANGE = 1
@@ -37,43 +37,12 @@ def run_complete():
     return "done"
 
 
-@task(multiple_outputs=True, max_active_tis_per_dag=1)
-def run_mdrun(tpr_path: str, output_info) -> dict:
-    import os
-    import gmxapi as gmx
-
-    output_dir = output_info[0]
-    simulation_id = output_info[1]
-    if not os.path.exists(tpr_path):
-        raise FileNotFoundError("You must supply a tpr file")
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    out_path = os.path.abspath(output_dir)
-    input_files = {"-s": tpr_path}
-    output_files = {
-        "-x": os.path.join(out_path, "result.xtc"),
-        "-c": os.path.join(out_path, "result.gro"),
-        "-dhdl": os.path.join(out_path, "dhdl.xvg"),
-    }
-    cwd = os.getcwd()
-    os.chdir(out_path)
-    md = gmx.commandline_operation(
-        gmx.commandline.cli_executable(), "mdrun", input_files, output_files
-    )
-    md.run()
-    os.chdir(cwd)
-    assert os.path.exists(md.output.file["-c"].result())
-    results_dict = md.output.file.result()
-    results_dict["simulation_id"] = simulation_id
-    return results_dict
-
-
 def get_dhdl(result):
-    return {"simulation_id": result["simulation_id"], "-dhdl": result["-dhdl"]}
-
-
-def get_state(result):
-    return {"simulation_id": result["simulation_id"], "state": result["state"]}
+    return {
+        "simulation_id": result["simulation_id"],
+        "-dhdl": result["-dhdl"],
+        "gro_path": result["-c"],
+    }
 
 
 @task
@@ -84,16 +53,22 @@ def extract_final_dhdl_info(result) -> dict[str, int]:
     shift_range = SHIFT_RANGE
     i = result["simulation_id"]
     dhdl = result["-dhdl"]
+    gro = result["gro_path"]
     headers = get_headers(dhdl)
     state_local = list(extract_dataframe(dhdl, headers=headers)["Thermodynamic state"])[
         -1
     ]  # local index of the last state  # noqa: E501
     state_global = state_local + i * shift_range  # global index of the last state
-    return {"simulation_id": i, "state": state_global}
+    return {"simulation_id": i, "state": state_global, "gro": gro}
 
 
 @task
-def store_dhdl_results(dhdl, output_dir, iteration) -> Dataset:
+def reduce_dhdl(dhdl, iteration):
+    return {str(iteration): list(dhdl)}
+
+
+@task
+def store_dhdl_results(dhdl_dict, output_dir, iteration) -> Dataset:
     import os
     import json
     import logging
@@ -106,15 +81,24 @@ def store_dhdl_results(dhdl, output_dir, iteration) -> Dataset:
         with open(output_file, "r") as f:
             data = json.load(f)
         if str(iteration) in data["iteration"].keys():
-            data["iteration"][str(iteration)].append(dhdl)
-        else:
-            data["iteration"][str(iteration)] = [dhdl]
+            raise ValueError(
+                f"store_dhdl_results: iteration {iteration} already exists in {output_file}"
+            )
+        if str(iteration) not in dhdl_dict.keys():
+            raise ValueError(
+                f"store_dhdl_results: iteration {iteration} not found in dhdl_dict"
+            )
+        data["iteration"][str(iteration)] = dhdl_dict[str(iteration)]
         with open(output_file, "w") as f:
-            json.dump(data, f, indent=4, separators=(",", ": "))
+            json.dump(data, f, indent=2, separators=(",", ": "))
     else:
+        if str(iteration) not in dhdl_dict.keys():
+            raise ValueError(
+                f"store_dhdl_results: iteration {iteration} not found in dhdl_dict"
+            )
         with open(output_file, "w") as f:
-            data = {"iteration": {str(iteration): [dhdl]}}
-            json.dump(data, f, indent=4, separators=(",", ": "))
+            data = {"iteration": {str(iteration): dhdl_dict[str(iteration)]}}
+            json.dump(data, f, indent=2, separators=(",", ": "))
     dataset = Dataset(uri=output_file)
     logging.info(f"store_dhdl_results: iteration {iteration} dataset {dataset}")
     return dataset
@@ -130,9 +114,7 @@ def get_swaps(
     import random
     import json
 
-    # Only one dataset is actually used so it should be fine to just take the first one
-    store = list(dhdl_store)[0]
-    with open(store.uri, "r") as f:
+    with open(dhdl_store.uri, "r") as f:
         data = json.load(f)
 
     states = [
@@ -180,20 +162,45 @@ def get_swaps(
     return swap_pattern
 
 
+@task
+def prepare_next_step(swap_pattern, inputHolderList, dhdl_dict, iteration):
+    from dataclasses import asdict
+
+    input_holder_list = [InputHolder(**i) for i in inputHolderList]
+    if str(iteration) not in dhdl_dict.keys():
+        raise ValueError(
+            f"prepare_next_step: iteration {iteration} not found in dhdl_dict"
+        )
+    dhdl_info = dhdl_dict[str(iteration)]
+
+    # Swap the gro files but keep the order for top and mdp files
+    gro_list = [
+        dhdl_info[i]["gro"] for i in swap_pattern if dhdl_info[i]["simulation_id"] == i
+    ]
+    next_step_input = [
+        asdict(
+            InputHolder(
+                gro_path=gro_list[i],
+                top_path=input_holder_list[i].top_path,
+                mdp_path=input_holder_list[i].mdp_path,
+                simulation_id=i,
+                output_dir=f"outputs/step_{iteration}/sim_{i}",
+            )
+        )
+        for i in range(len(swap_pattern))
+    ]
+    return next_step_input
+
+
 @task_group
-def run_iteration(tpr_ref, num_replicates, iteration):
-    mdrun_outputs_info = [(f"outputs/sim_{i}", i) for i in range(num_replicates)]
-    mdrun_result = run_mdrun.partial(tpr_path=tpr_ref["-o"]).expand(
-        output_info=mdrun_outputs_info
-    )
+def run_iteration(inputs_list):
+    from tasks import run_grompp, run_mdrun
+
+    grompp_result = run_grompp.expand(input_holder_dict=inputs_list)
+    mdrun_result = run_mdrun.expand(mdrun_holder_dict=grompp_result)
     dhdl = mdrun_result.map(get_dhdl)
     dhdl_result = extract_final_dhdl_info.expand(result=dhdl)
-    state = dhdl_result.map(get_state)
-    dhdl_store = store_dhdl_results.partial(
-        output_dir="outputs/dhdl", iteration=iteration
-    ).expand(dhdl=state)
-    swap_pattern = get_swaps(iteration=iteration, dhdl_store=dhdl_store)
-    return swap_pattern
+    return dhdl_result
 
 
 @task(max_active_tis_per_dag=1)
@@ -201,7 +208,7 @@ def increment_counter(output_dir):
     import os
 
     if not os.path.exists(output_dir):
-        raise FileNotFoundError("Output directory does not exist")
+        os.makedirs(output_dir)
     out_path = os.path.abspath(output_dir)
     counter_file = os.path.join(out_path, "counter.txt")
     # start at index 1 so that requesting n iterations will run n iterations
@@ -225,12 +232,21 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as dag:
-    grompp_result = run_grompp("sys.gro", "outputs/grompp")
     counter = increment_counter("outputs")
-    swap_pattern = run_iteration(grompp_result, NUM_SIMULATIONS, counter)
+    inputHolderList = prepare_input(counter=counter, num_simulations=NUM_SIMULATIONS)
+    dhdl_results = run_iteration(inputHolderList)
+    dhdl_dict = reduce_dhdl(dhdl_results, counter)
+    dhdl_store = store_dhdl_results(
+        output_dir="outputs/dhdl", iteration=counter, dhdl_dict=dhdl_dict
+    )
+    swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
+    next_step_input = prepare_next_step(
+        swap_pattern, inputHolderList, dhdl_dict, counter
+    )
+
     trigger = TriggerDagRunOperator(task_id="trigger_self", trigger_dag_id="looper")
     condition = check_condition(counter, NUM_ITERATIONS)
     done = run_complete()
-    condition.set_upstream(swap_pattern)
+    condition.set_upstream(next_step_input)
     trigger.set_upstream(condition)
     done.set_upstream(condition)
