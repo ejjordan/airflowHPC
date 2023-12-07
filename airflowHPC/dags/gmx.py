@@ -1,5 +1,5 @@
 from airflow import DAG
-from airflow.decorators import task
+from airflow.decorators import task, task_group
 from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import run_grompp, run_mdrun, prepare_input
@@ -65,12 +65,8 @@ def get_grompp_input(input_holder_list):
     return list(input_holder_list)[0]
 
 
-with DAG("run_gmxapi", start_date=timezone.utcnow(), catchup=False) as dag:
-    input_holder_list = prepare_input(counter=0, num_simulations=1)
-    grompp_input = get_grompp_input(input_holder_list)
-    grompp_result = run_grompp(grompp_input)
-    mdrun_result = run_mdrun(grompp_result)
-
+@task_group
+def analyze(mdrun_result):
     protein_mass_result = protein_mass(
         {"gro": mdrun_result["-c"], "xtc": mdrun_result["-x"]}
     )
@@ -86,3 +82,11 @@ with DAG("run_gmxapi", start_date=timezone.utcnow(), catchup=False) as dag:
     )
     calc_decider.set_downstream(com)
     calc_decider.set_downstream(cog)
+
+
+with DAG("run_gmxapi", start_date=timezone.utcnow(), catchup=False) as dag:
+    input_holder_list = prepare_input(counter=0, num_simulations=1)
+    grompp_input = get_grompp_input(input_holder_list)
+    grompp_result = run_grompp(grompp_input)
+    mdrun_result = run_mdrun(grompp_result)
+    # analyze(mdrun_result)

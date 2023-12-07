@@ -6,7 +6,7 @@ from airflow.utils.state import TaskInstanceState
 from airflow.models.taskinstancekey import TaskInstanceKey
 import subprocess
 
-from scalems.simple.airflow.serialization import serialize_call, deserialize_call
+from airflowHPC.utils.serialization import serialize_call, deserialize_call
 
 
 class ZmqSequentialExecutor(BaseExecutor):
