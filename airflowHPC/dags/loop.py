@@ -4,7 +4,7 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflow import Dataset
 
-from tasks import InputHolder, prepare_input
+from airflowHPC.dags.tasks import InputHolder, prepare_input
 
 
 SHIFT_RANGE = 1
@@ -51,14 +51,14 @@ def extract_final_dhdl_info(result) -> dict[str, int]:
     from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
 
     shift_range = SHIFT_RANGE
-    i = result["simulation_id"]
+    i: int = result["simulation_id"]
     dhdl = result["-dhdl"]
     gro = result["gro_path"]
     headers = get_headers(dhdl)
     state_local = list(extract_dataframe(dhdl, headers=headers)["Thermodynamic state"])[
         -1
     ]  # local index of the last state  # noqa: E501
-    state_global = state_local + i * shift_range  # global index of the last state
+    state_global: int = state_local + i * shift_range  # global index of the last state
     return {"simulation_id": i, "state": state_global, "gro": gro}
 
 
@@ -148,15 +148,16 @@ def get_swaps(
     logging.info(f"get_swaps: iteration {iteration} swappables {swappables}")
 
     swap_pattern = sim_idx  # initialize with no swaps
-    swap = random.choices(swappables, k=1)[0]
-    swap_pattern[swap[0]], swap_pattern[swap[1]] = (
-        swap_pattern[swap[1]],
-        swap_pattern[swap[0]],
-    )
-    state_ranges[swap[0]], state_ranges[swap[1]] = (
-        state_ranges[swap[1]],
-        state_ranges[swap[0]],
-    )
+    if len(swappables) > 0:
+        swap = random.choices(swappables, k=1)[0]
+        swap_pattern[swap[0]], swap_pattern[swap[1]] = (
+            swap_pattern[swap[1]],
+            swap_pattern[swap[0]],
+        )
+        state_ranges[swap[0]], state_ranges[swap[1]] = (
+            state_ranges[swap[1]],
+            state_ranges[swap[0]],
+        )
     logging.info(f"get_swaps: iteration {iteration} swap_pattern {swap_pattern}")
 
     return swap_pattern
@@ -194,7 +195,7 @@ def prepare_next_step(swap_pattern, inputHolderList, dhdl_dict, iteration):
 
 @task_group
 def run_iteration(inputs_list):
-    from tasks import run_grompp, run_mdrun
+    from airflowHPC.dags.tasks import run_grompp, run_mdrun
 
     grompp_result = run_grompp.expand(input_holder_dict=inputs_list)
     mdrun_result = run_mdrun.expand(mdrun_holder_dict=grompp_result)

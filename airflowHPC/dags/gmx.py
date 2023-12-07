@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.decorators import task
 from airflow.utils import timezone
 
-from tasks import run_grompp, run_mdrun, prepare_input
+from airflowHPC.dags.tasks import run_grompp, run_mdrun, prepare_input
 
 
 @task
