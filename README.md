@@ -40,9 +40,10 @@ airflow standalone
 This will start a webserver on port 8080 where you can trigger airflow DGAs.
 Several lines of startup output will be printed to the terminal, including a
 line that looks like this:
-```bash
-standalone | Login with username: admin  password: ****************
-```
+
+`standalone | Login with username: admin  password: ****************`
+
+
 where the password is a randomly generated string. 
 You can use these credentials to log in to the webserver.
 
