@@ -8,7 +8,7 @@ from airflow.utils.context import Context, context_merge
 from airflow.utils.operator_helpers import KeywordParameters
 from airflow.decorators.base import task_decorator_factory, DecoratedOperator
 
-from scalems.call import serialize_call
+from airflowHPC.utils.serialization import serialize_call
 
 
 class RadicalPythonOperator(BaseOperator):

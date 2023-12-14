@@ -233,6 +233,8 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as dag:
+    dag.doc = "Demonstration of a replica exchange MD workflow."
+
     counter = increment_counter("outputs")
     inputHolderList = prepare_input(counter=counter, num_simulations=NUM_SIMULATIONS)
     dhdl_results = run_iteration(inputHolderList)
