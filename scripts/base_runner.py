@@ -17,8 +17,6 @@ conf.set(
     "mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db",
 )
 
-os.environ["PYTHONPATH"] = "~/dev/airflowHPC/airflowHPC/executors/"
-os.environ["AIRFLOW__CORE__EXECUTOR"] = "zmq_local_executor.ZmqLocalExecutor"
 os.environ["AIRFLOW__CORE__PARALLELISM"] = "2"
 os.environ["AIRFLOW__CORE__DAGS_FOLDER"] = "~/dev/airflowHPC/airflowHPC/dags/"
 
@@ -45,6 +43,6 @@ dag_dir = os.path.join(scalems_airflow_dir, "airflowHPC/dags/")
 utc_now = timezone.utcnow()
 
 dagbag = DagBag(dag_folder=dag_dir, include_examples=False, read_dags_from_db=False)
-dag = dagbag.dags.get("run_gmxapi")
-dag.run(executor=ZmqLocalExecutor())
+dag = dagbag.dags.get("get_source")
+dag.run(executor=ZmqLocalExecutor(), run_at_least_once=True, start_date=utc_now)
 # import ipdb; ipdb.set_trace()
