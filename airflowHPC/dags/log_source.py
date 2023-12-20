@@ -3,7 +3,7 @@ from airflow.decorators import task
 from airflow.utils import timezone
 
 
-@task
+@task.radical
 def print_source(**kwargs):
     import logging, inspect
 

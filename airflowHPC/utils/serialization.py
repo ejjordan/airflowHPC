@@ -1,16 +1,18 @@
 import dill
 import functools
 import json
-import typing
+from typing import Any, Callable, Dict, List, TypedDict
 
 
-class CallPack(typing.TypedDict):
-    """A call pack is a dictionary that contains all the information needed to execute a call."""
-
+class AirflowCall(TypedDict):
     key: str
-    command: typing.List[str]
-    decoder: str
-    encoder: str
+    command: List[str]
+
+
+class OperatorCall(TypedDict):
+    func: Callable
+    op_args: List[Any]
+    op_kwargs: Dict[str, Any]
 
 
 to_bytes = functools.partial(dill.dumps, byref=True, recurse=False)
@@ -20,12 +22,19 @@ def from_hex(x: str):
     return dill.loads(bytes.fromhex(x))
 
 
-def serialize_call(key, command) -> str:
-    pack = CallPack(
+def serialize_airflow_call(key, command) -> str:
+    pack = AirflowCall(
         key=to_bytes(key).hex(),
         command=[to_bytes(arg).hex() for arg in command],
-        decoder="dill",
-        encoder="dill",
+    )
+    return json.dumps(pack, separators=(",", ":"))
+
+
+def serialize_operator_call(func, op_args, op_kwargs) -> str:
+    pack = OperatorCall(
+        func=to_bytes(func).hex(),
+        op_args=[to_bytes(arg).hex() for arg in op_args],
+        op_kwargs={key: to_bytes(value).hex() for key, value in op_kwargs.items()},
     )
     return json.dumps(pack, separators=(",", ":"))
 

@@ -3,8 +3,12 @@ requires = ["setuptools>=61.0", "versioningit~=2.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "airflowHPC"
+name = "airflow-provider-radical"
 dynamic = ["version"]
+classifiers = [
+    "Framework :: Apache Airflow",
+    "Framework :: Apache Airflow :: Provider",
+]
 
 dependencies = [
     "apache-airflow",
@@ -14,6 +18,10 @@ dependencies = [
 [project.urls]
 "Source" = "https://github.com/ejjordan/airflowHPC"
 
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
 [project.optional-dependencies]
 test = [
     "build",
@@ -21,4 +29,7 @@ test = [
 ]
 
 target-version = ['py39', 'py310', 'py311']
+
+[project.entry-points.apache_airflow_provider]
+provider_info = "airflowHPC.__init__:get_provider_info"
 

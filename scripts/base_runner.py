@@ -4,7 +4,7 @@ from pathlib import Path
 from airflow.utils import timezone
 from airflow.models import DagBag
 
-# from loud_logger import loud_logger
+from airflowHPC.utils.loud_logger import loud_logger
 
 from airflow.configuration import conf
 from airflow import settings
@@ -36,7 +36,7 @@ settings.configure_orm()
 "export AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT=600"  # for use with DebugExecutor
 "export AIRFLOW__CORE__LOAD_EXAMPLES=False"
 
-# loud_logger()
+loud_logger()
 
 dag_dir = os.path.join(scalems_airflow_dir, "airflowHPC/dags/")
 
