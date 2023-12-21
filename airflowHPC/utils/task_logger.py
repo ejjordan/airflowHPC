@@ -1,7 +1,8 @@
 import logging
 
 
-def loud_logger():
+def task_logger():
+    """Log task execution, including calls to log.info in task sources."""
     logger = logging.getLogger("airflow.task")
     logger.setLevel(logging.INFO)
     handler = logging.StreamHandler()

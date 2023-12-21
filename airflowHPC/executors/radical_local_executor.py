@@ -129,7 +129,7 @@ class LocalWorker(Process, LoggingMixin):
                 self.task_queue.task_done()
 
 
-class ZmqLocalExecutor(BaseExecutor):
+class RadicalLocalExecutor(BaseExecutor):
     is_local: bool = True
     supports_pickling: bool = False
 

@@ -66,9 +66,32 @@ documentation
 
 Once you have a MySQL database set up and configured according to the instructions,
 you can launch the standalone webserver with the `prepare_standalone.sh` script.
+This script will use the RadicalLocalExecutor, which is vended by the function
+`get_provider_info()` in `airflowHPC/__init__.py`.
 ```bash
 bash airflowHPC/scripts/prepare_standalone.sh
 ```
 
 Note that the script can be run from any directory, but it should not be moved
 from its original location in the repository.
+
+### Running from the command line
+After conviguring a python virtual environment and MySQL database as described above,
+you can run a DAG from the command line by executing the `base_runner.py` script.
+```bash
+python airflowHPC/scripts/base_runner.py get_mass
+```
+The script should work without needing to configure any environment variables,
+as they are set in the script itself and the help should provide enough information
+to run the script.
+
+### Debugging
+Instructions for debugging a DAG are available in the 
+[airflow documentation](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/executor/debug.html#testing-dags-with-dag-test).
+
+### Clearing the database
+Airflow ships with a command line tool for clearing the database.
+```bash
+airflow db clean --clean-before-timestamp 'yyyy-mm-dd'
+```
+The dag runs can also be deleted from the webserver.

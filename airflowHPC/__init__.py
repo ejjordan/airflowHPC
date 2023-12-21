@@ -19,6 +19,10 @@ def get_provider_info():
                 "class-name": "airflowHPC.operators.radical_operator.radical_task",
             }
         ],
+        "executors": [
+            "airflowHPC.executors.radical_local_executor.RadicalLocalExecutor",
+            "airflowHPC.executors.zmq_sequential_executor.ZMQSequentialExecutor",
+        ],
         "versions": [__version__],
         "docs-url": "https://github.com/ejjordan/airflowHPC/blob/main/README.md",
     }

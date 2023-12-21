@@ -3,7 +3,7 @@ from airflow.decorators import task
 from airflow.utils import timezone
 
 
-@task.radical
+@task
 def print_source(**kwargs):
     import logging, inspect
 
@@ -13,6 +13,9 @@ def print_source(**kwargs):
 
 
 with DAG("get_source", start_date=timezone.utcnow(), catchup=False) as dag:
+    dag.doc = (
+        "Demo of how to get source code of a task function within the task itself."
+    )
     print_source()
 
 if __name__ == "__main__":

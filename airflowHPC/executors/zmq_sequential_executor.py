@@ -6,7 +6,7 @@ from airflow.utils.state import TaskInstanceState
 from airflow.models.taskinstancekey import TaskInstanceKey
 import subprocess
 
-from airflowHPC.utils.serialization import serialize_call, deserialize_call
+from airflowHPC.utils.serialization import serialize_airflow_call, deserialize_call
 
 
 class ZmqSequentialExecutor(BaseExecutor):
@@ -30,7 +30,7 @@ class ZmqSequentialExecutor(BaseExecutor):
         executor_config=None,
     ) -> None:
         self.validate_airflow_tasks_run_command(command)
-        self.sender.send_string(serialize_call(key, command))
+        self.sender.send_string(serialize_airflow_call(key, command))
 
     def sync(self) -> None:
         while True:
@@ -59,6 +59,6 @@ class ZmqSequentialExecutor(BaseExecutor):
 
     def end(self):
         """End the executor."""
-        self.sender.send_string(serialize_call(None, []))
+        self.sender.send_string(serialize_airflow_call(None, []))
         self.sender.close()
         self.receiver.close()
