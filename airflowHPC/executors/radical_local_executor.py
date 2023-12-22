@@ -139,6 +139,9 @@ class RadicalLocalExecutor(BaseExecutor):
         super().__init__(parallelism=parallelism)
         if self.parallelism <= 1:
             raise AirflowException(f"{self.__class__.__name__} parallelism must be > 1")
+        self.log.info(
+            f"Using {self.__class__.__name__} with {self.parallelism} processes"
+        )
         self.manager: SyncManager | None = None
         self.result_queue: Queue[TaskInstanceStateType] | None = None
         self.workers: list[LocalWorker] = []

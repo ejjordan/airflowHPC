@@ -226,14 +226,16 @@ def increment_counter(output_dir):
 
 
 with DAG(
-    "looper",
-    schedule=None,
+    "replica_exchange",
     start_date=timezone.utcnow(),
+    schedule="@once",
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
+    tags=["schedule"],
 ) as dag:
-    dag.doc = "Demonstration of a replica exchange MD workflow."
+    dag.doc = """Demonstration of a replica exchange MD workflow.
+    Since it is scheduled '@once', it has to be deleted from the database before it can be run again."""
 
     counter = increment_counter("outputs")
     inputHolderList = prepare_input(counter=counter, num_simulations=NUM_SIMULATIONS)
@@ -247,7 +249,9 @@ with DAG(
         swap_pattern, inputHolderList, dhdl_dict, counter
     )
 
-    trigger = TriggerDagRunOperator(task_id="trigger_self", trigger_dag_id="looper")
+    trigger = TriggerDagRunOperator(
+        task_id="trigger_self", trigger_dag_id="replica_exchange"
+    )
     condition = check_condition(counter, NUM_ITERATIONS)
     done = run_complete()
     condition.set_upstream(next_step_input)

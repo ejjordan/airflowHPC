@@ -9,8 +9,6 @@ from airflow.decorators.base import (
     TaskDecorator,
 )
 
-from airflowHPC.utils.serialization import serialize_operator_call
-
 
 class RadicalOperator(PythonOperator):
     def __init__(self, *, python_callable, op_args, op_kwargs, **kwargs) -> None:
@@ -20,14 +18,21 @@ class RadicalOperator(PythonOperator):
             op_kwargs=op_kwargs,
             **kwargs,
         )
-        self.radical_call = self.radical_callable()
+        # self.radical_task = self.radical_task()
 
-    def radical_callable(self) -> Any:
-        call = serialize_operator_call(
-            self.python_callable, self.op_args, self.op_kwargs
+    def radical_task(self) -> Any:
+        import radical.pilot as rp
+        import radical.utils as ru
+
+        task = rp.TaskDescription()
+        task.name = self.python_callable.__name__
+        task.mode = rp.TASK_FUNCTION
+        task.raptor_id = ru.generate_id("task.%(item_counter)06d", ru.ID_CUSTOM)
+        task.function = rp.PythonTask(
+            self.python_callable, *self.op_args, **self.op_kwargs
         )
-        self.log.info(f"Radical call: {call}")
-        return call
+        # self.log.info(f"Radical task: {task}")
+        return task
 
 
 class _RadicalDecoratedOperator(DecoratedOperator, RadicalOperator):

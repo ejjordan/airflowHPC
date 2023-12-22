@@ -89,6 +89,10 @@ to run the script.
 Instructions for debugging a DAG are available in the 
 [airflow documentation](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/executor/debug.html#testing-dags-with-dag-test).
 
+It is also possible to debug an operator, task, or DAG, by setting the
+environment variable `AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT` to a large value
+in seconds and dropping a set_trace() statement in the code.
+
 ### Clearing the database
 Airflow ships with a command line tool for clearing the database.
 ```bash
