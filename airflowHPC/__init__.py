@@ -1,6 +1,6 @@
-import importlib.metadata
+import importlib_metadata
 
-__version__ = importlib.metadata.version("airflow-provider-radical")
+__version__ = importlib_metadata.version("airflow-provider-radical")
 
 
 def get_provider_info():

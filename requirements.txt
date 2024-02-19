@@ -2,5 +2,4 @@ alchemlyb
 dill
 h5py
 mdanalysis
-mysql
 zmq

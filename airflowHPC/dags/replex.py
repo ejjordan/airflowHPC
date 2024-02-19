@@ -3,6 +3,7 @@ from airflow.decorators import task, task_group
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflow import Dataset
+from typing import Dict
 
 from airflowHPC.dags.tasks import InputHolder, prepare_input
 
@@ -46,7 +47,7 @@ def get_dhdl(result):
 
 
 @task
-def extract_final_dhdl_info(result) -> dict[str, int]:
+def extract_final_dhdl_info(result) -> Dict[str, int]:
     from alchemlyb.parsing.gmx import _get_headers as get_headers
     from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
 
