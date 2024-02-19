@@ -1,5 +1,9 @@
+import os
+import shutil
+import gmxapi as gmx
 from airflow.decorators import task
-from dataclasses import dataclass
+from airflowHPC.data import data_dir
+from dataclasses import dataclass, asdict
 
 __all__ = ("run_grompp", "run_mdrun", "InputHolder")
 
@@ -22,10 +26,6 @@ class MdrunHolder:
 
 @task
 def prepare_input(counter, num_simulations):
-    import os
-    from dataclasses import asdict
-    from airflowHPC.data import data_dir
-
     input_dir = os.path.abspath(os.path.join(data_dir, "ensemble_md"))
     inputHolderList = [
         asdict(
@@ -34,7 +34,7 @@ def prepare_input(counter, num_simulations):
                 top_path=os.path.join(input_dir, "sys.top"),
                 mdp_path=os.path.join(input_dir, "expanded.mdp"),
                 simulation_id=i,
-                output_dir=f"outputs/step_{counter}/sim_{i}",
+                output_dir=f"outputs/sim_{i}/iteration_{counter}",
             )
         )
         for i in range(num_simulations)
@@ -44,10 +44,6 @@ def prepare_input(counter, num_simulations):
 
 @task(multiple_outputs=True)
 def run_grompp(input_holder_dict, verbose: bool = False):
-    import os
-    import gmxapi as gmx
-    from dataclasses import asdict
-
     input_holder = InputHolder(**input_holder_dict)
     input_files = {
         "-f": input_holder.mdp_path,
@@ -58,8 +54,10 @@ def run_grompp(input_holder_dict, verbose: bool = False):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     out_path = os.path.abspath(output_dir)
-    tpr = os.path.join(out_path, "run.tpr")
-    output_files = {"-o": tpr}
+    output_files = {
+        "-o": os.path.join(out_path, "run.tpr"),
+        "-po": os.path.join(out_path, "mdout.mdp")
+    }
     cwd = os.getcwd()
     os.chdir(out_path)
     grompp = gmx.commandline_operation(
@@ -81,9 +79,6 @@ def run_grompp(input_holder_dict, verbose: bool = False):
 
 @task(multiple_outputs=True, max_active_tis_per_dag=1)
 def run_mdrun(mdrun_holder_dict) -> dict:
-    import os
-    import gmxapi as gmx
-
     mdrun_holder = MdrunHolder(**mdrun_holder_dict)
     output_dir = mdrun_holder.output_dir
     simulation_id = mdrun_holder.simulation_id
@@ -98,6 +93,9 @@ def run_mdrun(mdrun_holder_dict) -> dict:
         "-x": os.path.join(out_path, "result.xtc"),
         "-c": os.path.join(out_path, "result.gro"),
         "-dhdl": os.path.join(out_path, "dhdl.xvg"),
+        "-g": os.path.join(out_path, "md.log"),
+        "-e": os.path.join(out_path, "ener.edr"),
+        "-cpo": os.path.join(out_path, "state.cpt"),
     }
     cwd = os.getcwd()
     os.chdir(out_path)
@@ -107,6 +105,7 @@ def run_mdrun(mdrun_holder_dict) -> dict:
     md.run()
     os.chdir(cwd)
     assert os.path.exists(md.output.file["-c"].result())
+    shutil.rmtree(md.output.directory.result())
     results_dict = md.output.file.result()
     results_dict["simulation_id"] = simulation_id
     return results_dict
