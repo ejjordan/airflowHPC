@@ -1,4 +1,4 @@
-title                   = CHARMM NPT equilibration
+; title                   = CHARMM NPT equilibration
 
 ; Parameters describing what to do, when to stop and what to save
 integrator              = md        ; leap-frog integrator
@@ -11,7 +11,7 @@ nstxout-compressed      = 500      ; save coordincates every 1 ps
 pbc                     = xyz       ;
 
 ; Pressure coupling is on
-pcoupl                  = Berendsen             ; Pressure coupling on in NPT
+pcoupl                  = C-rescale             ; Pressure coupling on in NPT
 pcoupltype              = isotropic             ; uniform scaling of box vectors
 tau_p                   = 1.0                   ; time constant, in ps
 ref_p                   = 1.0                   ; reference pressure, in bar
@@ -22,7 +22,8 @@ refcoord_scaling        = com
 tcoupl                  = V-rescale ; modified Berendsen thermostat
 tc-grps                 = System    ; one coupling groups
 tau_t                   = 0.1       ; time constant, in ps
-ref_t                   = XXXXXX    ; reference temperature, one for each group, in K
+; ref_t                   = XXXXXX    ; reference temperature, one for each group, in K
+ref_t                   = 300    ; reference temperature, one for each group, in K
 
 ; Velocity generation
 gen_vel                 = yes       ; assign velocities from Maxwell distribution

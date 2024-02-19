@@ -1,14 +1,31 @@
 from airflow import DAG
 from airflow.decorators import task
-from airflow.utils import timezone
+from airflow.exceptions import AirflowSkipException
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+import pendulum
+from airflow.sensors.external_task import ExternalTaskSensor
+from airflow.sensors.filesystem import FileSensor
 
 
 @task(multiple_outputs=False)
-def get_refdata_file(input_dir, file_name):
+def get_refdata_file(
+    input_dir, file_name, use_ref_data: bool = True, check_exists: bool = False
+):
     import os
-    from airflowHPC.data import data_dir
+    from airflowHPC.data import data_dir as data
 
-    return os.path.join(os.path.abspath(os.path.join(data_dir, input_dir)), file_name)
+    if use_ref_data:
+        data_dir = os.path.abspath(os.path.join(data, input_dir))
+    else:
+        data_dir = os.path.abspath(input_dir)
+    file_to_get = os.path.join(data_dir, file_name)
+    if check_exists:
+        if os.path.exists(file_to_get):
+            return True
+        else:
+            return False
+    assert os.path.exists(file_to_get)
+    return file_to_get
 
 
 @task(multiple_outputs=True)
@@ -38,14 +55,17 @@ def run_gmxapi(args, input_files, output_files, output_dir):
     return {f"{key}": f"{gmx.output.file[key].result()}" for key in output_files.keys()}
 
 
+start_date = pendulum.datetime(2024, 1, 1, tz="UTC")
+
 with DAG(
-    "gromacs_remd_tutorial",
-    start_date=timezone.utcnow(),
+    "system_setup",
+    start_date=start_date,
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
-) as dag:
-    dag.doc = """Reworking of gromacs tutorial for replica exchange MD.
+) as system_setup:
+    system_setup.doc = """Reworking of gromacs tutorial for replica exchange MD.
     Source: https://gitlab.com/gromacs/online-tutorials/tutorials-in-progress.git"""
 
     input_pdb = get_refdata_file.override(task_id="get_pdb")(
@@ -105,3 +125,68 @@ with DAG(
         output_files={"-c": "nvt.gro"},
         output_dir=prep_output_dir,
     )
+
+
+with DAG(
+    dag_id="equilibrate",
+    start_date=start_date,
+    schedule=None,
+    catchup=False,
+    render_template_as_native_obj=True,
+    max_active_runs=1,
+) as equilibrate:
+    mdp_equil = get_refdata_file.override(task_id="get_equil_mdp")(
+        input_dir="ala_tripeptide_remd", file_name="equil.mdp"
+    )
+    gro_equil = get_refdata_file.override(task_id="get_equil_gro")(
+        input_dir="prep", file_name="nvt.gro", use_ref_data=False
+    )
+    top = get_refdata_file.override(task_id="get_equil_top")(
+        input_dir="prep", file_name="topol.top", use_ref_data=False
+    )
+    equil_output_dir = "equil"
+    grompp_equil = run_gmxapi.override(task_id="grompp_equil")(
+        args=["grompp"],
+        input_files={"-f": mdp_equil, "-c": gro_equil, "-r": gro_equil, "-p": top},
+        output_files={"-o": "equil.tpr"},
+        output_dir=equil_output_dir,
+    )
+
+
+with DAG(
+    dag_id="coordinate",
+    start_date=start_date,
+    schedule=None,
+    catchup=False,
+    render_template_as_native_obj=True,
+    max_active_runs=1,
+) as coordinate:
+    setup_done = get_refdata_file.override(task_id="setup_done")(
+        input_dir="prep",
+        file_name="nvt.gro",
+        use_ref_data=False,
+        check_exists=True,
+    )
+    trigger_setup = TriggerDagRunOperator(
+        task_id="trigger_setup",
+        trigger_dag_id="system_setup",
+        wait_for_completion=True,
+        poke_interval=10,
+    )
+    trigger_equil = TriggerDagRunOperator(
+        task_id="trigger_equil",
+        trigger_dag_id="equilibrate",
+        wait_for_completion=True,
+        poke_interval=10,
+        trigger_rule="none_failed_min_one_success",
+    )
+
+    @task.branch
+    def setup_done_branch(setup_done: bool) -> str:
+        if setup_done:
+            return "trigger_equil"
+        else:
+            return "trigger_setup"
+
+    setup_done >> setup_done_branch(setup_done) >> [trigger_setup, trigger_equil]
+    trigger_setup >> trigger_equil

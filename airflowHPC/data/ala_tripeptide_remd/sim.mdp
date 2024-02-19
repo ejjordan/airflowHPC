@@ -1,4 +1,4 @@
-title                   = CHARMM NPT equilibration
+; title                   = CHARMM NPT equilibration
 
 ; Parameters describing what to do, when to stop and what to save
 integrator              = md        ; leap-frog integrator

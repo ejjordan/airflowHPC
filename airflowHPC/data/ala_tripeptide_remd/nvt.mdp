@@ -1,4 +1,4 @@
-title                   = CHARMM NVT equilibration
+; title                   = CHARMM NVT equilibration
 define                  = -DPOSRES  ; position restrain the protein
 
 ; Parameters describing what to do, when to stop and what to save
