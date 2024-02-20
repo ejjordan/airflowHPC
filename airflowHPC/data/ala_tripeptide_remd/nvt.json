@@ -1,0 +1,25 @@
+{
+    "define": "-dposres",
+    "integrator": "md",
+    "dt": 0.002,
+    "nsteps": 5000,
+    "nstenergy": 1000,
+    "pbc": "xyz",
+    "tcoupl": "v-rescale",
+    "tc-grps": [
+        "System"
+    ],
+    "tau_t": 0.1,
+    "ref_t": 300.0,
+    "pcoupl": "no",
+    "gen_vel": "yes",
+    "gen_temp": 300.0,
+    "constraints": "h-bonds",
+    "rcoulomb": 1.2,
+    "rvdw": 1.2,
+    "vdw-modifier": "force-switch",
+    "rvdw_switch": 1.0,
+    "dispcorr": "enerpres",
+    "coulombtype": "pme",
+    "fourierspacing": 0.15
+}

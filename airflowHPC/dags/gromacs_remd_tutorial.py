@@ -1,10 +1,8 @@
 from airflow import DAG
 from airflow.decorators import task
-from airflow.exceptions import AirflowSkipException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 import pendulum
-from airflow.sensors.external_task import ExternalTaskSensor
-from airflow.sensors.filesystem import FileSensor
+from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
 @task(multiple_outputs=False)
@@ -135,9 +133,10 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as equilibrate:
-    mdp_equil = get_refdata_file.override(task_id="get_equil_mdp")(
-        input_dir="ala_tripeptide_remd", file_name="equil.mdp"
+    mdp_json = get_refdata_file.override(task_id="get_equil_mdp_json")(
+        input_dir="ala_tripeptide_remd", file_name="equil.json"
     )
+    mdp_equil = update_write_mdp_json_as_mdp_from_file(mdp_json, {})
     gro_equil = get_refdata_file.override(task_id="get_equil_gro")(
         input_dir="prep", file_name="nvt.gro", use_ref_data=False
     )
