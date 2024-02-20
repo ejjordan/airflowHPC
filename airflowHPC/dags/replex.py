@@ -1,11 +1,20 @@
+import os
+import json
+import random
+import logging
+import numpy as np
+from typing import Dict
+from dataclasses import asdict
+from itertools import combinations    
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflow import Dataset
-from typing import Dict
+from alchemlyb.parsing.gmx import _get_headers as get_headers
+from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
 
-from airflowHPC.dags.tasks import InputHolder, prepare_input
+from airflowHPC.dags.tasks import InputHolder, prepare_input, run_grompp, run_mdrun
 
 
 SHIFT_RANGE = 1
@@ -21,8 +30,6 @@ STATE_RANGES = [
 
 @task.branch
 def check_condition(counter, num_iterations):
-    import logging
-
     logging.info(f"check_condition: counter {counter} iterations {num_iterations}")
     if counter < num_iterations:
         return "trigger_self"
@@ -32,8 +39,6 @@ def check_condition(counter, num_iterations):
 
 @task
 def run_complete():
-    import logging
-
     logging.info("run_complete: done")
     return "done"
 
@@ -48,18 +53,13 @@ def get_dhdl(result):
 
 @task
 def extract_final_dhdl_info(result) -> Dict[str, int]:
-    from alchemlyb.parsing.gmx import _get_headers as get_headers
-    from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
-
     shift_range = SHIFT_RANGE
     i: int = result["simulation_id"]
     dhdl = result["-dhdl"]
     gro = result["gro_path"]
     headers = get_headers(dhdl)
-    state_local = list(extract_dataframe(dhdl, headers=headers)["Thermodynamic state"])[
-        -1
-    ]  # local index of the last state  # noqa: E501
-    state_global: int = state_local + i * shift_range  # global index of the last state
+    state_local = list(extract_dataframe(dhdl, headers=headers)["Thermodynamic state"])[-1]  # local index
+    state_global: int = state_local + i * shift_range  # global index
     return {"simulation_id": i, "state": state_global, "gro": gro}
 
 
@@ -70,10 +70,6 @@ def reduce_dhdl(dhdl, iteration):
 
 @task
 def store_dhdl_results(dhdl_dict, output_dir, iteration) -> Dataset:
-    import os
-    import json
-    import logging
-
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     out_path = os.path.abspath(output_dir)
@@ -109,12 +105,6 @@ def store_dhdl_results(dhdl_dict, output_dir, iteration) -> Dataset:
 def get_swaps(
     iteration, dhdl_store, state_ranges=STATE_RANGES, neighbor_exchange=False
 ):
-    from itertools import combinations
-    import numpy as np
-    import logging
-    import random
-    import json
-
     with open(dhdl_store.uri, "r") as f:
         data = json.load(f)
 
@@ -166,8 +156,6 @@ def get_swaps(
 
 @task
 def prepare_next_step(swap_pattern, inputHolderList, dhdl_dict, iteration):
-    from dataclasses import asdict
-
     input_holder_list = [InputHolder(**i) for i in inputHolderList]
     if str(iteration) not in dhdl_dict.keys():
         raise ValueError(
@@ -186,7 +174,7 @@ def prepare_next_step(swap_pattern, inputHolderList, dhdl_dict, iteration):
                 top_path=input_holder_list[i].top_path,
                 mdp_path=input_holder_list[i].mdp_path,
                 simulation_id=i,
-                output_dir=f"outputs/step_{iteration}/sim_{i}",
+                output_dir=f"outputs/sim_{i}/step_{iteration}",
             )
         )
         for i in range(len(swap_pattern))
@@ -196,8 +184,6 @@ def prepare_next_step(swap_pattern, inputHolderList, dhdl_dict, iteration):
 
 @task_group
 def run_iteration(inputs_list):
-    from airflowHPC.dags.tasks import run_grompp, run_mdrun
-
     grompp_result = run_grompp.expand(input_holder_dict=inputs_list)
     mdrun_result = run_mdrun.expand(mdrun_holder_dict=grompp_result)
     dhdl = mdrun_result.map(get_dhdl)
@@ -207,8 +193,6 @@ def run_iteration(inputs_list):
 
 @task(max_active_tis_per_dag=1)
 def increment_counter(output_dir):
-    import os
-
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     out_path = os.path.abspath(output_dir)
@@ -227,7 +211,7 @@ def increment_counter(output_dir):
 
 
 with DAG(
-    "replica_exchange",
+    "REXEE_example",
     start_date=timezone.utcnow(),
     schedule="@once",
     catchup=False,
@@ -235,15 +219,15 @@ with DAG(
     max_active_runs=1,
     tags=["schedule"],
 ) as dag:
-    dag.doc = """Demonstration of a replica exchange MD workflow.
+    dag.doc = """Demonstration of a REXEE workflow.
     Since it is scheduled '@once', it has to be deleted from the database before it can be run again."""
 
     counter = increment_counter("outputs")
     inputHolderList = prepare_input(counter=counter, num_simulations=NUM_SIMULATIONS)
     dhdl_results = run_iteration(inputHolderList)
-    dhdl_dict = reduce_dhdl(dhdl_results, counter)
+    dhdl_dict = reduce_dhdl(dhdl_results, counter)  # key: iteration number; value: a list of dictionaries
     dhdl_store = store_dhdl_results(
-        output_dir="outputs/dhdl", iteration=counter, dhdl_dict=dhdl_dict
+        dhdl_dict=dhdl_dict, output_dir="outputs/dhdl", iteration=counter
     )
     swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
     next_step_input = prepare_next_step(
@@ -251,7 +235,7 @@ with DAG(
     )
 
     trigger = TriggerDagRunOperator(
-        task_id="trigger_self", trigger_dag_id="replica_exchange"
+        task_id="trigger_self", trigger_dag_id="REXEE_example"
     )
     condition = check_condition(counter, NUM_ITERATIONS)
     done = run_complete()
