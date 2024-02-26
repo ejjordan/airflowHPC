@@ -7,6 +7,7 @@ __all__ = (
     "run_gmxapi_dataclass",
     "update_gmxapi_input",
     "prepare_gmxapi_input",
+    "branch_task",
 )
 
 
@@ -25,7 +26,7 @@ class GmxapiRunInfoHolder:
     outputs: dict
 
 
-@task(multiple_outputs=False)
+@task(multiple_outputs=False, trigger_rule="none_failed")
 def get_file(
     input_dir, file_name, use_ref_data: bool = True, check_exists: bool = False
 ):
@@ -143,3 +144,11 @@ def prepare_gmxapi_input(
         for i in range(num_simulations)
     ]
     return inputHolderList
+
+
+@task.branch
+def branch_task(truth_value: bool, task_if_true: str, task_if_false: str) -> str:
+    if truth_value:
+        return task_if_true
+    else:
+        return task_if_false

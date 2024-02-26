@@ -1,9 +1,10 @@
 from airflow import DAG
 from airflow.decorators import task
+from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 import pendulum
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
-from airflowHPC.dags.tasks import get_file, run_gmxapi
+from airflowHPC.dags.tasks import get_file, run_gmxapi, branch_task
 
 
 start_date = pendulum.datetime(2024, 1, 1, tz="UTC")
@@ -113,7 +114,7 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as coordinate:
-    setup_done = get_file.override(task_id="setup_done")(
+    is_setup_done = get_file.override(task_id="is_setup_done")(
         input_dir="prep",
         file_name="nvt.gro",
         use_ref_data=False,
@@ -124,21 +125,30 @@ with DAG(
         trigger_dag_id="system_setup",
         wait_for_completion=True,
         poke_interval=10,
+        trigger_rule="none_failed",
+    )
+    setup_done = EmptyOperator(task_id="setup_done", trigger_rule="none_failed")
+    is_equil_done = get_file.override(task_id="is_equil_done")(
+        input_dir="equil",
+        file_name="equil.tpr",
+        use_ref_data=False,
+        check_exists=True,
     )
     trigger_equil = TriggerDagRunOperator(
         task_id="trigger_equil",
         trigger_dag_id="equilibrate",
         wait_for_completion=True,
         poke_interval=10,
-        trigger_rule="none_failed_min_one_success",
+        trigger_rule="none_failed",
+    )
+    equil_done = EmptyOperator(task_id="equil_done", trigger_rule="none_failed")
+
+    setup_done_branch = branch_task.override(task_id="setup_done_branch")(
+        is_setup_done, setup_done.task_id, trigger_setup.task_id
+    )
+    equil_done_branch = branch_task.override(task_id="equil_done_branch")(
+        is_equil_done, equil_done.task_id, trigger_equil.task_id
     )
 
-    @task.branch
-    def setup_done_branch(setup_done: bool) -> str:
-        if setup_done:
-            return "trigger_equil"
-        else:
-            return "trigger_setup"
-
-    setup_done >> setup_done_branch(setup_done) >> [trigger_setup, trigger_equil]
-    trigger_setup >> trigger_equil
+    is_setup_done >> setup_done_branch >> [trigger_setup, setup_done] >> is_equil_done
+    is_equil_done >> equil_done_branch >> [trigger_equil, equil_done]
