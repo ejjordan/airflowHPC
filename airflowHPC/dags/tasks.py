@@ -127,22 +127,35 @@ def update_gmxapi_input(
 
 @task
 def prepare_gmxapi_input(
-    args, input_files, output_files, output_dir, counter, num_simulations
+    args: list,
+    input_files: dict,
+    output_files: dict,
+    output_dir: str,
+    counter: int,
+    num_simulations: int,
 ):
     from dataclasses import asdict
+    import copy
 
-    inputHolderList = [
-        asdict(
-            GmxapiInputHolder(
-                args=args,
-                input_files=input_files,
-                output_files=output_files,
-                output_dir=f"{output_dir}/step_{counter}/sim_{i}",
-                simulation_id=i,
+    inputHolderList = []
+
+    for i in range(num_simulations):
+        inputs = copy.deepcopy(input_files)
+        for key, value in input_files.items():
+            if isinstance(value, list):
+                inputs[key] = value[i]
+        inputHolderList.append(
+            asdict(
+                GmxapiInputHolder(
+                    args=args,
+                    input_files=inputs,
+                    output_files=output_files,
+                    output_dir=f"{output_dir}/step_{counter}/sim_{i}",
+                    simulation_id=i,
+                )
             )
         )
-        for i in range(num_simulations)
-    ]
+
     return inputHolderList
 
 

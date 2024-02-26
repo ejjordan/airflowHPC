@@ -4,8 +4,13 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 import pendulum
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
-from airflowHPC.dags.tasks import get_file, run_gmxapi, branch_task
-
+from airflowHPC.dags.tasks import (
+    get_file,
+    run_gmxapi,
+    branch_task,
+    prepare_gmxapi_input,
+    run_gmxapi_dataclass,
+)
 
 start_date = pendulum.datetime(2024, 1, 1, tz="UTC")
 
@@ -79,6 +84,11 @@ with DAG(
     )
 
 
+@task
+def forward_values(values):
+    return list(values)
+
+
 with DAG(
     dag_id="equilibrate",
     start_date=start_date,
@@ -87,22 +97,32 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as equilibrate:
-    mdp_json = get_file.override(task_id="get_equil_mdp_json")(
-        input_dir="ala_tripeptide_remd", file_name="equil.json"
-    )
-    mdp_equil = update_write_mdp_json_as_mdp_from_file(mdp_json, {})
     gro_equil = get_file.override(task_id="get_equil_gro")(
         input_dir="prep", file_name="nvt.gro", use_ref_data=False
     )
     top = get_file.override(task_id="get_equil_top")(
         input_dir="prep", file_name="topol.top", use_ref_data=False
     )
+    mdp_json = get_file.override(task_id="get_equil_mdp_json")(
+        input_dir="ala_tripeptide_remd", file_name="equil.json"
+    )
+    mdp_equil = update_write_mdp_json_as_mdp_from_file.partial(
+        mdp_json_file_path=mdp_json
+    ).expand(
+        update_dict=[{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}]
+    )
+    mdp_list = forward_values(mdp_equil)
     equil_output_dir = "equil"
-    grompp_equil = run_gmxapi.override(task_id="grompp_equil")(
+    grompp_input_list = prepare_gmxapi_input(
         args=["grompp"],
-        input_files={"-f": mdp_equil, "-c": gro_equil, "-r": gro_equil, "-p": top},
+        input_files={"-f": mdp_list, "-c": gro_equil, "-r": gro_equil, "-p": top},
         output_files={"-o": "equil.tpr"},
         output_dir=equil_output_dir,
+        counter=0,
+        num_simulations=4,
+    )
+    grompp_equil = run_gmxapi_dataclass.override(task_id="grompp_equil").expand(
+        input_data=grompp_input_list
     )
 
 

@@ -109,7 +109,7 @@ def update_write_mdp_json_as_mdp(mdp_data, update_dict, output_file: str = None)
 
 @task
 def update_write_mdp_json_as_mdp_from_file(
-    mdp_json_file_path, update_dict, output_file: str = None
+    mdp_json_file_path, update_dict: dict = {}, output_file: str = None
 ):
     import json
 
