@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import queue
 import contextlib
 from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from airflow.executors.base_executor import PARALLELISM, BaseExecutor
+from airflow.utils.state             import TaskInstanceState
 
 import radical.utils as ru
 import radical.pilot as rp
@@ -32,11 +34,20 @@ class RadicalLocalExecutor(BaseExecutor):
     def __init__(self, parallelism: int = PARALLELISM):
 
         super().__init__(parallelism=parallelism)
+
         self.log.info(f"=== RadicalLocalExecutor: __init__ {parallelism}")
+        self._rp_keys    = None
+        self._rp_results = None
+        self._rp_session = None
+        self._rp_log     = None
+        self._rp_pmgr    = None
+        self._rp_tmgr    = None
 
 
     def start(self) -> None:
         """Start the executor."""
+        self._rp_keys    = dict()
+        self._rp_results = queue.Queue()
         self._rp_session = rp.Session()
         self._rp_log     = self._rp_session._log
         self._rp_pmgr    = rp.PilotManager(session=self._rp_session)
@@ -50,7 +61,15 @@ class RadicalLocalExecutor(BaseExecutor):
         self._rp_tmgr.add_pilots(pilot)
 
         def state_cb(task, state):
-            self._rp_log.debug('=== task state %s: %s' % (task.uid, state))
+            tid = task.uid
+            self._rp_log.debug('=== task state %s: %s' % (tid, state))
+            if state in rp.FINAL:
+                key = self._rp_keys.pop(tid)
+                self._rp_log.debug('===      key   %s: %s' % (tid, key))
+                if state == rp.DONE:
+                    self._rp_results.put((key, TaskInstanceState.FAILED))
+                else:
+                    self._rp_results.put((key, TaskInstanceState.SUCCESS))
 
         self._rp_tmgr.register_callback(state_cb)
 
@@ -68,15 +87,23 @@ class RadicalLocalExecutor(BaseExecutor):
         td = rp.TaskDescription()
         td.executable = command[0]
         td.arguments  = command[1:]
+        td.metadata   = {'key': key}
 
         task = self._rp_tmgr.submit_tasks(td)
+
+        self._rp_keys[task.uid] = key
         self._rp_log.debug(f"=== submitted task: {task}")
 
 
     def sync(self) -> None:
         """Sync will get called periodically by the heartbeat method."""
-        # FIXME
-        return
+        with contextlib.suppress(queue.Empty):
+            while True:
+                results = self._rp_results.get_nowait()
+                try:
+                    self.change_state(*results)
+                finally:
+                    self._rp_results.task_done()
 
 
     def end(self) -> None:
