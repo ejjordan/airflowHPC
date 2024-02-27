@@ -1,5 +1,4 @@
 import os
-import subprocess
 
 __all__ = ("data_dir",)
 
