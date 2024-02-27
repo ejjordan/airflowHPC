@@ -1,18 +1,9 @@
-import os
-import json
-import random
-import logging
-import numpy as np
 from typing import Dict
-from dataclasses import asdict
-from itertools import combinations
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflow import Dataset
-from alchemlyb.parsing.gmx import _get_headers as get_headers
-from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
 
 from airflowHPC.dags.tasks import (
     get_file,
@@ -32,6 +23,8 @@ STATE_RANGES = [
 
 @task.branch
 def check_condition(counter, num_iterations):
+    import logging
+
     logging.info(f"check_condition: counter {counter} iterations {num_iterations}")
     if counter < num_iterations:
         return "trigger_self"
@@ -41,6 +34,8 @@ def check_condition(counter, num_iterations):
 
 @task
 def run_complete():
+    import logging
+
     logging.info("run_complete: done")
     return "done"
 
@@ -55,6 +50,9 @@ def get_dhdl(result):
 
 @task
 def extract_final_dhdl_info(result) -> Dict[str, int]:
+    from alchemlyb.parsing.gmx import _get_headers as get_headers
+    from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
+
     shift_range = SHIFT_RANGE
     i: int = result["simulation_id"]
     dhdl = result["dhdl"]
@@ -74,6 +72,10 @@ def reduce_dhdl(dhdl, iteration):
 
 @task
 def store_dhdl_results(dhdl_dict, output_dir, iteration) -> Dataset:
+    import os
+    import json
+    import logging
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     out_path = os.path.abspath(output_dir)
@@ -109,6 +111,12 @@ def store_dhdl_results(dhdl_dict, output_dir, iteration) -> Dataset:
 def get_swaps(
     iteration, dhdl_store, state_ranges=STATE_RANGES, neighbor_exchange=False
 ):
+    from itertools import combinations
+    import numpy as np
+    import logging
+    import random
+    import json
+
     with open(dhdl_store.uri, "r") as f:
         data = json.load(f)
 
@@ -178,8 +186,8 @@ def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_dict, iteration):
             GmxapiInputHolder(
                 args=["grompp"],
                 input_files={"-f": mdp_path, "-c": gro_list[i], "-p": top_path},
-                output_files={"-o": "run.tpr"},
-                output_dir=f"outputs/sim_{i}/step_{iteration}",
+                output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
+                output_dir=f"outputs/sim_{i}/iteration_{iteration}",
                 simulation_id=i,
             )
         )
@@ -200,10 +208,11 @@ def run_iteration(grompp_input_list):
         .partial(
             args=["mdrun"],
             input_files_keys={"-s": "-o"},
-            output_files={"-dhdl": "dhdl.xvg", "-c": "result.gro", "-x": "result.xtc"},
+            output_files={"-dhdl": "dhdl.xvg", "-c": "result.gro", "-x": "result.xtc", "-g": "md.log", "-e": "ener.edr", "-cpo": "state.cpt"},
         )
         .expand(gmxapi_output=grompp_result)
     )
+
     mdrun_result = run_gmxapi_dataclass.override(task_id="mdrun").expand(
         input_data=mdrun_input
     )
@@ -214,6 +223,8 @@ def run_iteration(grompp_input_list):
 
 @task(max_active_tis_per_dag=1)
 def increment_counter(output_dir):
+    import os
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     out_path = os.path.abspath(output_dir)
@@ -254,13 +265,13 @@ with DAG(
     grompp_input_list = prepare_gmxapi_input(
         args=["grompp"],
         input_files={"-f": input_mdp, "-c": input_gro, "-p": input_top},
-        output_files={"-o": "run.tpr"},
+        output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
         output_dir="outputs",
         counter=counter,
         num_simulations=NUM_SIMULATIONS,
     )
     dhdl_results = run_iteration(grompp_input_list)
-    dhdl_dict = reduce_dhdl(dhdl_results, counter)
+    dhdl_dict = reduce_dhdl(dhdl_results, counter)  # key: iteration number; value: a list of dictionaries
     dhdl_store = store_dhdl_results(
         dhdl_dict=dhdl_dict, output_dir="outputs/dhdl", iteration=counter
     )

@@ -1,8 +1,4 @@
-import os
-import shutil
-import gmxapi as gmx
 from airflow.decorators import task
-from airflowHPC.data import data_dir
 from dataclasses import dataclass, asdict
 
 __all__ = (
@@ -52,6 +48,7 @@ def get_file(
 
 def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: str):
     import os
+    import shutil
     import gmxapi
     import logging
 
@@ -73,6 +70,8 @@ def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: s
     assert all(
         [os.path.exists(gmx.output.file[key].result()) for key in output_files.keys()]
     )
+    if not os.listdir(gmx.output.directory.result()):
+        shutil.rmtree(gmx.output.directory.result())  # delete if empty
     return gmx
 
 
@@ -140,7 +139,7 @@ def prepare_gmxapi_input(
                 args=args,
                 input_files=input_files,
                 output_files=output_files,
-                output_dir=f"{output_dir}/step_{counter}/sim_{i}",
+                output_dir=f"{output_dir}/sim_{i}/iteration_{counter}",
                 simulation_id=i,
             )
         )
