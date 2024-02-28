@@ -64,7 +64,7 @@ def extract_final_dhdl_info(result) -> Dict[str, int]:
         -1
     ]  # local index
     state_global: int = state_local + i * shift_range  # global index
-    return {"simulation_id": i, "state": state_global, "gro": gro}
+    return {"simulation_id": i, "state": state_global, "gro": gro, "dhdl": dhdl}
 
 
 @task
@@ -110,6 +110,8 @@ def store_dhdl_results(dhdl_dict, output_dir, iteration) -> Dataset:
 
 
 def propose_swap(swappables):
+    import random
+
     try:
         swap = random.choices(swappables, k=1)[0]
     except IndexError:  # no swappable pairs
@@ -118,13 +120,13 @@ def propose_swap(swappables):
     return swap
 
 
-@task
 def calc_prob_acc(swap, dhdl_files, states):
     import logging
     import numpy as np
     from alchemlyb.parsing.gmx import _get_headers as get_headers
     from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
 
+    logging.info(dhdl_files)
     shifts = [SHIFT_RANGE for i in range(NUM_SIMULATIONS)]
     f0, f1 = dhdl_files[swap[0]], dhdl_files[swap[1]]
     h0, h1 = get_headers(f0), get_headers(f1)
@@ -133,7 +135,7 @@ def calc_prob_acc(swap, dhdl_files, states):
         extract_dataframe(f1, headers=h1).iloc[-1],
     )
 
-    n_sub = N_STATES - SHIFT_RANGE * (NUM_SIMULATIONS - 1)
+    n_sub = NUM_STATES - SHIFT_RANGE * (NUM_SIMULATIONS - 1)
     dhdl_0 = data_0[-n_sub:]
     dhdl_1 = data_1[-n_sub:]
 
@@ -156,31 +158,30 @@ def calc_prob_acc(swap, dhdl_files, states):
     return prob_acc
 
 
-@task
 def accept_or_reject(prob_acc):
     import random
     import logging
 
     if prob_acc == 0:
         swap_bool = False
-        logging.info("get_swaps: Swap rejected!")
+        logging.info("accept_or_reject: Swap rejected!")
     else:
         rand = random.random()
         logging.info(
-            f"get_swaps: Acceptance rate: {prob_acc:.3f} / Random number drawn: {rand:.3f}"
+            f"accept_or_reject: Acceptance rate: {prob_acc:.3f} / Random number drawn: {rand:.3f}"
         )
         if rand < prob_acc:
             swap_bool = True
-            logging.info("get_swaps: Swap accepted!")
+            logging.info("accept_or_reject: Swap accepted!")
         else:
             swap_bool = False
-            logging.info("get_swaps: Swap rejected!")
+            logging.info("accept_or_reject: Swap rejected!")
 
     return swap_bool
 
 
 @task
-def get_swaps(iteration, dhdl_store, dhdl_files):
+def get_swaps(iteration, dhdl_store):
     from itertools import combinations
     import numpy as np
     import logging
@@ -195,11 +196,13 @@ def get_swaps(iteration, dhdl_store, dhdl_files):
     swap_pattern = list(range(NUM_SIMULATIONS))
     state_ranges = copy.deepcopy(STATE_RANGES)
 
-    states = [
-        data["iteration"][str(iteration)][i]["state"]
-        for i in range(len(data["iteration"][str(iteration)]))
+    dhdl_files = [
+        data["iteration"][str(iteration)][i]["dhdl"] for i in range(NUM_SIMULATIONS)
     ]
-    sim_idx = list(range(NUM_SIMULATIONS))  # should be as simple as this
+    states = [
+        data["iteration"][str(iteration)][i]["state"] for i in range(NUM_SIMULATIONS)
+    ]
+    sim_idx = list(range(NUM_SIMULATIONS))
 
     all_pairs = list(combinations(sim_idx, 2))
 
@@ -216,9 +219,6 @@ def get_swaps(iteration, dhdl_store, dhdl_files):
         for i in swappables
         if states[i[0]] in state_ranges[i[1]] and states[i[1]] in state_ranges[i[0]]
     ]
-
-    if neighbor_exchange is True:
-        swappables = [i for i in swappables if np.abs(i[0] - i[1]) == 1]
 
     logging.info(f"get_swaps: iteration {iteration} swappables {swappables}")
 
@@ -383,9 +383,7 @@ with DAG(
     dhdl_store = store_dhdl_results(
         dhdl_dict=dhdl_dict, output_dir="outputs/dhdl", iteration=counter
     )
-    swap_pattern = get_swaps(
-        iteration=counter, dhdl_store=dhdl_store, dhdl_files=dhdl_files
-    )
+    swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
     next_step_input = prepare_next_step(
         input_top, input_mdp, swap_pattern, dhdl_dict, counter
     )
