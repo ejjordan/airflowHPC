@@ -13,12 +13,14 @@ from airflowHPC.dags.tasks import (
 SHIFT_RANGE = 1
 NUM_ITERATIONS = 2
 NUM_SIMULATIONS = 4
+NUM_STATES = 8
 STATE_RANGES = [
     [0, 1, 2, 3, 4, 5],
     [1, 2, 3, 4, 5, 6],
     [2, 3, 4, 5, 6, 7],
     [3, 4, 5, 6, 7, 8],
 ]
+T = 300
 
 
 @task.branch
@@ -107,27 +109,97 @@ def store_dhdl_results(dhdl_dict, output_dir, iteration) -> Dataset:
     return dataset
 
 
+def propose_swap(swappables):
+    try:
+        swap = random.choices(swappables, k=1)[0]
+    except IndexError:  # no swappable pairs
+        swap = []
+
+    return swap
+
+
 @task
-def get_swaps(
-    iteration, dhdl_store, state_ranges=STATE_RANGES, neighbor_exchange=False
-):
+def calc_prob_acc(swap, dhdl_files, states):
+    import logging
+    import numpy as np
+    from alchemlyb.parsing.gmx import _get_headers as get_headers
+    from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
+
+    shifts = [SHIFT_RANGE for i in range(NUM_SIMULATIONS)]
+    f0, f1 = dhdl_files[swap[0]], dhdl_files[swap[1]]
+    h0, h1 = get_headers(f0), get_headers(f1)
+    data_0, data_1 = (
+        extract_dataframe(f0, headers=h0).iloc[-1],
+        extract_dataframe(f1, headers=h1).iloc[-1],
+    )
+
+    n_sub = N_STATES - SHIFT_RANGE * (NUM_SIMULATIONS - 1)
+    dhdl_0 = data_0[-n_sub:]
+    dhdl_1 = data_1[-n_sub:]
+
+    old_state_0 = states[swap[0]] - shifts[swap[0]]
+    old_state_1 = states[swap[1]] - shifts[swap[1]]
+
+    new_state_0 = states[swap[1]] - shifts[swap[0]]
+    new_state_1 = states[swap[0]] - shifts[swap[1]]
+
+    kT = 1.380649e-23 * 6.0221408e23 * T / 1000
+    dU_0 = (dhdl_0[new_state_0] - dhdl_0[old_state_0]) / kT
+    dU_1 = (dhdl_1[new_state_1] - dhdl_1[old_state_1]) / kT
+    dU = dU_0 + dU_1
+
+    logging.info(
+        f"calc_prob_acc: U^i_n - U^i_m = {dU_0:.2f} kT, U^j_m - U^j_n = {dU_1:.2f} kT, Total dU: {dU:.2f} kT"
+    )
+    prob_acc = min(1, np.exp(-dU))
+
+    return prob_acc
+
+
+@task
+def accept_or_reject(prob_acc):
+    import random
+    import logging
+
+    if prob_acc == 0:
+        swap_bool = False
+        logging.info("get_swaps: Swap rejected!")
+    else:
+        rand = random.random()
+        logging.info(
+            f"get_swaps: Acceptance rate: {prob_acc:.3f} / Random number drawn: {rand:.3f}"
+        )
+        if rand < prob_acc:
+            swap_bool = True
+            logging.info("get_swaps: Swap accepted!")
+        else:
+            swap_bool = False
+            logging.info("get_swaps: Swap rejected!")
+
+    return swap_bool
+
+
+@task
+def get_swaps(iteration, dhdl_store, dhdl_files):
     from itertools import combinations
     import numpy as np
     import logging
     import random
     import json
+    import copy
 
     with open(dhdl_store.uri, "r") as f:
         data = json.load(f)
+
+    swap_list = []
+    swap_pattern = list(range(NUM_SIMULATIONS))
+    state_ranges = copy.deepcopy(STATE_RANGES)
 
     states = [
         data["iteration"][str(iteration)][i]["state"]
         for i in range(len(data["iteration"][str(iteration)]))
     ]
-    sim_idx = [
-        data["iteration"][str(iteration)][i]["simulation_id"]
-        for i in range(len(data["iteration"][str(iteration)]))
-    ]
+    sim_idx = list(range(NUM_SIMULATIONS))  # should be as simple as this
 
     all_pairs = list(combinations(sim_idx, 2))
 
@@ -150,18 +222,45 @@ def get_swaps(
 
     logging.info(f"get_swaps: iteration {iteration} swappables {swappables}")
 
-    swap_pattern = sim_idx  # initialize with no swaps
-    if len(swappables) > 0:
-        swap = random.choices(swappables, k=1)[0]
-        swap_pattern[swap[0]], swap_pattern[swap[1]] = (
-            swap_pattern[swap[1]],
-            swap_pattern[swap[0]],
-        )
-        state_ranges[swap[0]], state_ranges[swap[1]] = (
-            state_ranges[swap[1]],
-            state_ranges[swap[0]],
-        )
-    logging.info(f"get_swaps: iteration {iteration} swap_pattern {swap_pattern}")
+    # Note that here we only implement the exhaustive exchange proposal scheme
+    n_ex = int(np.floor(NUM_SIMULATIONS / 2))
+    for i in range(n_ex):
+        if i >= 1:
+            swappables = [
+                i for i in swappables if set(i).intersection(set(swap)) == set()
+            ]
+            logging.info(f"get_swaps: Remaining swappable pairs: {swappables}")
+        swap = propose_swap(swappables)
+        logging.info(f"get_swaps: Proposed swap: {swap}")
+        if swap == []:
+            logging.info(
+                f"get_swaps: No swap is proposed due to the lack of swappable pairs."
+            )
+            break
+        else:
+            # Figure out dhdl_files
+            prob_acc = calc_prob_acc(swap, dhdl_files, states)
+            swap_bool = accept_or_reject(prob_acc)
+
+        if swap_bool is True:
+            swap_list.append(swap)
+            shifts[swap[0]], shifts[swap[1]] = shifts[swap[1]], shifts[swap[0]]
+            dhdl_files[swap[0]], dhdl_files[swap[1]] = (
+                dhdl_files[swap[1]],
+                dhdl_files[swap[0]],
+            )
+            swap_pattern[swap[0]], swap_pattern[swap[1]] = (
+                swap_pattern[swap[1]],
+                swap_pattern[swap[0]],
+            )
+            state_ranges[swap[0]], state_ranges[swap[1]] = (
+                state_ranges[swap[1]],
+                state_ranges[swap[0]],
+            )
+        else:
+            pass
+
+    logging.info(f"get_swaps: The finally adopted swap pattern: {swap_pattern}")
 
     return swap_pattern
 
@@ -208,7 +307,14 @@ def run_iteration(grompp_input_list):
         .partial(
             args=["mdrun"],
             input_files_keys={"-s": "-o"},
-            output_files={"-dhdl": "dhdl.xvg", "-c": "result.gro", "-x": "result.xtc", "-g": "md.log", "-e": "ener.edr", "-cpo": "state.cpt"},
+            output_files={
+                "-dhdl": "dhdl.xvg",
+                "-c": "result.gro",
+                "-x": "result.xtc",
+                "-g": "md.log",
+                "-e": "ener.edr",
+                "-cpo": "state.cpt",
+            },
         )
         .expand(gmxapi_output=grompp_result)
     )
@@ -271,11 +377,15 @@ with DAG(
         num_simulations=NUM_SIMULATIONS,
     )
     dhdl_results = run_iteration(grompp_input_list)
-    dhdl_dict = reduce_dhdl(dhdl_results, counter)  # key: iteration number; value: a list of dictionaries
+    dhdl_dict = reduce_dhdl(
+        dhdl_results, counter
+    )  # key: iteration number; value: a list of dictionaries with keys like simulation_id, state, and gro
     dhdl_store = store_dhdl_results(
         dhdl_dict=dhdl_dict, output_dir="outputs/dhdl", iteration=counter
     )
-    swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
+    swap_pattern = get_swaps(
+        iteration=counter, dhdl_store=dhdl_store, dhdl_files=dhdl_files
+    )
     next_step_input = prepare_next_step(
         input_top, input_mdp, swap_pattern, dhdl_dict, counter
     )
