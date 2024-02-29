@@ -10,6 +10,7 @@ from airflowHPC.dags.tasks import (
     branch_task,
     prepare_gmxapi_input,
     run_gmxapi_dataclass,
+    update_gmxapi_input,
 )
 
 start_date = pendulum.datetime(2024, 1, 1, tz="UTC")
@@ -89,6 +90,35 @@ def forward_values(values):
     return list(values)
 
 
+@task
+def extract_edr_info(edr_file, field):
+    import pyedr
+
+    edr = pyedr.edr_to_dict(edr_file)
+    return edr[field].tolist()
+
+
+@task
+def plot_histograms(data_list, labels, hatch_list, xlabel, title, output_file):
+    import matplotlib.pyplot as plt
+
+    for data in data_list:
+        plt.hist(
+            data,
+            bins=5,
+            alpha=0.5,
+            hatch=hatch_list.pop(),
+            label=labels.pop(),
+            edgecolor="black",
+            density=True,
+        )
+    plt.xlabel(xlabel)
+    plt.ylabel("Density")
+    plt.title(title)
+    plt.legend()
+    plt.savefig(output_file)
+
+
 with DAG(
     dag_id="equilibrate",
     start_date=start_date,
@@ -123,6 +153,30 @@ with DAG(
     )
     grompp_equil = run_gmxapi_dataclass.override(task_id="grompp_equil").expand(
         input_data=grompp_input_list
+    )
+    mdrun_input = (
+        update_gmxapi_input.override(task_id="mdrun_prepare_equil")
+        .partial(
+            args=["mdrun"],
+            input_files_keys={"-s": "-o"},
+            output_files={"-e": "ener.edr", "-c": "result.gro", "-x": "result.xtc"},
+        )
+        .expand(gmxapi_output=grompp_equil)
+    )
+    mdrun_result = run_gmxapi_dataclass.override(task_id="mdrun_equil").expand(
+        input_data=mdrun_input
+    )
+    edr_files = mdrun_result.map(lambda x: x["outputs"]["-e"])
+    potential_energies_list = extract_edr_info.partial(field="Potential").expand(
+        edr_file=edr_files
+    )
+    plot_histograms(
+        data_list=potential_energies_list,
+        labels=["300K", "310K", "320K", "330K"],
+        hatch_list=["/", ".", "\\", "o"],
+        output_file="potential_energy_histogram.png",
+        xlabel="Potential Energy (kJ/mol)",
+        title="Potential Energy Histogram",
     )
 
 
