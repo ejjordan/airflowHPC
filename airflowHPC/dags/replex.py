@@ -53,6 +53,11 @@ def get_dhdl(result):
 
 
 @task
+def forward_values(values):
+    return list(values)
+
+
+@task
 def initialize_MDP(template, idx_output):
     import os
     from ensemble_md.utils import gmx_parser
@@ -445,17 +450,12 @@ with DAG(
     mdp_results = initialize_MDP.override(task_id="intialize_mdp").partial(template=input_mdp).expand(
         idx_output=idx_output
     )
-
-    mdp_list = [
-        os.path.abspath(f"outputs/sim_{i}/iteration_1/expanded.mdp")
-        for i in range(NUM_SIMULATIONS)
-    ]
     mdp_list = mdp_results.map(lambda x: x)
+    mdp_list = forward_values(mdp_list)
+
     grompp_input_list = prepare_gmxapi_input(
         args=["grompp"],
-        gro_path=input_gro,
-        top_path=input_top,
-        mdp_list=mdp_list,
+        input_files={"-f": mdp_list, "-c": input_gro, "-p": input_top},
         output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
         output_dir="outputs",
         counter=counter,
