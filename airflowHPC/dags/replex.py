@@ -55,7 +55,6 @@ def get_dhdl(result):
 @task
 def initialize_MDP(template, idx_output):
     import os
-    import logging
     from ensemble_md.utils import gmx_parser
 
     # idx_output = (idx, output_dir), i.e., a tuple
@@ -95,7 +94,28 @@ def initialize_MDP(template, idx_output):
 
     out_path = os.path.abspath(output_dir)
     output_file = os.path.join(out_path, f"expanded.mdp")
-    logging.info(output_file)
+    MDP.write(output_file, skipempty=True)
+
+
+@task
+def update_MDP(template, iter_idx, states, sim_idx_output):
+    # TODO: Parameters for weight-updating REXEE and distance restraints were ignored and should be added when necessary.
+    import os
+    from ensemble_md.utils import gmx_parser
+
+    sim_idx = sim_idx_output[0]
+    output_dir = sim_idx_output[1]
+
+    MDP = gmx_parser.MDP(template)
+    MDP["tinit"] = NUM_STEPS * MDP["dt"] * iter_idx
+    MDP["nsteps"] = NUM_STEPS
+    MDP["init_lambda_state"] = (states[sim_idx] - sim_idx * SHIFT_RANGE)
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    out_path = os.path.abspath(output_dir)
+    output_file = os.path.join(out_path, f"expanded.mdp")
     MDP.write(output_file, skipempty=True)
 
 
@@ -419,7 +439,6 @@ with DAG(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
 
-    mdp_dirs = [f"outputs/sim_{i}/iteration_1" for i in range(NUM_SIMULATIONS)]
     idx_output = [(i, f"outputs/sim_{i}/iteration_1") for i in range(NUM_SIMULATIONS)]
     initialize_MDP.override(task_id="intialize_mdp").partial(template=input_mdp).expand(
         idx_output=idx_output
