@@ -42,7 +42,7 @@ def prepare_input(counter, num_simulations):
     return inputHolderList
 
 
-@task(multiple_outputs=True)
+@task(multiple_outputs=True, queue="radical")
 def run_grompp(input_holder_dict, verbose: bool = False):
     import os
     import gmxapi as gmx
@@ -79,7 +79,7 @@ def run_grompp(input_holder_dict, verbose: bool = False):
     )
 
 
-@task(multiple_outputs=True, max_active_tis_per_dag=1)
+@task(multiple_outputs=True, max_active_tis_per_dag=1, queue="radical")
 def run_mdrun(mdrun_holder_dict) -> dict:
     import os
     import gmxapi as gmx
