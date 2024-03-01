@@ -1,0 +1,1298 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "include": {
+            "type": "string",
+            "title": "Preprocessing"
+        },
+        "define": {
+            "type": "string",
+            "title": "Preprocessing"
+        },
+        "integrator": {
+            "type": "string",
+            "title": "Run control",
+            "enum": [
+                "md",
+                "md-vv",
+                "md-vv-avek",
+                "sd",
+                "bd",
+                "steep",
+                "cg",
+                "l-bfgs",
+                "nm",
+                "tpi",
+                "tpic",
+                "mimic"
+            ]
+        },
+        "tinit": {
+            "type": "number",
+            "title": "Run control"
+        },
+        "dt": {
+            "type": "number",
+            "title": "Run control"
+        },
+        "nsteps": {
+            "type": "integer",
+            "title": "Run control"
+        },
+        "init-step": {
+            "type": "integer",
+            "title": "Run control"
+        },
+        "simulation-part": {
+            "type": "integer",
+            "title": "Run control"
+        },
+        "mts": {
+            "type": "boolean",
+            "title": "Run control"
+        },
+        "mts-levels": {
+            "type": "integer",
+            "title": "Run control",
+            "enum": [
+                2
+            ]
+        },
+        "mts-level2-forces": {
+            "type": "string",
+            "title": "Run control",
+            "enum": [
+                "longrange-nonbonded",
+                "nonbonded",
+                "pair",
+                "dihedral",
+                "angle",
+                "pull",
+                "awh"
+            ]
+        },
+        "mts-level2-factor": {
+            "type": "integer",
+            "title": "Run control"
+        },
+        "mass-repartitioning-factor": {
+            "type": "number",
+            "title": "Run control"
+        },
+        "comm-mode": {
+            "type": "string",
+            "title": "Run control",
+            "enum": [
+                "linear",
+                "angular",
+                "linear-acceleration-correction",
+                "none"
+            ]
+        },
+        "nstcomm": {
+            "type": "integer",
+            "title": "Run control"
+        },
+        "comm-grps": {
+            "type": "array",
+            "title": "Run control"
+        },
+        "bd-fric": {
+            "type": "number",
+            "title": "Langevin dynamics"
+        },
+        "ld-seed": {
+            "type": "integer",
+            "title": "Langevin dynamics"
+        },
+        "emtol": {
+            "type": "number",
+            "title": "Energy minimization"
+        },
+        "emstep": {
+            "type": "number",
+            "title": "Energy minimization"
+        },
+        "nstcgsteep": {
+            "type": "integer",
+            "title": "Energy minimization"
+        },
+        "nbfgscorr": {
+            "type": "integer",
+            "title": "Energy minimization"
+        },
+        "niter": {
+            "type": "integer",
+            "title": "Shell Molecular Dynamics"
+        },
+        "fcstep": {
+            "type": "number",
+            "title": "Shell Molecular Dynamics"
+        },
+        "rtpi": {
+            "type": "number",
+            "title": "Test particle insertion"
+        },
+        "nstxout": {
+            "type": "integer",
+            "title": "Output control"
+        },
+        "nstvout": {
+            "type": "integer",
+            "title": "Output control"
+        },
+        "nstfout": {
+            "type": "integer",
+            "title": "Output control"
+        },
+        "nstlog": {
+            "type": "integer",
+            "title": "Output control"
+        },
+        "nstcalcenergy": {
+            "type": "integer",
+            "title": "Output control"
+        },
+        "nstenergy": {
+            "type": "integer",
+            "title": "Output control"
+        },
+        "nstxout-compressed": {
+            "type": "integer",
+            "title": "Output control"
+        },
+        "compressed-x-precision": {
+            "type": "number",
+            "title": "Output control"
+        },
+        "compressed-x-grps": {
+            "type": "array",
+            "title": "Output control"
+        },
+        "energygrps": {
+            "type": "array",
+            "title": "Output control"
+        },
+        "cutoff-scheme": {
+            "type": "string",
+            "enum": [
+                "verlet",
+                "group"
+            ],
+            "title": "Neighbor searching"
+        },
+        "nstlist": {
+            "type": "integer",
+            "title": "Neighbor searching"
+        },
+        "pbc": {
+            "type": "string",
+            "enum": [
+                "xyz",
+                "no",
+                "xy"
+            ],
+            "title": "Neighbor searching"
+        },
+        "periodic-molecules": {
+            "type": "boolean",
+            "title": "Neighbor searching"
+        },
+        "verlet-buffer-tolerance": {
+            "type": "number",
+            "title": "Neighbor searching"
+        },
+        "verlet-buffer-pressure-tolerance": {
+            "type": "number",
+            "title": "Neighbor searching"
+        },
+        "rlist": {
+            "type": "number",
+            "title": "Neighbor searching"
+        },
+        "coulombtype": {
+            "type": "string",
+            "enum": [
+                "cut-off",
+                "ewald",
+                "pme",
+                "p3m-ad",
+                "reaction-Field",
+                "User",
+                "generalized-reaction-field",
+                "pme-switch",
+                "pme-user",
+                "pme-user-switch"
+            ],
+            "title": "Electrostatics"
+        },
+        "coulob-modifier": {
+            "type": "string",
+            "enum": [
+                "potential-shift",
+                "none"
+            ],
+            "title": "Electrostatics"
+        },
+        "rcoulomb-switch": {
+            "type": "number",
+            "title": "Electrostatics"
+        },
+        "rcoulomb": {
+            "type": "number",
+            "title": "Electrostatics"
+        },
+        "epsilon-r": {
+            "type": "number",
+            "title": "Electrostatics"
+        },
+        "epsilon-rf": {
+            "type": "number",
+            "title": "Electrostatics"
+        },
+        "vdw-type": {
+            "type": "string",
+            "enum": [
+                "cut-off",
+                "pme",
+                "shift",
+                "switch",
+                "user"
+            ],
+            "title": "Van der Waals"
+        },
+        "vdw-modifier": {
+            "type": "string",
+            "enum": [
+                "potential-shift",
+                "none",
+                "force-switch",
+                "potential-switch"
+            ],
+            "title": "Van der Waals"
+        },
+        "rvdw-switch": {
+            "type": "number",
+            "title": "Van der Waals"
+        },
+        "rvdw": {
+            "type": "number",
+            "title": "Van der Waals"
+        },
+        "DispCorr": {
+            "type": "string",
+            "enum": [
+                "no",
+                "enerpres",
+                "ener"
+            ],
+            "title": "Van der Waals"
+        },
+        "table-extension": {
+            "type": "number",
+            "title": "Tables"
+        },
+        "energygrp-table": {
+            "type": "array",
+            "title": "Tables"
+        },
+        "fourierspacing": {
+            "type": "number",
+            "title": "Ewald"
+        },
+        "fourier-nx": {
+            "type": "integer",
+            "title": "Ewald"
+        },
+        "fourier-ny": {
+            "type": "integer",
+            "title": "Ewald"
+        },
+        "fourier-nz": {
+            "type": "integer",
+            "title": "Ewald"
+        },
+        "pme-order": {
+            "type": "integer",
+            "title": "Ewald"
+        },
+        "ewald-rtol": {
+            "type": "number",
+            "title": "Ewald"
+        },
+        "ewald-rtol-lj": {
+            "type": "number",
+            "title": "Ewald"
+        },
+        "lj-pme-comb-rule": {
+            "type": "string",
+            "enum": [
+                "geometric",
+                "lorentz-berthelot"
+            ],
+            "title": "Ewald"
+        },
+        "ewald-geometry": {
+            "type": "string",
+            "enum": [
+                "3dc",
+                "3d"
+            ],
+            "title": "Ewald"
+        },
+        "epsilon-surface": {
+            "type": "number",
+            "title": "Ewald"
+        },
+        "ensemble-temperature-setting": {
+            "type": "string",
+            "enum": [
+                "auto",
+                "constant",
+                "variable",
+                "not-available"
+            ],
+            "title": "Temperature coupling"
+        },
+        "ensemble-temperature": {
+            "type": "number",
+            "title": "Temperature coupling"
+        },
+        "tcoupl": {
+            "type": "string",
+            "enum": [
+                "berendsen",
+                "nose-hoover",
+                "andersen",
+                "andersen-massive",
+                "v-rescale"
+            ],
+            "title": "Temperature coupling"
+        },
+        "nsttcouple": {
+            "type": "integer",
+            "title": "Temperature coupling"
+        },
+        "nh-chain-length": {
+            "type": "integer",
+            "title": "Temperature coupling"
+        },
+        "print-nose-hoover-chain-variables": {
+            "type": "boolean",
+            "title": "Temperature coupling"
+        },
+        "tc-grps": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "title": "Temperature coupling"
+        },
+        "tau-t": {
+            "type": "number",
+            "title": "Temperature coupling"
+        },
+        "ref-t": {
+            "type": "number",
+            "title": "Temperature coupling"
+        },
+        "pcoupl": {
+            "type": "string",
+            "enum": [
+                "no",
+                "berendsen",
+                "c-rescale",
+                "parrinello-rahman",
+                "mttk"
+            ],
+            "title": "Pressure coupling"
+        },
+        "pcoupltype": {
+            "type": "string",
+            "enum": [
+                "isotropic",
+                "semiisotropic",
+                "anisotropic",
+                "surface-tension"
+            ],
+            "title": "Pressure coupling"
+        },
+        "nstpcouple": {
+            "type": "integer",
+            "title": "Pressure coupling"
+        },
+        "tau-p": {
+            "type": "number",
+            "title": "Pressure coupling"
+        },
+        "compressibility": {
+            "type": "number",
+            "title": "Pressure coupling"
+        },
+        "ref-p": {
+            "type": "number",
+            "title": "Pressure coupling"
+        },
+        "refcoord-scaling": {
+            "type": "string",
+            "enum": [
+                "no",
+                "com",
+                "all"
+            ],
+            "title": "Pressure coupling"
+        },
+        "gen-vel": {
+            "type": "boolean",
+            "title": "Velocity generation"
+        },
+        "gen-temp": {
+            "type": "number",
+            "title": "Velocity generation"
+        },
+        "gen-seed": {
+            "type": "integer",
+            "title": "Velocity generation"
+        },
+        "constraints": {
+            "type": "string",
+            "enum": [
+                "none",
+                "h-bonds",
+                "all-bonds",
+                "h-angles",
+                "all-angles"
+            ],
+            "title": "Bonds"
+        },
+        "constraint-algorithm": {
+            "type": "string",
+            "enum": [
+                "lincs",
+                "shake"
+            ],
+            "title": "Bonds"
+        },
+        "continuation": {
+            "type": "boolean",
+            "title": "Bonds"
+        },
+        "shake-tol": {
+            "type": "number",
+            "title": "Bonds"
+        },
+        "lincs-order": {
+            "type": "integer",
+            "title": "Bonds"
+        },
+        "lincs-iter": {
+            "type": "integer",
+            "title": "Bonds"
+        },
+        "lincs-warnangle": {
+            "type": "number",
+            "title": "Bonds"
+        },
+        "morse": {
+            "type": "boolean",
+            "title": "Bonds"
+        },
+        "energygrp-excl": {
+            "type": "array",
+            "title": "Energy group exclusions"
+        },
+        "nwall": {
+            "type": "integer",
+            "title": "Walls"
+        },
+        "wall-atomtype": {
+            "type": "array",
+            "title": "Walls"
+        },
+        "wall-type": {
+            "type": "string",
+            "enum": [
+                "9-3",
+                "10-4",
+                "12-6"
+            ],
+            "title": "Walls"
+        },
+        "table": {
+            "type": "array",
+            "title": "Walls"
+        },
+        "wall-r-linpot": {
+            "type": "number",
+            "title": "Walls"
+        },
+        "wall-density": {
+            "type": "number",
+            "title": "Walls"
+        },
+        "wall-ewald-zfac": {
+            "type": "number",
+            "title": "Walls"
+        },
+        "pull": {
+            "type": "boolean",
+            "title": "COM pulling"
+        },
+        "pull-cylinder-r": {
+            "type": "number",
+            "title": "COM pulling"
+        },
+        "pull-constr-tol": {
+            "type": "number",
+            "title": "COM pulling"
+        },
+        "pull-print-com": {
+            "type": "boolean",
+            "title": "COM pulling"
+        },
+        "pull-print-ref-value": {
+            "type": "boolean",
+            "title": "COM pulling"
+        },
+        "pull-print-components": {
+            "type": "boolean",
+            "title": "COM pulling"
+        },
+        "pull-nstxout": {
+            "type": "integer",
+            "title": "COM pulling"
+        },
+        "pull-pbc-ref-prev-step": {
+            "type": "boolean",
+            "title": "COM pulling"
+        },
+        "pull-xout-average": {
+            "type": "boolean",
+            "title": "COM pulling"
+        },
+        "pull-fout-average": {
+            "type": "boolean",
+            "title": "COM pulling"
+        },
+        "pull-ngroups": {
+            "type": "integer",
+            "title": "COM pulling"
+        },
+        "pull-group1-name": {
+            "type": "string",
+            "title": "COM pulling"
+        },
+        "pull-group1-weights": {
+            "type": "array",
+            "title": "COM pulling"
+        },
+        "pull-group1-pbcatom": {
+            "type": "integer",
+            "title": "COM pulling"
+        },
+        "pull-coord1-type": {
+            "type": "string",
+            "enum": [
+                "umbrella",
+                "constraint",
+                "constant-force",
+                "flat-bottom",
+                "flat-bottom-high",
+                "external-potential"
+            ],
+            "title": "COM pulling"
+        },
+        "pull-coord1-potential-provider": {
+            "type": "string",
+            "title": "COM pulling"
+        },
+        "pull-coord1-geometry": {
+            "type": "string",
+            "enum": [
+                "distance",
+                "direction",
+                "direction-periodic",
+                "distance-relative",
+                "cylinder",
+                "angle",
+                "angle-axis",
+                "dihedral",
+                "transformation"
+            ],
+            "title": "COM pulling"
+        },
+        "pull-coord1-expresion": {
+            "type": "string",
+            "title": "COM pulling"
+        },
+        "pull-coord1-groups": {
+            "type": "array",
+            "title": "COM pulling"
+        },
+        "pull-coord1-dim": {
+            "type": "array",
+            "title": "COM pulling"
+        },
+        "pull-coord1-origin": {
+            "type": "array",
+            "title": "COM pulling"
+        },
+        "pull-coord1-vec": {
+            "type": "array",
+            "title": "COM pulling"
+        },
+        "pull-coord1-start": {
+            "type": "boolean",
+            "title": "COM pulling"
+        },
+        "pull-coord1-init": {
+            "type": "number",
+            "title": "COM pulling"
+        },
+        "pull-coord1-rate": {
+            "type": "number",
+            "title": "COM pulling"
+        },
+        "pull-coord1-k": {
+            "type": "number",
+            "title": "COM pulling"
+        },
+        "pull-coord1-kB": {
+            "type": "number",
+            "title": "COM pulling"
+        },
+        "awh": {
+            "type": "boolean",
+            "title": "AWH adaptive biasing"
+        },
+        "awh-potential": {
+            "type": "string",
+            "enum": [
+                "convolved",
+                "umbrella"
+            ],
+            "title": "AWH adaptive biasing"
+        },
+        "awh-share-multisim": {
+            "type": "boolean",
+            "title": "AWH adaptive biasing"
+        },
+        "awh-seed": {
+            "type": "integer",
+            "title": "AWH adaptive biasing"
+        },
+        "awh-nstout": {
+            "type": "integer",
+            "title": "AWH adaptive biasing"
+        },
+        "awh-nstsample": {
+            "type": "integer",
+            "title": "AWH adaptive biasing"
+        },
+        "awh-nsamples-update": {
+            "type": "integer",
+            "title": "AWH adaptive biasing"
+        },
+        "awh-nbias": {
+            "type": "integer",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-error-init": {
+            "type": "number",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-growth": {
+            "type": "string",
+            "enum": [
+                "exp-linear",
+                "linear"
+            ],
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-growth-factor": {
+            "type": "number",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-equillibrate-histogram": {
+            "type": "boolean",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-target": {
+            "type": "string",
+            "enum": [
+                "constant",
+                "cutoff",
+                "boltzmann",
+                "local-boltzmann"
+            ],
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-target-beta-scaling": {
+            "type": "number",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-target-cutoff": {
+            "type": "number",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-user-data": {
+            "type": "boolean",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-share-group": {
+            "type": "string",
+            "enum": [
+                "0",
+                "positive"
+            ],
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-target-metric-scaling": {
+            "type": "boolean",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-target-metric-scaling-limit": {
+            "type": "number",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-ndim": {
+            "type": "integer",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-dim1-coord-provider": {
+            "type": "string",
+            "enum": [
+                "pull",
+                "fep-lambda"
+            ],
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-dim1-coord-index": {
+            "type": "integer",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-dim1-force-constant": {
+            "type": "number",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-dim1-start": {
+            "type": "number",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-dim1-end": {
+            "type": "number",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-dim1-diffusion": {
+            "type": "number",
+            "title": "AWH adaptive biasing"
+        },
+        "awh1-dim1-cover-diameter": {
+            "type": "number",
+            "title": "AWH adaptive biasing"
+        },
+        "free-energy": {
+            "type": "boolean",
+            "title": "Free energy calculation"
+        },
+        "expanded": {
+            "type": "boolean",
+            "title": "Free energy calculation"
+        },
+        "init-lambda": {
+            "type": "number",
+            "title": "Free energy calculation"
+        },
+        "delta-lambda": {
+            "type": "integer",
+            "title": "Free energy calculation"
+        },
+        "init-lambda-state": {
+            "type": "integer",
+            "title": "Free energy calculation"
+        },
+        "fep-lambdas": {
+            "type": "array",
+            "title": "Free energy calculation"
+        },
+        "coul-lambdas": {
+            "type": "array",
+            "title": "Free energy calculation"
+        },
+        "vdw-lambdas": {
+            "type": "array",
+            "title": "Free energy calculation"
+        },
+        "bonded-lambdas": {
+            "type": "array",
+            "title": "Free energy calculation"
+        },
+        "restraint-lambdas": {
+            "type": "array",
+            "title": "Free energy calculation"
+        },
+        "mass-lambdas": {
+            "type": "array",
+            "title": "Free energy calculation"
+        },
+        "temperature-lambdas": {
+            "type": "array",
+            "title": "Free energy calculation"
+        },
+        "calc-lambda-neighbors": {
+            "type": "integer",
+            "title": "Free energy calculation"
+        },
+        "sc-function": {
+            "type": "string",
+            "enum": [
+                "beutler",
+                "gapsys"
+            ],
+            "title": "Free energy calculation"
+        },
+        "sc-alpha": {
+            "type": "number",
+            "title": "Free energy calculation"
+        },
+        "sc-r-power": {
+            "type": "number",
+            "title": "Free energy calculation"
+        },
+        "sc-coul": {
+            "type": "boolean",
+            "title": "Free energy calculation"
+        },
+        "sc-power": {
+            "type": "integer",
+            "title": "Free energy calculation"
+        },
+        "sc-sigma": {
+            "type": "number",
+            "title": "Free energy calculation"
+        },
+        "sc-gapsys-scale-linpoint-lj": {
+            "type": "number",
+            "title": "Free energy calculation"
+        },
+        "sc-gapsys-scale-linpoint-q": {
+            "type": "number",
+            "title": "Free energy calculation"
+        },
+        "sc-gapsys-sigma-lj": {
+            "type": "number",
+            "title": "Free energy calculation"
+        },
+        "couple-moltype": {
+            "type": "string",
+            "title": "Free energy calculation"
+        },
+        "couple-lambda0": {
+            "type": "string",
+            "enum": [
+                "vdw-q",
+                "vdw",
+                "q",
+                "none"
+            ],
+            "title": "Free energy calculation"
+        },
+        "couple-lambda1": {
+            "type": "string",
+            "enum": [
+                "vdw-q",
+                "vdw",
+                "q",
+                "none"
+            ],
+            "title": "Free energy calculation"
+        },
+        "couple-intramol": {
+            "type": "boolean",
+            "title": "Free energy calculation"
+        },
+        "nstdhdl": {
+            "type": "integer",
+            "title": "Free energy calculation"
+        },
+        "dhdl-derivatives": {
+            "type": "boolean",
+            "title": "Free energy calculation"
+        },
+        "dhdl-print-energy": {
+            "type": "boolean",
+            "title": "Free energy calculation"
+        },
+        "separate-dhdl-file": {
+            "type": "boolean",
+            "title": "Free energy calculation"
+        },
+        "dh-hist-size": {
+            "type": "integer",
+            "title": "Free energy calculation"
+        },
+        "dh-hist-spacing": {
+            "type": "number",
+            "title": "Free energy calculation"
+        },
+        "nstexpanded": {
+            "type": "integer",
+            "title": "Expanded ensemble calculations"
+        },
+        "lmc-stats": {
+            "type": "string",
+            "enum": [
+                "no",
+                "metropolis-transition",
+                "barker-transition",
+                "wang-landau",
+                "min-variance"
+            ],
+            "title": "Expanded ensemble calculations"
+        },
+        "lmc-mc-move": {
+            "type": "string",
+            "enum": [
+                "no",
+                "metropolis-transition",
+                "barker-transition",
+                "gibbs",
+                "metropolized-gibbs"
+            ],
+            "title": "Expanded ensemble calculations"
+        },
+        "lmc-seed": {
+            "type": "integer",
+            "title": "Expanded ensemble calculations"
+        },
+        "mc-temperature": {
+            "type": "number",
+            "title": "Expanded ensemble calculations"
+        },
+        "wl-ratio": {
+            "type": "number",
+            "title": "Expanded ensemble calculations"
+        },
+        "wl-scale": {
+            "type": "number",
+            "title": "Expanded ensemble calculations"
+        },
+        "init-wl-delta": {
+            "type": "number",
+            "title": "Expanded ensemble calculations"
+        },
+        "wl-oneovert": {
+            "type": "number",
+            "title": "Expanded ensemble calculations"
+        },
+        "lmc-repeats": {
+            "type": "integer",
+            "title": "Expanded ensemble calculations"
+        },
+        "lmc-gibbsdelta": {
+            "type": "integer",
+            "title": "Expanded ensemble calculations"
+        },
+        "lmc-forced-nstart": {
+            "type": "integer",
+            "title": "Expanded ensemble calculations"
+        },
+        "nst-transition-matrix": {
+            "type": "integer",
+            "title": "Expanded ensemble calculations"
+        },
+        "symmetrized-transition-matrix": {
+            "type": "boolean",
+            "title": "Expanded ensemble calculations"
+        },
+        "minimum-var-min": {
+            "type": "integer",
+            "title": "Expanded ensemble calculations"
+        },
+        "init-lambda-weights": {
+            "type": "array",
+            "title": "Expanded ensemble calculations"
+        },
+        "lmc-weights-equil": {
+            "type": "string",
+            "enum": [
+                "no",
+                "yes",
+                "wl-delta",
+                "number-all-lambda",
+                "number_steps",
+                "number-samples",
+                "count-ratio"
+            ],
+            "title": "Expanded ensemble calculations"
+        },
+        "simulated-tempering": {
+            "type": "boolean",
+            "title": "Expanded ensemble calculations"
+        },
+        "sim-temp-low": {
+            "type": "number",
+            "title": "Expanded ensemble calculations"
+        },
+        "sim-temp-high": {
+            "type": "number",
+            "title": "Expanded ensemble calculations"
+        },
+        "simulated-temperature-scaling": {
+            "type": "string",
+            "enum": [
+                "linear",
+                "geometric",
+                "exponential"
+            ],
+            "title": "Expanded ensemble calculations"
+        },
+        "acc-grps": {
+            "type": "array",
+            "title": "Non-equilibrium MD"
+        },
+        "accelerate": {
+            "type": "array",
+            "title": "Non-equilibrium MD"
+        },
+        "freezegrps": {
+            "type": "array",
+            "title": "Non-equilibrium MD"
+        },
+        "freezedim": {
+            "type": "array",
+            "title": "Non-equilibrium MD"
+        },
+        "cos-acceleration": {
+            "type": "number",
+            "title": "Non-equilibrium MD"
+        },
+        "deform": {
+            "type": "array",
+            "title": "Non-equilibrium MD"
+        },
+        "deform-init-flow": {
+            "type": "boolean",
+            "title": "Non-equilibrium MD"
+        },
+        "electric-field-x": {
+            "type": "string",
+            "title": "Electric fields"
+        },
+        "electric-field-y": {
+            "type": "string",
+            "title": "Electric fields"
+        },
+        "electric-field-z": {
+            "type": "string",
+            "title": "Electric fields"
+        },
+        "QMMM-grps": {
+            "type": "array",
+            "title": "Mixed quantum/classical molecular dynamics"
+        },
+        "QMMM": {
+            "type": "boolean",
+            "title": "Mixed quantum/classical molecular dynamics"
+        },
+        "swapcoords": {
+            "type": "string",
+            "enum": [
+                "no",
+                "X",
+                "Y",
+                "Z"
+            ],
+            "title": "Computational Electrophysiology"
+        },
+        "swap-frequency": {
+            "type": "integer",
+            "title": "Computational Electrophysiology"
+        },
+        "split-group0": {
+            "type": "string",
+            "title": "Computational Electrophysiology"
+        },
+        "split-group1": {
+            "type": "string",
+            "title": "Computational Electrophysiology"
+        },
+        "massw-split0": {
+            "type": "boolean",
+            "title": "Computational Electrophysiology"
+        },
+        "massw-split1": {
+            "type": "boolean",
+            "title": "Computational Electrophysiology"
+        },
+        "solvent-group": {
+            "type": "string",
+            "title": "Computational Electrophysiology"
+        },
+        "coupl-steps": {
+            "type": "integer",
+            "title": "Computational Electrophysiology"
+        },
+        "iontypes": {
+            "type": "integer",
+            "title": "Computational Electrophysiology"
+        },
+        "iontype0-name": {
+            "type": "string",
+            "title": "Computational Electrophysiology"
+        },
+        "iontype0-in-A": {
+            "type": "integer",
+            "title": "Computational Electrophysiology"
+        },
+        "iontype0-in-B": {
+            "type": "integer",
+            "title": "Computational Electrophysiology"
+        },
+        "bulk-offsetA": {
+            "type": "number",
+            "title": "Computational Electrophysiology"
+        },
+        "bulk-offsetB": {
+            "type": "number",
+            "title": "Computational Electrophysiology"
+        },
+        "threshold": {
+            "type": "number",
+            "title": "Computational Electrophysiology"
+        },
+        "cyl0-r": {
+            "type": "number",
+            "title": "Computational Electrophysiology"
+        },
+        "cyl0-up": {
+            "type": "number",
+            "title": "Computational Electrophysiology"
+        },
+        "cyl0-down": {
+            "type": "number",
+            "title": "Computational Electrophysiology"
+        },
+        "cyl1-r": {
+            "type": "number",
+            "title": "Computational Electrophysiology"
+        },
+        "cyl1-up": {
+            "type": "number",
+            "title": "Computational Electrophysiology"
+        },
+        "cyl1-down": {
+            "type": "number",
+            "title": "Computational Electrophysiology"
+        },
+        "density-guided-simulation-active": {
+            "type": "boolean",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-group": {
+            "type": "string",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-similarity-measure": {
+            "type": "string",
+            "enum": [
+                "inner-product",
+                "relative-entropy",
+                "cross-correlation"
+            ],
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-atom-spreading-weight": {
+            "type": "string",
+            "enum": [
+                "unity",
+                "mass",
+                "charge"
+            ],
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-force-constant": {
+            "type": "number",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-gaussian-transform-spreading-width": {
+            "type": "number",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-gaussian-transform-spreading-range-in-multiples-of-width": {
+            "type": "integer",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-reference-density-filename": {
+            "type": "string",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-nst": {
+            "type": "integer",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-normalize-densities": {
+            "type": "boolean",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-adaptive-force-scaling": {
+            "type": "boolean",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-adaptive-force-scaling-time-constant": {
+            "type": "integer",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-shift-vector": {
+            "type": "array",
+            "title": "Density-guided simulation"
+        },
+        "density-guided-simulation-transformation-matrix": {
+            "type": "array",
+            "title": "Density-guided simulation"
+        },
+        "qmmm-cp2k-active": {
+            "type": "boolean",
+            "title": "QM/MM simulations with CP2K Interface"
+        },
+        "qmmm-cp2k-qmgroup": {
+            "type": "string",
+            "title": "QM/MM simulations with CP2K Interface"
+        },
+        "qmmm-cp2k-qmmethod": {
+            "type": "string",
+            "enum": [
+                "bpe",
+                "blyp",
+                "input"
+            ],
+            "title": "QM/MM simulations with CP2K Interface"
+        },
+        "qmmm-cp2k-qmcharge": {
+            "type": "integer",
+            "title": "QM/MM simulations with CP2K Interface"
+        },
+        "qmmm-cp2k-qmmultiplicity": {
+            "type": "integer",
+            "title": "QM/MM simulations with CP2K Interface"
+        },
+        "qmmm-cp2k-qmfilenames": {
+            "type": "array",
+            "title": "QM/MM simulations with CP2K Interface"
+        },
+        "colvars-active": {
+            "type": "boolean",
+            "title": "Collective variables (Colvars) module"
+        },
+        "colvars-configfile": {
+            "type": "string",
+            "title": "Collective variables (Colvars) module"
+        },
+        "colvars-seed": {
+            "type": "integer",
+            "title": "Collective variables (Colvars) module"
+        }
+    },
+    "required": []
+}

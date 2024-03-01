@@ -7,6 +7,7 @@ __all__ = (
     "run_gmxapi_dataclass",
     "update_gmxapi_input",
     "prepare_gmxapi_input",
+    "branch_task",
 )
 
 
@@ -25,7 +26,7 @@ class GmxapiRunInfoHolder:
     outputs: dict
 
 
-@task(multiple_outputs=False)
+@task(multiple_outputs=False, trigger_rule="none_failed")
 def get_file(
     input_dir, file_name, use_ref_data: bool = True, check_exists: bool = False
 ):
@@ -129,27 +130,41 @@ def update_gmxapi_input(
 
 @task
 def prepare_gmxapi_input(
-    args,
-    gro_path,
-    top_path,
-    mdp_list,
-    output_files,
-    output_dir,
-    counter,
-    num_simulations,
+    args: list,
+    input_files: dict,
+    output_files: dict,
+    output_dir: str,
+    counter: int,
+    num_simulations: int,
 ):
     from dataclasses import asdict
+    import copy
 
-    inputHolderList = [
-        asdict(
-            GmxapiInputHolder(
-                args=args,
-                input_files={"-f": mdp_list[i], "-c": gro_path, "-p": top_path},
-                output_files=output_files,
-                output_dir=f"{output_dir}/sim_{i}/iteration_{counter}",
-                simulation_id=i,
+    inputHolderList = []
+
+    for i in range(num_simulations):
+        inputs = copy.deepcopy(input_files)
+        for key, value in input_files.items():
+            if isinstance(value, list):
+                inputs[key] = value[i]
+        inputHolderList.append(
+            asdict(
+                GmxapiInputHolder(
+                    args=args,
+                    input_files=inputs,
+                    output_files=output_files,
+                    output_dir=f"{output_dir}/sim_{i}/iteration_{counter}",
+                    simulation_id=i,
+                )
             )
         )
-        for i in range(num_simulations)
-    ]
+
     return inputHolderList
+
+
+@task.branch
+def branch_task(truth_value: bool, task_if_true: str, task_if_false: str) -> str:
+    if truth_value:
+        return task_if_true
+    else:
+        return task_if_false
