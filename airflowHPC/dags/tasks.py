@@ -129,7 +129,14 @@ def update_gmxapi_input(
 
 @task
 def prepare_gmxapi_input(
-    args, input_files, output_files, output_dir, counter, num_simulations
+    args,
+    gro_path,
+    top_path,
+    mdp_list,
+    output_files,
+    output_dir,
+    counter,
+    num_simulations,
 ):
     from dataclasses import asdict
 
@@ -137,7 +144,7 @@ def prepare_gmxapi_input(
         asdict(
             GmxapiInputHolder(
                 args=args,
-                input_files=input_files,
+                input_files={"-f": mdp_list[i], "-c": gro_path, "-p": top_path},
                 output_files=output_files,
                 output_dir=f"{output_dir}/sim_{i}/iteration_{counter}",
                 simulation_id=i,

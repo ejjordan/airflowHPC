@@ -1,3 +1,4 @@
+import os
 from typing import Dict
 from airflow import DAG
 from airflow.decorators import task, task_group
@@ -14,6 +15,7 @@ SHIFT_RANGE = 1
 NUM_ITERATIONS = 2
 NUM_SIMULATIONS = 4
 NUM_STATES = 8
+NUM_STEPS = 2000
 STATE_RANGES = [
     [0, 1, 2, 3, 4, 5],
     [1, 2, 3, 4, 5, 6],
@@ -48,6 +50,53 @@ def get_dhdl(result):
         "dhdl": result["outputs"]["-dhdl"],
         "gro_path": result["outputs"]["-c"],
     }
+
+
+@task
+def initialize_MDP(template, idx_output):
+    import os
+    import logging
+    from ensemble_md.utils import gmx_parser
+
+    # idx_output = (idx, output_dir), i.e., a tuple
+    idx = idx_output[0]
+    output_dir = idx_output[1]
+
+    MDP = gmx_parser.MDP(template)
+    MDP["nsteps"] = NUM_STEPS
+
+    start_idx = idx * SHIFT_RANGE
+
+    lambdas_types_all = [
+        "fep_lambdas",
+        "mass_lambdas",
+        "coul_lambdas",
+        "vdw_lambdas",
+        "bonded_lambdas",
+        "restraint_lambdas",
+        "temperature_lambdas",
+    ]
+    lambda_types = []
+    for i in lambdas_types_all:
+        if i in MDP.keys():
+            lambda_types.append(i)
+
+    n_sub = NUM_STATES - SHIFT_RANGE * (NUM_SIMULATIONS - 1)
+    for i in lambda_types:
+        MDP[i] = MDP[i][start_idx : start_idx + n_sub]
+
+    if "init_lambda_weights" in MDP:
+        MDP["init_lambda_weights"] = MDP["init_lambda_weights"][
+            start_idx : start_idx + n_sub
+        ]
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    out_path = os.path.abspath(output_dir)
+    output_file = os.path.join(out_path, f"expanded.mdp")
+    logging.info(output_file)
+    MDP.write(output_file, skipempty=True)
 
 
 @task
@@ -224,6 +273,7 @@ def get_swaps(iteration, dhdl_store):
 
     # Note that here we only implement the exhaustive exchange proposal scheme
     n_ex = int(np.floor(NUM_SIMULATIONS / 2))
+    shifts = [SHIFT_RANGE for i in range(NUM_SIMULATIONS)]
     for i in range(n_ex):
         if i >= 1:
             swappables = [
@@ -368,9 +418,22 @@ with DAG(
     input_mdp = get_file.override(task_id="get_mdp")(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
+
+    mdp_dirs = [f"outputs/sim_{i}/iteration_1" for i in range(NUM_SIMULATIONS)]
+    idx_output = [(i, f"outputs/sim_{i}/iteration_1") for i in range(NUM_SIMULATIONS)]
+    initialize_MDP.override(task_id="intialize_mdp").partial(template=input_mdp).expand(
+        idx_output=idx_output
+    )
+
+    mdp_list = [
+        os.path.abspath(f"outputs/sim_{i}/iteration_1/expanded.mdp")
+        for i in range(NUM_SIMULATIONS)
+    ]
     grompp_input_list = prepare_gmxapi_input(
         args=["grompp"],
-        input_files={"-f": input_mdp, "-c": input_gro, "-p": input_top},
+        gro_path=input_gro,
+        top_path=input_top,
+        mdp_list=mdp_list,
         output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
         output_dir="outputs",
         counter=counter,
