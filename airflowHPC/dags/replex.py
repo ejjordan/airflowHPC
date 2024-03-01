@@ -96,6 +96,8 @@ def initialize_MDP(template, idx_output):
     output_file = os.path.join(out_path, f"expanded.mdp")
     MDP.write(output_file, skipempty=True)
 
+    return output_file
+
 
 @task
 def update_MDP(template, iter_idx, states, sim_idx_output):
@@ -440,7 +442,7 @@ with DAG(
     )
 
     idx_output = [(i, f"outputs/sim_{i}/iteration_1") for i in range(NUM_SIMULATIONS)]
-    initialize_MDP.override(task_id="intialize_mdp").partial(template=input_mdp).expand(
+    mdp_results = initialize_MDP.override(task_id="intialize_mdp").partial(template=input_mdp).expand(
         idx_output=idx_output
     )
 
@@ -448,6 +450,7 @@ with DAG(
         os.path.abspath(f"outputs/sim_{i}/iteration_1/expanded.mdp")
         for i in range(NUM_SIMULATIONS)
     ]
+    mdp_list = mdp_results.map(lambda x: x)
     grompp_input_list = prepare_gmxapi_input(
         args=["grompp"],
         gro_path=input_gro,
