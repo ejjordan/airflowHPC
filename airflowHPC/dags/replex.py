@@ -105,14 +105,35 @@ def initialize_MDP(template, idx_output):
 
 
 @task
-def update_MDP(template, iter_idx, states, sim_idx_output):
+def prepare_args_for_update_MDP(counter):
+    expand_args = [
+        {
+            'simulation_id': i,
+            'template': f"outputs/sim_{i}/iteration_{counter}/expanded.mdp",
+            'output_dir': f"outputs/sim_{i}/iteration_{counter+1}"
+        }
+        for i in range(NUM_SIMULATIONS)
+    ]
+    return expand_args
+
+
+@task
+def update_MDP(iter_idx, dhdl_store, expand_args):
     # TODO: Parameters for weight-updating REXEE and distance restraints were ignored and should be added when necessary.
     import os
+    import json
     from ensemble_md.utils import gmx_parser
 
-    sim_idx = sim_idx_output[0]
-    output_dir = sim_idx_output[1]
+    sim_idx = expand_args['simulation_id']
+    template = expand_args['template']
+    output_dir = expand_args['output_dir']
 
+    with open(dhdl_store.uri, "r") as f:
+        data = json.load(f)
+    states = [
+        data["iteration"][str(iter_idx)][i]["state"] for i in range(NUM_SIMULATIONS)
+    ]
+    
     MDP = gmx_parser.MDP(template)
     MDP["tinit"] = NUM_STEPS * MDP["dt"] * iter_idx
     MDP["nsteps"] = NUM_STEPS
@@ -484,11 +505,16 @@ with DAG(
     )
     swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
 
-    # update_MDP.override('update_mdp').partial(template=)
-    # update_MDP(template, iter_idx, states, sim_idx_output)
+    # update MDP files for the next iteration
+    expand_args = prepare_args_for_update_MDP(counter)  # keys: simulation_id, template, output_dir
+    mdp_results = update_MDP.override(task_id="update_mdp").partial(iter_idx=counter, dhdl_store=dhdl_store).expand(
+        expand_args=expand_args
+    )
+    mdp_list = mdp_results.map(lambda x: x)
+    mdp_list = forward_values(mdp_list)
 
     next_step_input = prepare_next_step(
-        input_top, input_mdp, swap_pattern, dhdl_dict, counter
+        input_top, mdp_list, swap_pattern, dhdl_dict, counter
     )
 
     trigger = TriggerDagRunOperator(
