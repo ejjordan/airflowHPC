@@ -125,6 +125,8 @@ def update_MDP(template, iter_idx, states, sim_idx_output):
     output_file = os.path.join(out_path, f"expanded.mdp")
     MDP.write(output_file, skipempty=True)
 
+    return output_file
+
 
 @task
 def extract_final_dhdl_info(result) -> Dict[str, int]:
@@ -357,18 +359,30 @@ def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_dict, iteration):
     gro_list = [
         dhdl_info[i]["gro"] for i in swap_pattern if dhdl_info[i]["simulation_id"] == i
     ]
-    next_step_input = [
-        asdict(
-            GmxapiInputHolder(
-                args=["grompp"],
-                input_files={"-f": mdp_path, "-c": gro_list[i], "-p": top_path},
-                output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
-                output_dir=f"outputs/sim_{i}/iteration_{iteration}",
-                simulation_id=i,
+
+    next_step_input = []
+
+    for i in range(len(swap_pattern)):
+        if isinstance(top_path, list):
+            top = top_path[i]
+        else:
+            top = top_path
+        if isinstance(mdp_path, list):
+            mdp = mdp_path[i]
+        else:
+            mdp = mdp_path
+
+        next_step_input.append(
+            asdict(
+                GmxapiInputHolder(
+                    args=["grompp"],
+                    input_files={"-f": mdp, "-c": gro_list[i], "-p": top},
+                    output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
+                    output_dir=f"outputs/sim_{i}/iteration_{iteration}",
+                    simulation_id=i,
+                )
             )
         )
-        for i in range(len(swap_pattern))
-    ]
     return next_step_input
 
 
@@ -469,6 +483,10 @@ with DAG(
         dhdl_dict=dhdl_dict, output_dir="outputs/dhdl", iteration=counter
     )
     swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
+
+    # update_MDP.override('update_mdp').partial(template=)
+    # update_MDP(template, iter_idx, states, sim_idx_output)
+
     next_step_input = prepare_next_step(
         input_top, input_mdp, swap_pattern, dhdl_dict, counter
     )
