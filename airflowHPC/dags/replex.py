@@ -1,4 +1,4 @@
-import json
+import os
 from typing import Dict
 from airflow import DAG
 from airflow.decorators import task, task_group
@@ -6,10 +6,6 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflow import Dataset
 
-from airflowHPC.utils.mdp2json import (
-    update_write_mdp_json_as_mdp_from_file,
-    mdp2json
-)
 from airflowHPC.dags.tasks import (
     get_file,
     prepare_gmxapi_input,
@@ -440,7 +436,6 @@ with DAG(
     Since it is scheduled '@once', it has to be deleted from the database before it can be run again."""
 
     counter = increment_counter("outputs")
-
     input_gro = get_file.override(task_id="get_gro")(
         input_dir="ensemble_md", file_name="sys.gro"
     )
@@ -450,19 +445,6 @@ with DAG(
     input_mdp = get_file.override(task_id="get_mdp")(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
-
-    mdp_data = mdp2json(input_mdp)
-    with open('outputs/expanded.json', 'w') as json_file:
-        json.dump(mdp_data, json_file, indent=2)
-
-    mdp_json = get_file.override(task_id="get_mdp_json")(
-        input_dir='outputs/expanded.json', file_name='expanded.json'
-    )
-    
-    update_write_mdp_json_as_mdp_from_file.override(task_id="initialize_mdp").partial(
-        mdp_json_file_path=mdp_json
-    )
-
 
     idx_output = [(i, f"outputs/sim_{i}/iteration_1") for i in range(NUM_SIMULATIONS)]
     mdp_results = initialize_MDP.override(task_id="intialize_mdp").partial(template=input_mdp).expand(
