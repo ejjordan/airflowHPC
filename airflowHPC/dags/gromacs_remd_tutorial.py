@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.decorators import task
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-import pendulum
+from airflow.utils import timezone
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflowHPC.dags.tasks import (
     get_file,
@@ -11,13 +11,13 @@ from airflowHPC.dags.tasks import (
     prepare_gmxapi_input,
     run_gmxapi_dataclass,
     update_gmxapi_input,
+    list_from_xcom,
 )
 
-start_date = pendulum.datetime(2024, 1, 1, tz="UTC")
 
 with DAG(
     "system_setup",
-    start_date=start_date,
+    start_date=timezone.utcnow(),
     schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
@@ -48,9 +48,10 @@ with DAG(
         output_files={"-o": "alanine_solv.gro", "-p": "topol.top"},
         output_dir=prep_output_dir,
     )
-    mdp_em = get_file.override(task_id="get_min_mdp")(
-        input_dir="ala_tripeptide_remd", file_name="min.mdp"
+    mdp_json_em = get_file.override(task_id="get_min_mdp_json")(
+        input_dir="ala_tripeptide_remd", file_name="min.json"
     )
+    mdp_em = update_write_mdp_json_as_mdp_from_file(mdp_json_file_path=mdp_json_em)
     grompp_em = run_gmxapi.override(task_id="grompp_em")(
         args=["grompp"],
         input_files={"-f": mdp_em, "-c": solvate["-o"], "-p": solvate["-p"]},
@@ -63,9 +64,10 @@ with DAG(
         output_files={"-c": "em.gro"},
         output_dir=prep_output_dir,
     )
-    mdp_nvt = get_file.override(task_id="get_nvt_mdp")(
-        input_dir="ala_tripeptide_remd", file_name="nvt.mdp"
+    mdp_json_nvt = get_file.override(task_id="get_nvt_mdp_json")(
+        input_dir="ala_tripeptide_remd", file_name="nvt.json"
     )
+    mdp_nvt = update_write_mdp_json_as_mdp_from_file(mdp_json_file_path=mdp_json_nvt)
     grompp_nvt = run_gmxapi.override(task_id="grompp_nvt")(
         args=["grompp"],
         input_files={
@@ -83,11 +85,6 @@ with DAG(
         output_files={"-c": "nvt.gro"},
         output_dir=prep_output_dir,
     )
-
-
-@task
-def forward_values(values):
-    return list(values)
 
 
 @task
@@ -121,7 +118,7 @@ def plot_histograms(data_list, labels, hatch_list, xlabel, title, output_file):
 
 with DAG(
     dag_id="equilibrate",
-    start_date=start_date,
+    start_date=timezone.utcnow(),
     schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
@@ -141,7 +138,7 @@ with DAG(
     ).expand(
         update_dict=[{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}]
     )
-    mdp_list = forward_values(mdp_equil)
+    mdp_list = list_from_xcom(mdp_equil)
     equil_output_dir = "equil"
     grompp_input_list = prepare_gmxapi_input(
         args=["grompp"],
@@ -182,7 +179,7 @@ with DAG(
 
 with DAG(
     dag_id="coordinate",
-    start_date=start_date,
+    start_date=timezone.utcnow(),
     schedule=None,
     catchup=False,
     render_template_as_native_obj=True,

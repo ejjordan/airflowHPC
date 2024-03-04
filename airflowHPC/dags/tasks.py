@@ -165,3 +165,8 @@ def branch_task(truth_value: bool, task_if_true: str, task_if_false: str) -> str
         return task_if_true
     else:
         return task_if_false
+
+
+@task
+def list_from_xcom(values):
+    return list(values)
