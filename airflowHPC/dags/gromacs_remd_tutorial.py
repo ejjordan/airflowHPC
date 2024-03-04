@@ -14,6 +14,7 @@ from airflowHPC.dags.tasks import (
     list_from_xcom,
 )
 
+NUM_SIMULATIONS = 4
 
 with DAG(
     "system_setup",
@@ -146,7 +147,7 @@ with DAG(
         output_files={"-o": "equil.tpr"},
         output_dir=equil_output_dir,
         counter=0,
-        num_simulations=4,
+        num_simulations=NUM_SIMULATIONS,
     )
     grompp_equil = run_gmxapi_dataclass.override(task_id="grompp_equil").expand(
         input_data=grompp_input_list
@@ -199,11 +200,14 @@ with DAG(
         trigger_rule="none_failed",
     )
     setup_done = EmptyOperator(task_id="setup_done", trigger_rule="none_failed")
-    is_equil_done = get_file.override(task_id="is_equil_done")(
-        input_dir="equil",
-        file_name="equil.tpr",
-        use_ref_data=False,
-        check_exists=True,
+    is_equil_done = (
+        get_file.override(task_id="is_equil_done")
+        .partial(
+            file_name="equil.tpr",
+            use_ref_data=False,
+            check_exists=True,
+        )
+        .expand(input_dir=[f"equil/step_0/sim_{i}" for i in range(NUM_SIMULATIONS)])
     )
     trigger_equil = TriggerDagRunOperator(
         task_id="trigger_equil",
@@ -215,10 +219,14 @@ with DAG(
     equil_done = EmptyOperator(task_id="equil_done", trigger_rule="none_failed")
 
     setup_done_branch = branch_task.override(task_id="setup_done_branch")(
-        is_setup_done, setup_done.task_id, trigger_setup.task_id
+        truth_value=is_setup_done,
+        task_if_true=setup_done.task_id,
+        task_if_false=trigger_setup.task_id,
     )
     equil_done_branch = branch_task.override(task_id="equil_done_branch")(
-        is_equil_done, equil_done.task_id, trigger_equil.task_id
+        truth_value=is_equil_done,
+        task_if_true=equil_done.task_id,
+        task_if_false=trigger_equil.task_id,
     )
 
     is_setup_done >> setup_done_branch >> [trigger_setup, setup_done] >> is_equil_done

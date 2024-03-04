@@ -160,7 +160,14 @@ def prepare_gmxapi_input(
 
 
 @task.branch
-def branch_task(truth_value: bool, task_if_true: str, task_if_false: str) -> str:
+def branch_task(
+    truth_value: bool | list[bool], task_if_true: str, task_if_false: str
+) -> str:
+    from collections.abc import Iterable
+
+    # Handle list-like truth values
+    if isinstance(truth_value, Iterable):
+        truth_value = all(truth_value)
     if truth_value:
         return task_if_true
     else:
