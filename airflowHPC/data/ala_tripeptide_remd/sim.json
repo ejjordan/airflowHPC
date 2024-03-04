@@ -16,7 +16,7 @@
         "System"
     ],
     "tau_t": 0.1,
-    "ref_t": "xxxxxx",
+    "ref_t": "300",
     "gen_vel": "no",
     "constraints": "h-bonds",
     "rcoulomb": 1.2,
