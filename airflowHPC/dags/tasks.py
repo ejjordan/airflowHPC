@@ -7,6 +7,7 @@ __all__ = (
     "run_gmxapi_dataclass",
     "update_gmxapi_input",
     "prepare_gmxapi_input",
+    "branch_task",
 )
 
 
@@ -25,7 +26,7 @@ class GmxapiRunInfoHolder:
     outputs: dict
 
 
-@task(multiple_outputs=False)
+@task(multiple_outputs=False, trigger_rule="none_failed")
 def get_file(
     input_dir, file_name, use_ref_data: bool = True, check_exists: bool = False
 ):
@@ -126,20 +127,57 @@ def update_gmxapi_input(
 
 @task
 def prepare_gmxapi_input(
-    args, input_files, output_files, output_dir, counter, num_simulations
+    args: list,
+    input_files: dict,
+    output_files: dict,
+    output_dir: str,
+    counter: int,
+    num_simulations: int,
 ):
+    import os
     from dataclasses import asdict
+    from copy import deepcopy
+    from collections.abc import Iterable
 
-    inputHolderList = [
-        asdict(
-            GmxapiInputHolder(
-                args=args,
-                input_files=input_files,
-                output_files=output_files,
-                output_dir=f"{output_dir}/step_{counter}/sim_{i}",
-                simulation_id=i,
+    inputHolderList = []
+
+    for i in range(num_simulations):
+        inputs = deepcopy(input_files)
+        for key, value in input_files.items():
+            if isinstance(value, str) and os.path.exists(value):
+                continue
+            if isinstance(value, Iterable):
+                inputs[key] = value[i]
+        inputHolderList.append(
+            asdict(
+                GmxapiInputHolder(
+                    args=args,
+                    input_files=inputs,
+                    output_files=output_files,
+                    output_dir=f"{output_dir}/step_{counter}/sim_{i}",
+                    simulation_id=i,
+                )
             )
         )
-        for i in range(num_simulations)
-    ]
+
     return inputHolderList
+
+
+@task.branch
+def branch_task(
+    truth_value: bool | list[bool], task_if_true: str, task_if_false: str
+) -> str:
+    from collections.abc import Iterable
+
+    # Handle list-like truth values
+    if isinstance(truth_value, Iterable):
+        truth_value = all(truth_value)
+    if truth_value:
+        return task_if_true
+    else:
+        return task_if_false
+
+
+@task
+def list_from_xcom(values):
+    return list(values)
