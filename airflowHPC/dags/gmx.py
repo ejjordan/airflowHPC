@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.utils import timezone
 
-from airflowHPC.dags.tasks import run_grompp, run_mdrun, prepare_input
+from airflowHPC.dags.tasks import get_file, run_gmxapi
 
 
 @task
@@ -60,11 +60,6 @@ def decide_calculation(prot_mass):
         return "protein_cog_hdf5"
 
 
-@task
-def get_grompp_input(input_holder_list):
-    return list(input_holder_list)[0]
-
-
 @task_group
 def analyze(mdrun_result):
     protein_mass_result = protein_mass(
@@ -85,8 +80,26 @@ def analyze(mdrun_result):
 
 
 with DAG("run_gmxapi", start_date=timezone.utcnow(), catchup=False) as dag:
-    input_holder_list = prepare_input(counter=0, num_simulations=1)
-    grompp_input = get_grompp_input(input_holder_list)
-    grompp_result = run_grompp(grompp_input)
-    mdrun_result = run_mdrun(grompp_result)
+    input_gro = get_file.override(task_id="get_gro")(
+        input_dir="ensemble_md", file_name="sys.gro"
+    )
+    input_top = get_file.override(task_id="get_top")(
+        input_dir="ensemble_md", file_name="sys.top"
+    )
+    input_mdp = get_file.override(task_id="get_mdp")(
+        input_dir="ensemble_md", file_name="expanded.mdp"
+    )
+    output_dir = "outputs"
+    grompp_result = run_gmxapi.override(task_id="grompp")(
+        args=["grompp"],
+        input_files={"-f": input_mdp, "-c": input_gro, "-p": input_top},
+        output_files={"-o": "run.tpr"},
+        output_dir=output_dir,
+    )
+    mdrun_result = run_gmxapi.override(task_id="mdrun")(
+        args=["mdrun"],
+        input_files={"-s": grompp_result["-o"]},
+        output_files={"-c": "result.gro", "-x": "result.xtc"},
+        output_dir=output_dir,
+    )
     # analyze(mdrun_result)

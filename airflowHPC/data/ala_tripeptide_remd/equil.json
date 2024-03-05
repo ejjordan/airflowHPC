@@ -1,0 +1,29 @@
+{
+    "integrator": "md",
+    "dt": 0.002,
+    "nsteps": 50000,
+    "nstenergy": 500,
+    "nstxout-compressed": 500,
+    "pbc": "xyz",
+    "pcoupl": "c-rescale",
+    "pcoupltype": "isotropic",
+    "tau_p": 1.0,
+    "ref_p": 1.0,
+    "compressibility": 4.5e-05,
+    "refcoord_scaling": "com",
+    "tcoupl": "v-rescale",
+    "tc-grps": [
+        "System"
+    ],
+    "tau_t": 0.1,
+    "ref_t": 300.0,
+    "gen_vel": "yes",
+    "constraints": "h-bonds",
+    "rcoulomb": 1.2,
+    "rvdw": 1.2,
+    "vdw-modifier": "force-switch",
+    "rvdw_switch": 1.0,
+    "dispcorr": "enerpres",
+    "coulombtype": "pme",
+    "fourierspacing": 0.15
+}

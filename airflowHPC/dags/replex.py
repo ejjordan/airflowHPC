@@ -4,8 +4,10 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflow import Dataset
 
-from airflowHPC.dags.tasks import InputHolder, prepare_input
-
+from airflowHPC.dags.tasks import (
+    get_file,
+    prepare_gmxapi_input,
+)
 
 SHIFT_RANGE = 1
 NUM_ITERATIONS = 2
@@ -39,9 +41,9 @@ def run_complete():
 
 def get_dhdl(result):
     return {
-        "simulation_id": result["simulation_id"],
-        "-dhdl": result["-dhdl"],
-        "gro_path": result["-c"],
+        "simulation_id": result["inputs"]["simulation_id"],
+        "dhdl": result["outputs"]["-dhdl"],
+        "gro_path": result["outputs"]["-c"],
     }
 
 
@@ -52,7 +54,7 @@ def extract_final_dhdl_info(result) -> dict[str, int]:
 
     shift_range = SHIFT_RANGE
     i: int = result["simulation_id"]
-    dhdl = result["-dhdl"]
+    dhdl = result["dhdl"]
     gro = result["gro_path"]
     headers = get_headers(dhdl)
     state_local = list(extract_dataframe(dhdl, headers=headers)["Thermodynamic state"])[
@@ -164,10 +166,10 @@ def get_swaps(
 
 
 @task
-def prepare_next_step(swap_pattern, inputHolderList, dhdl_dict, iteration):
+def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_dict, iteration):
     from dataclasses import asdict
+    from airflowHPC.dags.tasks import GmxapiInputHolder
 
-    input_holder_list = [InputHolder(**i) for i in inputHolderList]
     if str(iteration) not in dhdl_dict.keys():
         raise ValueError(
             f"prepare_next_step: iteration {iteration} not found in dhdl_dict"
@@ -180,12 +182,12 @@ def prepare_next_step(swap_pattern, inputHolderList, dhdl_dict, iteration):
     ]
     next_step_input = [
         asdict(
-            InputHolder(
-                gro_path=gro_list[i],
-                top_path=input_holder_list[i].top_path,
-                mdp_path=input_holder_list[i].mdp_path,
-                simulation_id=i,
+            GmxapiInputHolder(
+                args=["grompp"],
+                input_files={"-f": mdp_path, "-c": gro_list[i], "-p": top_path},
+                output_files={"-o": "run.tpr"},
                 output_dir=f"outputs/step_{iteration}/sim_{i}",
+                simulation_id=i,
             )
         )
         for i in range(len(swap_pattern))
@@ -194,11 +196,24 @@ def prepare_next_step(swap_pattern, inputHolderList, dhdl_dict, iteration):
 
 
 @task_group
-def run_iteration(inputs_list):
-    from airflowHPC.dags.tasks import run_grompp, run_mdrun
+def run_iteration(grompp_input_list):
+    from airflowHPC.dags.tasks import run_gmxapi_dataclass, update_gmxapi_input
 
-    grompp_result = run_grompp.expand(input_holder_dict=inputs_list)
-    mdrun_result = run_mdrun.expand(mdrun_holder_dict=grompp_result)
+    grompp_result = run_gmxapi_dataclass.override(task_id="grompp").expand(
+        input_data=grompp_input_list
+    )
+    mdrun_input = (
+        update_gmxapi_input.override(task_id="mdrun_prepare")
+        .partial(
+            args=["mdrun"],
+            input_files_keys={"-s": "-o"},
+            output_files={"-dhdl": "dhdl.xvg", "-c": "result.gro", "-x": "result.xtc"},
+        )
+        .expand(gmxapi_output=grompp_result)
+    )
+    mdrun_result = run_gmxapi_dataclass.override(task_id="mdrun").expand(
+        input_data=mdrun_input
+    )
     dhdl = mdrun_result.map(get_dhdl)
     dhdl_result = extract_final_dhdl_info.expand(result=dhdl)
     return dhdl_result
@@ -228,25 +243,38 @@ def increment_counter(output_dir):
 with DAG(
     "replica_exchange",
     start_date=timezone.utcnow(),
-    schedule="@once",
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
-    tags=["schedule"],
 ) as dag:
-    dag.doc = """Demonstration of a replica exchange MD workflow.
-    Since it is scheduled '@once', it has to be deleted from the database before it can be run again."""
+    dag.doc = """Demonstration of a replica exchange MD workflow."""
 
     counter = increment_counter("outputs")
-    inputHolderList = prepare_input(counter=counter, num_simulations=NUM_SIMULATIONS)
-    dhdl_results = run_iteration(inputHolderList)
+    input_gro = get_file.override(task_id="get_gro")(
+        input_dir="ensemble_md", file_name="sys.gro"
+    )
+    input_top = get_file.override(task_id="get_top")(
+        input_dir="ensemble_md", file_name="sys.top"
+    )
+    input_mdp = get_file.override(task_id="get_mdp")(
+        input_dir="ensemble_md", file_name="expanded.mdp"
+    )
+    grompp_input_list = prepare_gmxapi_input(
+        args=["grompp"],
+        input_files={"-f": input_mdp, "-c": input_gro, "-p": input_top},
+        output_files={"-o": "run.tpr"},
+        output_dir="outputs",
+        counter=counter,
+        num_simulations=NUM_SIMULATIONS,
+    )
+    dhdl_results = run_iteration(grompp_input_list)
     dhdl_dict = reduce_dhdl(dhdl_results, counter)
     dhdl_store = store_dhdl_results(
         output_dir="outputs/dhdl", iteration=counter, dhdl_dict=dhdl_dict
     )
     swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
     next_step_input = prepare_next_step(
-        swap_pattern, inputHolderList, dhdl_dict, counter
+        input_top, input_mdp, swap_pattern, dhdl_dict, counter
     )
 
     trigger = TriggerDagRunOperator(
