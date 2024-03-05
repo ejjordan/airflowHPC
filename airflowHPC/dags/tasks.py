@@ -1,112 +1,183 @@
 from airflow.decorators import task
 from dataclasses import dataclass
 
-__all__ = ("run_grompp", "run_mdrun", "InputHolder")
+__all__ = (
+    "get_file",
+    "run_gmxapi",
+    "run_gmxapi_dataclass",
+    "update_gmxapi_input",
+    "prepare_gmxapi_input",
+    "branch_task",
+)
 
 
 @dataclass
-class InputHolder:
-    gro_path: str
-    top_path: str
-    mdp_path: str
-    simulation_id: int
+class GmxapiInputHolder:
+    args: list
+    input_files: dict
+    output_files: dict
     output_dir: str
+    simulation_id: int
 
 
 @dataclass
-class MdrunHolder:
-    tpr_path: str
-    output_dir: str
-    simulation_id: int
+class GmxapiRunInfoHolder:
+    inputs: GmxapiInputHolder
+    outputs: dict
 
 
-@task
-def prepare_input(counter, num_simulations):
+@task(multiple_outputs=False, trigger_rule="none_failed")
+def get_file(
+    input_dir, file_name, use_ref_data: bool = True, check_exists: bool = False
+):
     import os
-    from dataclasses import asdict
-    from airflowHPC.data import data_dir
+    from airflowHPC.data import data_dir as data
 
-    input_dir = os.path.abspath(os.path.join(data_dir, "ensemble_md"))
-    inputHolderList = [
-        asdict(
-            InputHolder(
-                gro_path=os.path.join(input_dir, "sys.gro"),
-                top_path=os.path.join(input_dir, "sys.top"),
-                mdp_path=os.path.join(input_dir, "expanded.mdp"),
-                simulation_id=i,
-                output_dir=f"outputs/step_{counter}/sim_{i}",
-            )
-        )
-        for i in range(num_simulations)
-    ]
-    return inputHolderList
+    if use_ref_data:
+        data_dir = os.path.abspath(os.path.join(data, input_dir))
+    else:
+        data_dir = os.path.abspath(input_dir)
+    file_to_get = os.path.join(data_dir, file_name)
+    if check_exists:
+        if os.path.exists(file_to_get):
+            return True
+        else:
+            return False
+    assert os.path.exists(file_to_get)
+    return file_to_get
+
+
+def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: str):
+    import os
+    import gmxapi
+    import logging
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    out_path = os.path.abspath(output_dir)
+    output_files_paths = {
+        f"{k}": f"{os.path.join(out_path, v)}" for k, v in output_files.items()
+    }
+    cwd = os.getcwd()
+    os.chdir(out_path)
+    gmx = gmxapi.commandline_operation(
+        gmxapi.commandline.cli_executable(), args, input_files, output_files_paths
+    )
+    gmx.run()
+    logging.info(gmx.output.stderr.result())
+    logging.info(gmx.output.stdout.result())
+    os.chdir(cwd)
+    assert all(
+        [os.path.exists(gmx.output.file[key].result()) for key in output_files.keys()]
+    )
+    return gmx
 
 
 @task(multiple_outputs=True)
-def run_grompp(input_holder_dict, verbose: bool = False):
-    import os
-    import gmxapi as gmx
+def run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: str):
+    gmx = _run_gmxapi(args, input_files, output_files, output_dir)
+    return {f"{key}": f"{gmx.output.file[key].result()}" for key in output_files.keys()}
+
+
+@task(multiple_outputs=True, max_active_tis_per_dagrun=1)
+def run_gmxapi_dataclass(input_data):
+    """Ideally this could be an overload with multipledispatch but that does not play well with airflow"""
     from dataclasses import asdict
 
-    input_holder = InputHolder(**input_holder_dict)
+    gmx = _run_gmxapi(
+        args=input_data["args"],
+        input_files=input_data["input_files"],
+        output_files=input_data["output_files"],
+        output_dir=input_data["output_dir"],
+    )
+    run_output = {
+        f"{key}": f"{gmx.output.file[key].result()}"
+        for key in input_data["output_files"].keys()
+    }
+    return asdict(GmxapiRunInfoHolder(inputs=input_data, outputs=run_output))
+
+
+@task
+def update_gmxapi_input(
+    gmxapi_output: GmxapiRunInfoHolder,
+    args: list,
+    input_files_keys: dict,
+    output_files: dict,
+):
+    from dataclasses import asdict
+
+    # Add values to the input_files dictionary if the keys are present in the gmxapi_output
     input_files = {
-        "-f": input_holder.mdp_path,
-        "-p": input_holder.top_path,
-        "-c": input_holder.gro_path,
+        key: gmxapi_output["outputs"][value]
+        for key, value in input_files_keys.items()
+        if value in gmxapi_output["outputs"].keys()
     }
-    output_dir = input_holder.output_dir
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    out_path = os.path.abspath(output_dir)
-    tpr = os.path.join(out_path, "run.tpr")
-    output_files = {"-o": tpr}
-    cwd = os.getcwd()
-    os.chdir(out_path)
-    grompp = gmx.commandline_operation(
-        gmx.commandline.cli_executable(), "grompp", input_files, output_files
+    # Ensure that we got all the requested input files
+    assert all([key in input_files.keys() for key in input_files_keys.keys()])
+    # Create the updated GmxapiInputHolder
+    updated_input_holder = GmxapiInputHolder(
+        args=args,
+        input_files=input_files,
+        output_files=output_files,
+        output_dir=gmxapi_output["inputs"]["output_dir"],
+        simulation_id=gmxapi_output["inputs"]["simulation_id"],
     )
-    grompp.run()
-    os.chdir(cwd)
-    if verbose:
-        print(grompp.output.stderr.result())
-    assert os.path.exists(grompp.output.file["-o"].result())
-    return asdict(
-        MdrunHolder(
-            tpr_path=grompp.output.file["-o"].result(),
-            output_dir=out_path,
-            simulation_id=input_holder.simulation_id,
-        )
-    )
+    return asdict(updated_input_holder)
 
 
-@task(multiple_outputs=True, max_active_tis_per_dag=1)
-def run_mdrun(mdrun_holder_dict) -> dict:
+@task
+def prepare_gmxapi_input(
+    args: list,
+    input_files: dict,
+    output_files: dict,
+    output_dir: str,
+    counter: int,
+    num_simulations: int,
+):
     import os
-    import gmxapi as gmx
+    from dataclasses import asdict
+    from copy import deepcopy
+    from collections.abc import Iterable
 
-    mdrun_holder = MdrunHolder(**mdrun_holder_dict)
-    output_dir = mdrun_holder.output_dir
-    simulation_id = mdrun_holder.simulation_id
-    tpr_path = mdrun_holder.tpr_path
-    if not os.path.exists(tpr_path):
-        raise FileNotFoundError("You must supply a tpr file")
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    out_path = os.path.abspath(output_dir)
-    input_files = {"-s": tpr_path}
-    output_files = {
-        "-x": os.path.join(out_path, "result.xtc"),
-        "-c": os.path.join(out_path, "result.gro"),
-        "-dhdl": os.path.join(out_path, "dhdl.xvg"),
-    }
-    cwd = os.getcwd()
-    os.chdir(out_path)
-    md = gmx.commandline_operation(
-        gmx.commandline.cli_executable(), "mdrun", input_files, output_files
-    )
-    md.run()
-    os.chdir(cwd)
-    assert os.path.exists(md.output.file["-c"].result())
-    results_dict = md.output.file.result()
-    results_dict["simulation_id"] = simulation_id
-    return results_dict
+    inputHolderList = []
+
+    for i in range(num_simulations):
+        inputs = deepcopy(input_files)
+        for key, value in input_files.items():
+            if isinstance(value, str) and os.path.exists(value):
+                continue
+            if isinstance(value, Iterable):
+                inputs[key] = value[i]
+        inputHolderList.append(
+            asdict(
+                GmxapiInputHolder(
+                    args=args,
+                    input_files=inputs,
+                    output_files=output_files,
+                    output_dir=f"{output_dir}/step_{counter}/sim_{i}",
+                    simulation_id=i,
+                )
+            )
+        )
+
+    return inputHolderList
+
+
+@task.branch
+def branch_task(
+    truth_value: bool | list[bool], task_if_true: str, task_if_false: str
+) -> str:
+    from collections.abc import Iterable
+
+    # Handle list-like truth values
+    if isinstance(truth_value, Iterable):
+        truth_value = all(truth_value)
+    if truth_value:
+        return task_if_true
+    else:
+        return task_if_false
+
+
+@task
+def list_from_xcom(values):
+    return list(values)
