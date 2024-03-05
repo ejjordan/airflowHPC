@@ -1,8 +1,8 @@
 {
-    "define": "-dposres",
+    "define": "-DPOSRES",
     "integrator": "md",
     "dt": 0.002,
-    "nsteps": 5000,
+    "nsteps": 50000,
     "nstenergy": 1000,
     "pbc": "xyz",
     "tcoupl": "v-rescale",
