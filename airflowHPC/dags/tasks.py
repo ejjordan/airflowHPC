@@ -134,15 +134,19 @@ def prepare_gmxapi_input(
     counter: int,
     num_simulations: int,
 ):
+    import os
     from dataclasses import asdict
-    import copy
+    from copy import deepcopy
+    from collections.abc import Iterable
 
     inputHolderList = []
 
     for i in range(num_simulations):
-        inputs = copy.deepcopy(input_files)
+        inputs = deepcopy(input_files)
         for key, value in input_files.items():
-            if isinstance(value, list):
+            if isinstance(value, str) and os.path.exists(value):
+                continue
+            if isinstance(value, Iterable):
                 inputs[key] = value[i]
         inputHolderList.append(
             asdict(
