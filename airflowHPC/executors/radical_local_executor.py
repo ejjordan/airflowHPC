@@ -90,14 +90,33 @@ class RadicalExecutor(BaseExecutor):
         queue: str | None = None,
         executor_config: Any | None = None,
     ) -> None:
-        self._rp_log.info(f"=== execute_async {key}: {command}")
-        self.validate_airflow_tasks_run_command(command)
+        from airflow.utils.cli import get_dag
+        import os
 
+        self._rp_log.info(f"=== execute_async {key}: {command}")
+
+        dag = get_dag(dag_id=key.dag_id, subdir=os.path.join("dags", key.dag_id))
+        task = dag.get_task(key.task_id)
+        rp_out_paths = [
+            os.path.join(task.op_kwargs["output_dir"], v)
+            for k, v in task.op_kwargs["output_files"].items()
+        ]
+
+        self.validate_airflow_tasks_run_command(command)
         td = rp.TaskDescription()
         td.executable = command[0]
         td.arguments = command[1:]
         td.metadata = {"key": key}
         td.named_env = "local_venv"
+        td.output_staging = [
+            {
+                "source": f"task:///{out_path}",
+                "target": f"client:///{out_path}",
+                "action": rp.COPY,
+            }
+            for out_path in rp_out_paths
+        ]
+        logging.info(f"=== output_staging: {td.output_staging}")
 
         task = self._rp_tmgr.submit_tasks(td)
 
@@ -120,7 +139,7 @@ class RadicalExecutor(BaseExecutor):
 
 
 class RadicalLocalExecutor(LoggingMixin):
-    is_local: bool = False
+    is_local: bool = True
     is_single_threaded: bool = False
     is_production: bool = True
 
