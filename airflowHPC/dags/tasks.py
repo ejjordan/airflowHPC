@@ -137,15 +137,19 @@ def prepare_gmxapi_input(
     counter: int,
     num_simulations: int,
 ):
+    import os
     from dataclasses import asdict
-    import copy
+    from copy import deepcopy
+    from collections.abc import Iterable
 
     inputHolderList = []
 
     for i in range(num_simulations):
-        inputs = copy.deepcopy(input_files)
+        inputs = deepcopy(input_files)
         for key, value in input_files.items():
-            if isinstance(value, list):
+            if isinstance(value, str) and os.path.exists(value):
+                continue
+            if isinstance(value, Iterable):
                 inputs[key] = value[i]
         inputHolderList.append(
             asdict(
@@ -163,8 +167,20 @@ def prepare_gmxapi_input(
 
 
 @task.branch
-def branch_task(truth_value: bool, task_if_true: str, task_if_false: str) -> str:
+def branch_task(
+    truth_value: bool | list[bool], task_if_true: str, task_if_false: str
+) -> str:
+    from collections.abc import Iterable
+
+    # Handle list-like truth values
+    if isinstance(truth_value, Iterable):
+        truth_value = all(truth_value)
     if truth_value:
         return task_if_true
     else:
         return task_if_false
+
+
+@task
+def list_from_xcom(values):
+    return list(values)

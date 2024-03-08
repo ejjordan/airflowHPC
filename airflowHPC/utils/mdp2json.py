@@ -10,7 +10,7 @@ __all__ = [
 
 
 def mdp2json(mdp_file_path):
-    import re #, json
+    import re
 
     mdp_data = {}
     with open(mdp_file_path, "r") as mdp_file:
@@ -35,7 +35,6 @@ def mdp2json(mdp_file_path):
                     value = value.lower() == "true"
                 # If the value is an array, convert to Python list
                 elif re.match(r"^\[.*\]$", value):
-                    #value = json.loads(value)
                     if " " in value:
                         value = value.split()
                     else:
@@ -76,7 +75,6 @@ def validate_json_mdp(mdp_data):
     jsonschema.validate(mdp_data, schema)
 
 
-#@task
 def update_write_mdp_json(mdp_data, update_dict, output_file: str = None):
     import json, tempfile
 
@@ -89,7 +87,6 @@ def update_write_mdp_json(mdp_data, update_dict, output_file: str = None):
     return output_file
 
 
-#@task
 def update_write_mdp_json_from_file(
     mdp_json_file_path, update_dict, output_file: str = None
 ):
@@ -100,7 +97,6 @@ def update_write_mdp_json_from_file(
     return update_write_mdp_json(mdp_data, update_dict, output_file)
 
 
-#@task
 def update_write_mdp_json_as_mdp(mdp_data, update_dict, output_file: str = None):
     mdp_data.update(update_dict)
     validate_json_mdp(mdp_data)
@@ -118,7 +114,6 @@ def update_write_mdp_json_as_mdp_from_file(
     return update_write_mdp_json_as_mdp(mdp_data, update_dict, output_file)
 
 
-#@task
 def validate_convert_mdp(mdp_file_path):
     import json
 
