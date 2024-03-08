@@ -1,8 +1,10 @@
 import os
+import logging
 from typing import Dict
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.python_operator import PythonOperator
 from airflow.utils import timezone
 from airflow import Dataset
 
@@ -62,7 +64,6 @@ def initialize_MDP(template, expand_args):
     import os
     from ensemble_md.utils import gmx_parser
 
-    # idx_output = (idx, output_dir), i.e., a tuple
     idx = expand_args['simulation_id']
     output_dir = expand_args['output_dir']
 
@@ -233,14 +234,12 @@ def propose_swap(swappables):
     return swap
 
 
-def calc_prob_acc(swap, dhdl_files, states):
+def calc_prob_acc(swap, dhdl_files, states, shifts):
     import logging
     import numpy as np
     from alchemlyb.parsing.gmx import _get_headers as get_headers
     from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
 
-    logging.info(dhdl_files)
-    shifts = [SHIFT_RANGE for i in range(NUM_SIMULATIONS)]
     f0, f1 = dhdl_files[swap[0]], dhdl_files[swap[1]]
     h0, h1 = get_headers(f0), get_headers(f1)
     data_0, data_1 = (
@@ -249,6 +248,8 @@ def calc_prob_acc(swap, dhdl_files, states):
     )
 
     n_sub = NUM_STATES - SHIFT_RANGE * (NUM_SIMULATIONS - 1)
+    logging.info(f'n_sub: {n_sub}, swap: {swap}, states: {states}, shifts: {shifts}')
+    logging.info(data_0)
     dhdl_0 = data_0[-n_sub:]
     dhdl_1 = data_1[-n_sub:]
 
@@ -257,6 +258,9 @@ def calc_prob_acc(swap, dhdl_files, states):
 
     new_state_0 = states[swap[1]] - shifts[swap[0]]
     new_state_1 = states[swap[0]] - shifts[swap[1]]
+
+    logging.info(f'old_state_0: {old_state_0}, old_state_1: {old_state_1}, new_state_0: {new_state_0}, new_state_1: {new_state_1}')
+    logging.info(dhdl_0)
 
     kT = 1.380649e-23 * 6.0221408e23 * T / 1000
     dU_0 = (dhdl_0[new_state_0] - dhdl_0[old_state_0]) / kT
@@ -337,7 +341,7 @@ def get_swaps(iteration, dhdl_store):
 
     # Note that here we only implement the exhaustive exchange proposal scheme
     n_ex = int(np.floor(NUM_SIMULATIONS / 2))
-    shifts = [SHIFT_RANGE for i in range(NUM_SIMULATIONS)]
+    shifts = list(SHIFT_RANGE * np.arange(NUM_SIMULATIONS))
     for i in range(n_ex):
         if i >= 1:
             swappables = [
@@ -353,7 +357,7 @@ def get_swaps(iteration, dhdl_store):
             break
         else:
             # Figure out dhdl_files
-            prob_acc = calc_prob_acc(swap, dhdl_files, states)
+            prob_acc = calc_prob_acc(swap, dhdl_files, states, shifts)
             swap_bool = accept_or_reject(prob_acc)
 
         if swap_bool is True:
@@ -532,10 +536,24 @@ with DAG(
     )
 
     trigger = TriggerDagRunOperator(
-        task_id="trigger_self", trigger_dag_id="REXEE_example"
+        task_id="trigger_self", trigger_dag_id="REXEE_continuation"
     )
     condition = check_condition(counter, NUM_ITERATIONS)
     done = run_complete()
     condition.set_upstream(next_step_input)
     trigger.set_upstream(condition)
     done.set_upstream(condition)
+
+"""
+with DAG(
+    "REXEE_continuation",
+    start_date=timezone.utcnow(),
+    catchup=False,
+    render_template_as_native_obj=True,
+    max_active_runs=1,
+) as dag:
+    dag.doc = """This is a DAG for running iterations of a REXEE simulation after its initialization in the first iteration."""
+
+    counter = increment_counter("outputs")
+    logging.info(mdp_list)
+"""

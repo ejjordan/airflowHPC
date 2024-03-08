@@ -1,5 +1,6 @@
 from airflow.decorators import task
 from dataclasses import dataclass, asdict
+from typing import Union, List
 
 __all__ = (
     "get_file",
@@ -168,7 +169,7 @@ def prepare_gmxapi_input(
 
 @task.branch
 def branch_task(
-    truth_value: bool | list[bool], task_if_true: str, task_if_false: str
+    truth_value: Union[bool, List[bool]], task_if_true: str, task_if_false: str
 ) -> str:
     from collections.abc import Iterable
 
