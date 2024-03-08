@@ -133,7 +133,7 @@ def prepare_args_for_mdp_functions(counter, mode):
 
 
 @task
-def update_MDP(iter_idx, dhdl_store, expand_args):
+def update_MDP(iter_idx, expand_args, json_file='outputs/dhdl/dhdl.json'):
     # TODO: Parameters for weight-updating REXEE and distance restraints were ignored and should be added when necessary.
     import os
     import json
@@ -143,7 +143,7 @@ def update_MDP(iter_idx, dhdl_store, expand_args):
     template = expand_args['template']
     output_dir = expand_args['output_dir']
 
-    with open(dhdl_store.uri, "r") as f:
+    with open(json_file, "r") as f:
         data = json.load(f)
     states = [
         data["iteration"][str(iter_idx)][i]["state"] for i in range(NUM_SIMULATIONS)
@@ -298,7 +298,7 @@ def accept_or_reject(prob_acc):
 
 
 @task
-def get_swaps(iteration, dhdl_store):
+def get_swaps(iteration, json_file='outputs/dhdl/dhdl.json'):
     from itertools import combinations
     import numpy as np
     import logging
@@ -306,7 +306,7 @@ def get_swaps(iteration, dhdl_store):
     import json
     import copy
 
-    with open(dhdl_store.uri, "r") as f:
+    with open(json_file, "r") as f:
         data = json.load(f)
 
     swap_list = []
@@ -474,19 +474,33 @@ def increment_counter(output_dir):
             f.write(str(counter + 1))
     else:
         with open(counter_file, "w") as f:
-            f.write(str(counter + 1))
+            f.write(str(counter))  # so that the child dag gets the right counter
+    return counter
+
+
+@task(max_active_tis_per_dag=1)
+def read_counter(input_dir):
+    import os
+    out_path = os.path.abspath(input_dir)
+    counter_file = os.path.join(out_path, "counter.txt")
+    if os.path.exists(counter_file):
+        with open(counter_file, "r") as f:
+            counter = int(f.read())
+    else:
+        raise ValueError('No counter.txt found!')
+
     return counter
 
 
 with DAG(
-    "REXEE_example",
+    "REXEE_initialization",
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as dag:
     dag.doc = """Demonstration of a REXEE workflow.
-    Since it is scheduled '@once', it has to be deleted from the database before it can be run again."""
+    To rerun the DAG, outputs from any previous instance must be deleted first."""
 
     counter = increment_counter("outputs")
     input_gro = get_file.override(task_id="get_gro")(
@@ -521,30 +535,18 @@ with DAG(
     dhdl_store = store_dhdl_results(
         dhdl_dict=dhdl_dict, output_dir="outputs/dhdl", iteration=counter
     )
-    swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
-
-    # update MDP files for the next iteration
-    expand_args = prepare_args_for_mdp_functions(counter, mode='update')
-    mdp_results = update_MDP.override(task_id="update_mdp").partial(iter_idx=counter, dhdl_store=dhdl_store).expand(
-        expand_args=expand_args
-    )
-    mdp_list = mdp_results.map(lambda x: x)
-    mdp_list = forward_values(mdp_list)
-
-    next_step_input = prepare_next_step(
-        input_top, mdp_list, swap_pattern, dhdl_dict, counter
-    )
 
     trigger = TriggerDagRunOperator(
         task_id="trigger_self", trigger_dag_id="REXEE_continuation"
     )
     condition = check_condition(counter, NUM_ITERATIONS)
     done = run_complete()
-    condition.set_upstream(next_step_input)
+    # condition.set_upstream(next_step_input)
+    condition.set_upstream(dhdl_store)
     trigger.set_upstream(condition)
     done.set_upstream(condition)
 
-"""
+
 with DAG(
     "REXEE_continuation",
     start_date=timezone.utcnow(),
@@ -553,7 +555,22 @@ with DAG(
     max_active_runs=1,
 ) as dag:
     dag.doc = """This is a DAG for running iterations of a REXEE simulation after its initialization in the first iteration."""
+    
+    # This child DAG relies on two files saved by the parent DAG, including counter.txt and dhdl.json
+    counter = read_counter("outputs")
+    swap_pattern = get_swaps(iteration=counter)
 
-    counter = increment_counter("outputs")
-    logging.info(mdp_list)
-"""
+    # update MDP files for the next iteration
+    expand_args = prepare_args_for_mdp_functions(counter, mode='update')
+    mdp_results = update_MDP.override(task_id="update_mdp").partial(iter_idx=counter).expand(
+        expand_args=expand_args
+    )
+    mdp_list = mdp_results.map(lambda x: x)
+    mdp_list = forward_values(mdp_list)
+
+    # next_step_input = prepare_next_step(
+    #   input_top, mdp_list, swap_pattern, dhdl_dict, counter
+    # )
+
+
+    # counter = increment_counter("outputs")
