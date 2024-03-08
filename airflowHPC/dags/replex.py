@@ -16,7 +16,7 @@ from airflowHPC.dags.tasks import (
 SHIFT_RANGE = 1
 NUM_ITERATIONS = 3
 NUM_SIMULATIONS = 4
-NUM_STATES = 8
+NUM_STATES = 9
 NUM_STEPS = 2000
 STATE_RANGES = [
     [0, 1, 2, 3, 4, 5],
@@ -64,8 +64,8 @@ def initialize_MDP(template, expand_args):
     import os
     from ensemble_md.utils import gmx_parser
 
-    idx = expand_args['simulation_id']
-    output_dir = expand_args['output_dir']
+    idx = expand_args["simulation_id"]
+    output_dir = expand_args["output_dir"]
 
     MDP = gmx_parser.MDP(template)
     MDP["nsteps"] = NUM_STEPS
@@ -107,52 +107,49 @@ def initialize_MDP(template, expand_args):
 
 @task
 def prepare_args_for_mdp_functions(counter, mode):
-    if mode == 'initialize':
+    if mode == "initialize":
         # For initializing MDP files for the first iteration
         expand_args = [
-            {
-                'simulation_id': i,
-                'output_dir': f"outputs/sim_{i}/iteration_1"
-            }
+            {"simulation_id": i, "output_dir": f"outputs/sim_{i}/iteration_1"}
             for i in range(NUM_SIMULATIONS)
         ]
-    elif mode == 'update':
+    elif mode == "update":
         # For updating MDP files for the next iteration
         expand_args = [
             {
-                'simulation_id': i,
-                'template': f"outputs/sim_{i}/iteration_{counter-1}/expanded.mdp",  # previous iteration
-                'output_dir': f"outputs/sim_{i}/iteration_{counter}"  # the iteration to perform
+                "simulation_id": i,
+                "template": f"outputs/sim_{i}/iteration_{counter-1}/expanded.mdp",  # previous iteration
+                "output_dir": f"outputs/sim_{i}/iteration_{counter}",  # the iteration to perform
             }
             for i in range(NUM_SIMULATIONS)
         ]
     else:
         raise ValueError('Invalid value for the parameter "mode".')
-        
+
     return expand_args
 
 
 @task
-def update_MDP(iter_idx, expand_args, json_file='outputs/dhdl/dhdl.json'):
+def update_MDP(iter_idx, expand_args, json_file="outputs/dhdl/dhdl.json"):
     # TODO: Parameters for weight-updating REXEE and distance restraints were ignored and should be added when necessary.
     import os
     import json
     from ensemble_md.utils import gmx_parser
 
-    sim_idx = expand_args['simulation_id']
-    template = expand_args['template']
-    output_dir = expand_args['output_dir']
+    sim_idx = expand_args["simulation_id"]
+    template = expand_args["template"]
+    output_dir = expand_args["output_dir"]
 
     with open(json_file, "r") as f:
         data = json.load(f)
     states = [
-        data["iteration"][str(iter_idx-1)][i]["state"] for i in range(NUM_SIMULATIONS)
+        data["iteration"][str(iter_idx - 1)][i]["state"] for i in range(NUM_SIMULATIONS)
     ]  # Get the last sampled states in the previous iteration
-    
+
     MDP = gmx_parser.MDP(template)
-    MDP["tinit"] = NUM_STEPS * MDP["dt"] * iter_idx
+    MDP["tinit"] = NUM_STEPS * MDP["dt"] * (iter_idx - 1)
     MDP["nsteps"] = NUM_STEPS
-    MDP["init_lambda_state"] = (states[sim_idx] - sim_idx * SHIFT_RANGE)
+    MDP["init_lambda_state"] = states[sim_idx] - sim_idx * SHIFT_RANGE
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -248,8 +245,6 @@ def calc_prob_acc(swap, dhdl_files, states, shifts):
     )
 
     n_sub = NUM_STATES - SHIFT_RANGE * (NUM_SIMULATIONS - 1)
-    logging.info(f'n_sub: {n_sub}, swap: {swap}, states: {states}, shifts: {shifts}')
-    logging.info(data_0)
     dhdl_0 = data_0[-n_sub:]
     dhdl_1 = data_1[-n_sub:]
 
@@ -259,8 +254,9 @@ def calc_prob_acc(swap, dhdl_files, states, shifts):
     new_state_0 = states[swap[1]] - shifts[swap[0]]
     new_state_1 = states[swap[0]] - shifts[swap[1]]
 
-    logging.info(f'old_state_0: {old_state_0}, old_state_1: {old_state_1}, new_state_0: {new_state_0}, new_state_1: {new_state_1}')
-    logging.info(dhdl_0)
+    logging.info(
+        f"old_state_0: {old_state_0}, old_state_1: {old_state_1}, new_state_0: {new_state_0}, new_state_1: {new_state_1}"
+    )
 
     kT = 1.380649e-23 * 6.0221408e23 * T / 1000
     dU_0 = (dhdl_0[new_state_0] - dhdl_0[old_state_0]) / kT
@@ -298,7 +294,7 @@ def accept_or_reject(prob_acc):
 
 
 @task
-def get_swaps(iteration, json_file='outputs/dhdl/dhdl.json'):
+def get_swaps(iteration, json_file="outputs/dhdl/dhdl.json"):
     from itertools import combinations
     import numpy as np
     import logging
@@ -384,7 +380,9 @@ def get_swaps(iteration, json_file='outputs/dhdl/dhdl.json'):
 
 
 @task
-def prepare_next_step(top_path, mdp_path, swap_pattern, iteration, json_file='outputs/dhdl/dhdl.json'):
+def prepare_next_step(
+    top_path, mdp_path, swap_pattern, iteration, json_file="outputs/dhdl/dhdl.json"
+):
     import json
     from dataclasses import asdict
     from airflowHPC.dags.tasks import GmxapiInputHolder
@@ -392,13 +390,13 @@ def prepare_next_step(top_path, mdp_path, swap_pattern, iteration, json_file='ou
     # Check data from the previous iteration
     with open(json_file, "r") as f:
         data = json.load(f)
-    
-    if str(iteration-1) not in data["iteration"].keys():
+
+    if str(iteration - 1) not in data["iteration"].keys():
         raise ValueError(
-            f"prepare_next_step: iteration {iteration-1} not found in dhdl_dict"
+            f"prepare_next_step: iteration {iteration-1} not found in dhdl.json"
         )
 
-    dhdl_info = data["iteration"][str(iteration-1)]
+    dhdl_info = data["iteration"][str(iteration - 1)]
 
     # Swap the gro files but keep the order for top and mdp files
     gro_list = [
@@ -488,13 +486,14 @@ def increment_counter(output_dir):
 @task(max_active_tis_per_dag=1)
 def read_counter(input_dir):
     import os
+
     out_path = os.path.abspath(input_dir)
     counter_file = os.path.join(out_path, "counter.txt")
     if os.path.exists(counter_file):
         with open(counter_file, "r") as f:
             counter = int(f.read())
     else:
-        raise ValueError('No counter.txt found!')
+        raise ValueError("No counter.txt found!")
 
     return counter
 
@@ -520,9 +519,11 @@ with DAG(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
 
-    expand_args = prepare_args_for_mdp_functions(counter, mode='initialize')
-    mdp_results = initialize_MDP.override(task_id="intialize_mdp").partial(template=input_mdp).expand(
-        expand_args=expand_args
+    expand_args = prepare_args_for_mdp_functions(counter, mode="initialize")
+    mdp_results = (
+        initialize_MDP.override(task_id="intialize_mdp")
+        .partial(template=input_mdp)
+        .expand(expand_args=expand_args)
     )
     mdp_list = mdp_results.map(lambda x: x)
     mdp_list = forward_values(mdp_list)
@@ -561,17 +562,21 @@ with DAG(
     max_active_runs=1,
 ) as dag:
     dag.doc = """This is a DAG for running iterations of a REXEE simulation after its initialization in the first iteration."""
-    
+
     # This child DAG relies on two files saved by the parent DAG, including counter.txt and dhdl.json
     counter = read_counter("outputs")  # get the previous counter
-    swap_pattern = get_swaps(iteration=counter)  # Figure out the swapping pattern based on the previous iteration 
+    swap_pattern = get_swaps(
+        iteration=counter
+    )  # Figure out the swapping pattern based on the previous iteration
 
     # Update MDP files for the next iteration (Note that here we update the counter first.)
     counter = increment_counter("outputs")
     counter.set_upstream(swap_pattern)
-    expand_args = prepare_args_for_mdp_functions(counter, mode='update')
-    mdp_results = update_MDP.override(task_id="update_mdp").partial(iter_idx=counter).expand(
-        expand_args=expand_args
+    expand_args = prepare_args_for_mdp_functions(counter, mode="update")
+    mdp_results = (
+        update_MDP.override(task_id="update_mdp")
+        .partial(iter_idx=counter)
+        .expand(expand_args=expand_args)
     )
     mdp_list = mdp_results.map(lambda x: x)
     mdp_list = forward_values(mdp_list)
@@ -580,10 +585,8 @@ with DAG(
     input_top = get_file.override(task_id="get_top")(
         input_dir="ensemble_md", file_name="sys.top"
     )
-    next_step_input = prepare_next_step(
-      input_top, mdp_list, swap_pattern, counter
-    )
-    
+    next_step_input = prepare_next_step(input_top, mdp_list, swap_pattern, counter)
+
     dhdl_results = run_iteration(next_step_input)
     dhdl_dict = reduce_dhdl(dhdl_results, counter)
     dhdl_store = store_dhdl_results(
