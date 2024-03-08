@@ -14,7 +14,7 @@ from airflowHPC.dags.tasks import (
 )
 
 SHIFT_RANGE = 1
-NUM_ITERATIONS = 2
+NUM_ITERATIONS = 3
 NUM_SIMULATIONS = 4
 NUM_STATES = 8
 NUM_STEPS = 2000
@@ -121,8 +121,8 @@ def prepare_args_for_mdp_functions(counter, mode):
         expand_args = [
             {
                 'simulation_id': i,
-                'template': f"outputs/sim_{i}/iteration_{counter}/expanded.mdp",
-                'output_dir': f"outputs/sim_{i}/iteration_{counter+1}"
+                'template': f"outputs/sim_{i}/iteration_{counter-1}/expanded.mdp",  # previous iteration
+                'output_dir': f"outputs/sim_{i}/iteration_{counter}"  # the iteration to perform
             }
             for i in range(NUM_SIMULATIONS)
         ]
@@ -146,8 +146,8 @@ def update_MDP(iter_idx, expand_args, json_file='outputs/dhdl/dhdl.json'):
     with open(json_file, "r") as f:
         data = json.load(f)
     states = [
-        data["iteration"][str(iter_idx)][i]["state"] for i in range(NUM_SIMULATIONS)
-    ]
+        data["iteration"][str(iter_idx-1)][i]["state"] for i in range(NUM_SIMULATIONS)
+    ]  # Get the last sampled states in the previous iteration
     
     MDP = gmx_parser.MDP(template)
     MDP["tinit"] = NUM_STEPS * MDP["dt"] * iter_idx
@@ -384,15 +384,21 @@ def get_swaps(iteration, json_file='outputs/dhdl/dhdl.json'):
 
 
 @task
-def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_dict, iteration):
+def prepare_next_step(top_path, mdp_path, swap_pattern, iteration, json_file='outputs/dhdl/dhdl.json'):
+    import json
     from dataclasses import asdict
     from airflowHPC.dags.tasks import GmxapiInputHolder
 
-    if str(iteration) not in dhdl_dict.keys():
+    # Check data from the previous iteration
+    with open(json_file, "r") as f:
+        data = json.load(f)
+    
+    if str(iteration-1) not in data["iteration"].keys():
         raise ValueError(
-            f"prepare_next_step: iteration {iteration} not found in dhdl_dict"
+            f"prepare_next_step: iteration {iteration-1} not found in dhdl_dict"
         )
-    dhdl_info = dhdl_dict[str(iteration)]
+
+    dhdl_info = data["iteration"][str(iteration-1)]
 
     # Swap the gro files but keep the order for top and mdp files
     gro_list = [
@@ -470,11 +476,12 @@ def increment_counter(output_dir):
     if os.path.exists(counter_file):
         with open(counter_file, "r") as f:
             counter = int(f.read())
+        counter += 1  # so the value in counter.txt is the same as the variable counter
         with open(counter_file, "w") as f:
-            f.write(str(counter + 1))
+            f.write(str(counter))
     else:
         with open(counter_file, "w") as f:
-            f.write(str(counter))  # so that the child dag gets the right counter
+            f.write(str(counter))  # so that the child dag gets the right counter (of 1)
     return counter
 
 
@@ -541,7 +548,6 @@ with DAG(
     )
     condition = check_condition(counter, NUM_ITERATIONS)
     done = run_complete()
-    # condition.set_upstream(next_step_input)
     condition.set_upstream(dhdl_store)
     trigger.set_upstream(condition)
     done.set_upstream(condition)
@@ -557,10 +563,12 @@ with DAG(
     dag.doc = """This is a DAG for running iterations of a REXEE simulation after its initialization in the first iteration."""
     
     # This child DAG relies on two files saved by the parent DAG, including counter.txt and dhdl.json
-    counter = read_counter("outputs")
-    swap_pattern = get_swaps(iteration=counter)
+    counter = read_counter("outputs")  # get the previous counter
+    swap_pattern = get_swaps(iteration=counter)  # Figure out the swapping pattern based on the previous iteration 
 
-    # update MDP files for the next iteration
+    # Update MDP files for the next iteration (Note that here we update the counter first.)
+    counter = increment_counter("outputs")
+    counter.set_upstream(swap_pattern)
     expand_args = prepare_args_for_mdp_functions(counter, mode='update')
     mdp_results = update_MDP.override(task_id="update_mdp").partial(iter_idx=counter).expand(
         expand_args=expand_args
@@ -568,9 +576,25 @@ with DAG(
     mdp_list = mdp_results.map(lambda x: x)
     mdp_list = forward_values(mdp_list)
 
-    # next_step_input = prepare_next_step(
-    #   input_top, mdp_list, swap_pattern, dhdl_dict, counter
-    # )
+    # Run the next iteration
+    input_top = get_file.override(task_id="get_top")(
+        input_dir="ensemble_md", file_name="sys.top"
+    )
+    next_step_input = prepare_next_step(
+      input_top, mdp_list, swap_pattern, counter
+    )
+    
+    dhdl_results = run_iteration(next_step_input)
+    dhdl_dict = reduce_dhdl(dhdl_results, counter)
+    dhdl_store = store_dhdl_results(
+        dhdl_dict=dhdl_dict, output_dir="outputs/dhdl", iteration=counter
+    )
 
-
-    # counter = increment_counter("outputs")
+    trigger = TriggerDagRunOperator(
+        task_id="trigger_self", trigger_dag_id="REXEE_continuation"
+    )
+    condition = check_condition(counter, NUM_ITERATIONS)
+    done = run_complete()
+    condition.set_upstream(dhdl_store)
+    trigger.set_upstream(condition)
+    done.set_upstream(condition)
