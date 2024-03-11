@@ -76,13 +76,13 @@ def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: s
     return gmx
 
 
-@task(multiple_outputs=True)
+@task(multiple_outputs=True, queue="radical")
 def run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: str):
     gmx = _run_gmxapi(args, input_files, output_files, output_dir)
     return {f"{key}": f"{gmx.output.file[key].result()}" for key in output_files.keys()}
 
 
-@task(multiple_outputs=True, max_active_tis_per_dagrun=1)
+@task(multiple_outputs=True, max_active_tis_per_dagrun=1, queue="radical")
 def run_gmxapi_dataclass(input_data):
     """Ideally this could be an overload with multipledispatch but that does not play well with airflow"""
     from dataclasses import asdict

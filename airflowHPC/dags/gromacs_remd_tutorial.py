@@ -20,7 +20,6 @@ NUM_SIMULATIONS = 4
 with DAG(
     "system_setup",
     start_date=timezone.utcnow(),
-    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
@@ -44,10 +43,13 @@ with DAG(
         output_files={"-o": "alanine_box.gro"},
         output_dir=prep_output_dir,
     )
+    # gmx solvate does not allow specifying different file names for input and output top files.
+    # Here we rely on the fact that solvate overwrites the input top file with the solvated top file.
+    # Thus, after solvate, pdb2gmx["-p"] is what should be solvate["-p"].
     solvate = run_gmxapi.override(task_id="solvate")(
         args=["solvate"],
-        input_files={"-cp": editconf["-o"], "-cs": "spc216.gro"},
-        output_files={"-o": "alanine_solv.gro", "-p": "topol.top"},
+        input_files={"-cp": editconf["-o"], "-cs": "spc216.gro", "-p": pdb2gmx["-p"]},
+        output_files={"-o": "alanine_solv.gro"},
         output_dir=prep_output_dir,
     )
     mdp_json_em = get_file.override(task_id="get_min_mdp_json")(
@@ -56,7 +58,7 @@ with DAG(
     mdp_em = update_write_mdp_json_as_mdp_from_file(mdp_json_file_path=mdp_json_em)
     grompp_em = run_gmxapi.override(task_id="grompp_em")(
         args=["grompp"],
-        input_files={"-f": mdp_em, "-c": solvate["-o"], "-p": solvate["-p"]},
+        input_files={"-f": mdp_em, "-c": solvate["-o"], "-p": pdb2gmx["-p"]},
         output_files={"-o": "em.tpr"},
         output_dir=prep_output_dir,
     )
@@ -76,7 +78,7 @@ with DAG(
             "-f": mdp_nvt,
             "-c": mdrun_em["-c"],
             "-r": mdrun_em["-c"],
-            "-p": solvate["-p"],
+            "-p": pdb2gmx["-p"],
         },
         output_files={"-o": "nvt.tpr"},
         output_dir=prep_output_dir,

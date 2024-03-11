@@ -21,6 +21,7 @@ def get_provider_info():
         ],
         "executors": [
             "airflowHPC.executors.radical_local_executor.RadicalLocalExecutor",
+            "airflowHPC.executors.radical_local_executor.RadicalExecutor",
             "airflowHPC.executors.zmq_sequential_executor.ZMQSequentialExecutor",
         ],
         "versions": [__version__],
