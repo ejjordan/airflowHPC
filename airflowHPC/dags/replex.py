@@ -1,4 +1,3 @@
-import os
 from typing import Dict
 from airflow import DAG
 from airflow.decorators import task, task_group
@@ -63,8 +62,8 @@ def initialize_MDP(template, expand_args):
     from ensemble_md.utils import gmx_parser
 
     # idx_output = (idx, output_dir), i.e., a tuple
-    idx = expand_args['simulation_id']
-    output_dir = expand_args['output_dir']
+    idx = expand_args["simulation_id"]
+    output_dir = expand_args["output_dir"]
 
     MDP = gmx_parser.MDP(template)
     MDP["nsteps"] = NUM_STEPS
@@ -106,28 +105,25 @@ def initialize_MDP(template, expand_args):
 
 @task
 def prepare_args_for_mdp_functions(counter, mode):
-    if mode == 'initialize':
+    if mode == "initialize":
         # For initializing MDP files for the first iteration
         expand_args = [
-            {
-                'simulation_id': i,
-                'output_dir': f"outputs/sim_{i}/iteration_1"
-            }
+            {"simulation_id": i, "output_dir": f"outputs/sim_{i}/iteration_1"}
             for i in range(NUM_SIMULATIONS)
         ]
-    elif mode == 'update':
+    elif mode == "update":
         # For updating MDP files for the next iteration
         expand_args = [
             {
-                'simulation_id': i,
-                'template': f"outputs/sim_{i}/iteration_{counter}/expanded.mdp",
-                'output_dir': f"outputs/sim_{i}/iteration_{counter+1}"
+                "simulation_id": i,
+                "template": f"outputs/sim_{i}/iteration_{counter}/expanded.mdp",
+                "output_dir": f"outputs/sim_{i}/iteration_{counter+1}",
             }
             for i in range(NUM_SIMULATIONS)
         ]
     else:
         raise ValueError('Invalid value for the parameter "mode".')
-        
+
     return expand_args
 
 
@@ -138,20 +134,20 @@ def update_MDP(iter_idx, dhdl_store, expand_args):
     import json
     from ensemble_md.utils import gmx_parser
 
-    sim_idx = expand_args['simulation_id']
-    template = expand_args['template']
-    output_dir = expand_args['output_dir']
+    sim_idx = expand_args["simulation_id"]
+    template = expand_args["template"]
+    output_dir = expand_args["output_dir"]
 
     with open(dhdl_store.uri, "r") as f:
         data = json.load(f)
     states = [
         data["iteration"][str(iter_idx)][i]["state"] for i in range(NUM_SIMULATIONS)
     ]
-    
+
     MDP = gmx_parser.MDP(template)
     MDP["tinit"] = NUM_STEPS * MDP["dt"] * iter_idx
     MDP["nsteps"] = NUM_STEPS
-    MDP["init_lambda_state"] = (states[sim_idx] - sim_idx * SHIFT_RANGE)
+    MDP["init_lambda_state"] = states[sim_idx] - sim_idx * SHIFT_RANGE
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -495,9 +491,11 @@ with DAG(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
 
-    expand_args = prepare_args_for_mdp_functions(counter, mode='initialize')
-    mdp_results = initialize_MDP.override(task_id="intialize_mdp").partial(template=input_mdp).expand(
-        expand_args=expand_args
+    expand_args = prepare_args_for_mdp_functions(counter, mode="initialize")
+    mdp_results = (
+        initialize_MDP.override(task_id="intialize_mdp")
+        .partial(template=input_mdp)
+        .expand(expand_args=expand_args)
     )
     mdp_list = mdp_results.map(lambda x: x)
     mdp_list = forward_values(mdp_list)
@@ -520,9 +518,11 @@ with DAG(
     swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
 
     # update MDP files for the next iteration
-    expand_args = prepare_args_for_mdp_functions(counter, mode='update')
-    mdp_results = update_MDP.override(task_id="update_mdp").partial(iter_idx=counter, dhdl_store=dhdl_store).expand(
-        expand_args=expand_args
+    expand_args = prepare_args_for_mdp_functions(counter, mode="update")
+    mdp_results = (
+        update_MDP.override(task_id="update_mdp")
+        .partial(iter_idx=counter, dhdl_store=dhdl_store)
+        .expand(expand_args=expand_args)
     )
     mdp_list = mdp_results.map(lambda x: x)
     mdp_list = forward_values(mdp_list)
