@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import queue
 import contextlib
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional, Tuple, Sequence
 
 from airflow.executors.base_executor import PARALLELISM, BaseExecutor
 from airflow.executors.local_executor import LocalExecutor
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
 
-import radical.utils as ru
 import radical.pilot as rp
 import logging
 
@@ -17,7 +16,6 @@ import logging
 if TYPE_CHECKING:
     from airflow.executors.base_executor import CommandType
     from airflow.models.taskinstance import (
-        TaskInstanceStateType,
         SimpleTaskInstance,
         TaskInstance,
     )
@@ -143,6 +141,10 @@ class RadicalLocalExecutor(LoggingMixin):
     is_single_threaded: bool = False
     is_production: bool = True
 
+    serve_logs: bool = True
+
+    RADICAL_QUEUE = "radical"
+
     def __init__(self, parallelism: int = PARALLELISM):
         super().__init__()
         self._job_id: str | None = None
@@ -162,6 +164,11 @@ class RadicalLocalExecutor(LoggingMixin):
     def running(self) -> set[TaskInstanceKey]:
         """Return running tasks from local and radical executor."""
         return self.local_executor.running.union(self.radical_executor.running)
+
+    @property
+    def slots_available(self) -> int:
+        """Number of new tasks this executor instance can accept."""
+        return self.local_executor.slots_available
 
     def queue_command(
         self,
@@ -183,7 +190,7 @@ class RadicalLocalExecutor(LoggingMixin):
         self, simple_task_instance: SimpleTaskInstance
     ) -> LocalExecutor | RadicalExecutor:
         logging.info(f"Routing to queue: {simple_task_instance.queue}")
-        if simple_task_instance.queue == "radical":
+        if simple_task_instance.queue == self.RADICAL_QUEUE:
             return self.radical_executor
         return self.local_executor
 
@@ -261,6 +268,27 @@ class RadicalLocalExecutor(LoggingMixin):
         cleared_events_from_radical = self.radical_executor.get_event_buffer(dag_ids)
 
         return {**cleared_events_from_local, **cleared_events_from_radical}
+
+    def try_adopt_task_instances(
+        self, tis: Sequence[TaskInstance]
+    ) -> Sequence[TaskInstance]:
+        """
+        Try to adopt running task instances that have been abandoned by a SchedulerJob dying.
+
+        Anything that is not adopted will be cleared by the scheduler (and then become eligible for
+        re-scheduling)
+
+        :return: any TaskInstances that were unable to be adopted
+        """
+        local_tis = [ti for ti in tis if ti.queue != self.RADICAL_QUEUE]
+        radical_tis = [ti for ti in tis if ti.queue == self.RADICAL_QUEUE]
+        return [
+            *self.local_executor.try_adopt_task_instances(local_tis),
+            *self.radical_executor.try_adopt_task_instances(radical_tis),
+        ]
+
+    def cleanup_stuck_queued_tasks(self, tis: list[TaskInstance]) -> list[str]:
+        raise NotImplementedError()
 
     @staticmethod
     def get_cli_commands() -> list:
