@@ -1,3 +1,5 @@
+import gmxapi
+import os
 from airflow import DAG
 from airflow.decorators import task
 from airflow.operators.bash import BashOperator
@@ -12,10 +14,78 @@ from airflowHPC.dags.tasks import (
     prepare_gmxapi_input,
     run_gmxapi_dataclass,
     update_gmxapi_input,
-    list_from_xcom,
 )
 
 NUM_SIMULATIONS = 4
+
+
+@task
+def plot_ramachandran_residue(tpr_file, xtc_file, resnum, output_file):
+    import matplotlib.pyplot as plt
+    import os
+    from airflowHPC.data import data_dir
+    from MDAnalysis import Universe
+
+    u = Universe(tpr_file, xtc_file)
+    selected_residues = u.select_atoms(f"resid {resnum}")
+
+    from MDAnalysis.analysis.dihedrals import Ramachandran
+
+    phi_psi_angles = Ramachandran(selected_residues).run()
+    phi_angles, psi_angles = phi_psi_angles.angles.T
+
+    plt.figure(figsize=(8, 8))
+    plt.scatter(phi_angles, psi_angles, alpha=0.7)
+    plt.title("Ramachandran Plot")
+    plt.xlabel("Phi (degrees)")
+    plt.ylabel("Psi (degrees)")
+    plt.grid(True)
+
+    plt.xlim([-180, 180])
+    plt.ylim([-180, 180])
+    plt.gca().set_aspect("equal", adjustable="box")
+
+    plt.axhline(0, color="black", linewidth=0.5)
+    plt.axvline(0, color="black", linewidth=0.5)
+
+    plot_dir = os.path.join(os.path.join(data_dir, "ala_tripeptide_remd"))
+    bg_image = plt.imread(
+        fname=os.path.join(plot_dir, "Ramachandran_plot_original_outlines.jpg")
+    )
+    imgplot = plt.imshow(bg_image, aspect="auto", extent=(-209, 195, -207, 190))
+
+    plt.show()
+    plt.savefig(output_file)
+
+
+@task
+def extract_edr_info(edr_file, field):
+    import pyedr
+
+    edr = pyedr.edr_to_dict(edr_file)
+    return edr[field].tolist()
+
+
+@task
+def plot_histograms(data_list, labels, hatch_list, xlabel, title, output_file):
+    import matplotlib.pyplot as plt
+
+    for data in data_list:
+        plt.hist(
+            data,
+            bins=5,
+            alpha=0.5,
+            hatch=hatch_list.pop(),
+            label=labels.pop(),
+            edgecolor="black",
+            density=True,
+        )
+    plt.xlabel(xlabel)
+    plt.ylabel("Density")
+    plt.title(title)
+    plt.legend()
+    plt.savefig(output_file)
+
 
 with DAG(
     "system_setup",
@@ -24,8 +94,7 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as system_setup:
-    system_setup.doc = """Reworking of gromacs tutorial for replica exchange MD.
-    Source: https://gitlab.com/gromacs/online-tutorials/tutorials-in-progress.git"""
+    system_setup.doc = """Initial setup of a system for replica exchange."""
 
     input_pdb = get_file.override(task_id="get_pdb")(
         input_dir="ala_tripeptide_remd", file_name="ala_tripeptide.pdb"
@@ -91,35 +160,6 @@ with DAG(
     )
 
 
-@task
-def extract_edr_info(edr_file, field):
-    import pyedr
-
-    edr = pyedr.edr_to_dict(edr_file)
-    return edr[field].tolist()
-
-
-@task
-def plot_histograms(data_list, labels, hatch_list, xlabel, title, output_file):
-    import matplotlib.pyplot as plt
-
-    for data in data_list:
-        plt.hist(
-            data,
-            bins=5,
-            alpha=0.5,
-            hatch=hatch_list.pop(),
-            label=labels.pop(),
-            edgecolor="black",
-            density=True,
-        )
-    plt.xlabel(xlabel)
-    plt.ylabel("Density")
-    plt.title(title)
-    plt.legend()
-    plt.savefig(output_file)
-
-
 with DAG(
     dag_id="equilibrate",
     start_date=timezone.utcnow(),
@@ -128,6 +168,8 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as equilibrate:
+    equilibrate.doc = """Equilibration of a system for replica exchange."""
+
     gro_equil = get_file.override(task_id="get_equil_gro")(
         input_dir="prep", file_name="nvt.gro", use_ref_data=False
     )
@@ -192,45 +234,6 @@ with DAG(
     )
 
 
-@task
-def plot_ramachandran_residue(tpr_file, xtc_file, resnum, output_file):
-    import matplotlib.pyplot as plt
-    import os
-    from airflowHPC.data import data_dir
-    from MDAnalysis import Universe
-
-    u = Universe(tpr_file, xtc_file)
-    selected_residues = u.select_atoms(f"resid {resnum}")
-
-    from MDAnalysis.analysis.dihedrals import Ramachandran
-
-    phi_psi_angles = Ramachandran(selected_residues).run()
-    phi_angles, psi_angles = phi_psi_angles.angles.T
-
-    plt.figure(figsize=(8, 8))
-    plt.scatter(phi_angles, psi_angles, alpha=0.7)
-    plt.title("Ramachandran Plot")
-    plt.xlabel("Phi (degrees)")
-    plt.ylabel("Psi (degrees)")
-    plt.grid(True)
-
-    plt.xlim([-180, 180])
-    plt.ylim([-180, 180])
-    plt.gca().set_aspect("equal", adjustable="box")
-
-    plt.axhline(0, color="black", linewidth=0.5)
-    plt.axvline(0, color="black", linewidth=0.5)
-
-    plot_dir = os.path.join(os.path.join(data_dir, "ala_tripeptide_remd"))
-    bg_image = plt.imread(
-        fname=os.path.join(plot_dir, "Ramachandran_plot_original_outlines.jpg")
-    )
-    imgplot = plt.imshow(bg_image, aspect="auto", extent=(-209, 195, -207, 190))
-
-    plt.show()
-    plt.savefig(output_file)
-
-
 with DAG(
     dag_id="simulate",
     start_date=timezone.utcnow(),
@@ -239,7 +242,7 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as simulate:
-    import gmxapi, os
+    simulate.doc = """Simulation of a system for replica exchange."""
 
     gro_sim = (
         get_file.override(task_id="get_sim_gro")
@@ -324,6 +327,9 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as coordinate:
+    coordinate.doc = """Reworking of gromacs tutorial for replica exchange MD.
+        Source: https://gitlab.com/gromacs/online-tutorials/tutorials-in-progress.git"""
+
     is_setup_done = get_file.override(task_id="is_setup_done")(
         input_dir="prep",
         file_name="nvt.gro",
