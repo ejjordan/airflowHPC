@@ -56,12 +56,13 @@ class RadicalExecutor(BaseExecutor):
         self._rp_keys = dict()
         self._rp_results = queue.Queue()
         self._rp_session = rp.Session()
-        self._rp_log = logging  # self._rp_session._log
+        self._rp_log = logging  # TODO: should this be self._rp_session._log instead?
         self._rp_pmgr = rp.PilotManager(session=self._rp_session)
         self._rp_tmgr = rp.TaskManager(session=self._rp_session)
         self._rp_env_name = "rp"
 
         self._rp_log.info(f"=== RadicalExecutor: start")
+        # TODO: make resource and runtime airflow configuration variables or expose in some way
         pd = rp.PilotDescription(
             {"resource": "local.localhost", "cores": self.parallelism, "runtime": 30}
         )
