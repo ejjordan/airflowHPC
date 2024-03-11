@@ -1,5 +1,5 @@
 from airflow.decorators import task
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 __all__ = (
     "get_file",
