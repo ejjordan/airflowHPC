@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import contextlib
+import sys
 from typing import TYPE_CHECKING, Any, Optional, Tuple, Sequence
 
 from airflow.executors.base_executor import PARALLELISM, BaseExecutor
@@ -58,22 +59,26 @@ class RadicalExecutor(BaseExecutor):
         self._rp_log = logging  # self._rp_session._log
         self._rp_pmgr = rp.PilotManager(session=self._rp_session)
         self._rp_tmgr = rp.TaskManager(session=self._rp_session)
+        self._rp_env_name = "rp"
 
         self._rp_log.info(f"=== RadicalExecutor: start")
         pd = rp.PilotDescription(
             {"resource": "local.localhost", "cores": self.parallelism, "runtime": 30}
         )
         pilot = self._rp_pmgr.submit_pilots(pd)
-        env_spec = {"type": "venv", "path": "/home/joe/pyenvs/py3.11", "setup": []}
-        pilot.prepare_env(env_name="local_venv", env_spec=env_spec)
+        if sys.prefix != sys.base_prefix:
+            # TODO: make this an airflow configuration variable
+            self._rp_env_name = "local_venv"
+            env_spec = {"type": "venv", "path": sys.prefix, "setup": []}
+            pilot.prepare_env(env_name=self._rp_env_name, env_spec=env_spec)
+
         self._rp_tmgr.add_pilots(pilot)
 
         def state_cb(task, state):
             tid = task.uid
-            self._rp_log.info("=== task state %s: %s" % (tid, state))
+            self._rp_log.info(f"=== {tid}: {state}")
             if state in rp.FINAL:
                 key = self._rp_keys.pop(tid)
-                self._rp_log.info("===      key   %s: %s" % (tid, key))
                 if state == rp.DONE:
                     self._rp_results.put((key, TaskInstanceState.FAILED))
                 else:
@@ -95,6 +100,9 @@ class RadicalExecutor(BaseExecutor):
 
         dag = get_dag(dag_id=key.dag_id, subdir=os.path.join("dags", key.dag_id))
         task = dag.get_task(key.task_id)
+        # Raise if the task does not have output_files - TODO: handle this in the task decorator
+        if "output_files" not in task.op_kwargs:
+            raise AttributeError(f"Task {task} does not have output_files")
         rp_out_paths = [
             os.path.join(task.op_kwargs["output_dir"], v)
             for k, v in task.op_kwargs["output_files"].items()
@@ -105,7 +113,7 @@ class RadicalExecutor(BaseExecutor):
         td.executable = command[0]
         td.arguments = command[1:]
         td.metadata = {"key": key}
-        td.named_env = "local_venv"
+        td.named_env = self._rp_env_name
         td.output_staging = [
             {
                 "source": f"task:///{out_path}",
@@ -240,12 +248,7 @@ class RadicalLocalExecutor(LoggingMixin):
         self.radical_executor.end()
 
     def has_task(self, task_instance: TaskInstance) -> bool:
-        """
-        Checks if a task is either queued or running in either local or radical executor.
-
-        :param task_instance: TaskInstance
-        :return: True if the task is known to this executor
-        """
+        """Checks if a task is either queued or running in either local or radical executor."""
         return self.local_executor.has_task(
             task_instance
         ) or self.radical_executor.has_task(task_instance)
@@ -258,12 +261,7 @@ class RadicalLocalExecutor(LoggingMixin):
     def get_event_buffer(
         self, dag_ids: list[str] | None = None
     ) -> dict[TaskInstanceKey, EventBufferValueType]:
-        """
-        Return and flush the event buffer from local and radical executor.
-
-        :param dag_ids: dag_ids to return events for, if None returns all
-        :return: a dict of events
-        """
+        """Return and flush the event buffer from local and radical executor."""
         cleared_events_from_local = self.local_executor.get_event_buffer(dag_ids)
         cleared_events_from_radical = self.radical_executor.get_event_buffer(dag_ids)
 
