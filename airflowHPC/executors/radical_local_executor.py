@@ -80,6 +80,9 @@ class RadicalExecutor(BaseExecutor):
             self._rp_log.info(f"=== {tid}: {state}")
             if state in rp.FINAL:
                 key = self._rp_keys.pop(tid)
+                self._rp_log.info(
+                    f"=== {tid}: DAG {key.dag_id}; Task {key.task_id}; {state}"
+                )
                 if state == rp.DONE:
                     self._rp_results.put((key, TaskInstanceState.FAILED))
                 else:
