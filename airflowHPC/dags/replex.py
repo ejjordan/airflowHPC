@@ -1,16 +1,15 @@
-import os
-import logging
 from typing import Dict
 from airflow import DAG
 from airflow.decorators import task, task_group
+from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from airflow.operators.python_operator import PythonOperator
 from airflow.utils import timezone
 from airflow import Dataset
 
 from airflowHPC.dags.tasks import (
     get_file,
     prepare_gmxapi_input,
+    list_from_xcom,
 )
 
 SHIFT_RANGE = 1
@@ -38,25 +37,12 @@ def check_condition(counter, num_iterations):
         return "run_complete"
 
 
-@task
-def run_complete():
-    import logging
-
-    logging.info("run_complete: done")
-    return "done"
-
-
 def get_dhdl(result):
     return {
         "simulation_id": result["inputs"]["simulation_id"],
         "dhdl": result["outputs"]["-dhdl"],
         "gro_path": result["outputs"]["-c"],
     }
-
-
-@task
-def forward_values(values):
-    return list(values)
 
 
 @task
@@ -520,17 +506,16 @@ with DAG(
     )
 
     expand_args = prepare_args_for_mdp_functions(counter, mode="initialize")
-    mdp_results = (
+    mdp_inputs = (
         initialize_MDP.override(task_id="intialize_mdp")
         .partial(template=input_mdp)
         .expand(expand_args=expand_args)
     )
-    mdp_list = mdp_results.map(lambda x: x)
-    mdp_list = forward_values(mdp_list)
+    mdp_inputs_list = list_from_xcom.override(task_id="get_mdp_input_list")(mdp_inputs)
 
     grompp_input_list = prepare_gmxapi_input(
         args=["grompp"],
-        input_files={"-f": mdp_list, "-c": input_gro, "-p": input_top},
+        input_files={"-f": mdp_inputs_list, "-c": input_gro, "-p": input_top},
         output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
         output_dir="outputs",
         counter=counter,
@@ -548,10 +533,9 @@ with DAG(
         task_id="trigger_self", trigger_dag_id="REXEE_continuation"
     )
     condition = check_condition(counter, NUM_ITERATIONS)
-    done = run_complete()
-    condition.set_upstream(dhdl_store)
-    trigger.set_upstream(condition)
-    done.set_upstream(condition)
+    initialize_complete = EmptyOperator(task_id="initialize_complete", trigger_rule="none_failed")
+
+    dhdl_store >> condition >> [trigger, initialize_complete]
 
 
 with DAG(
@@ -573,19 +557,20 @@ with DAG(
     counter = increment_counter("outputs")
     counter.set_upstream(swap_pattern)
     expand_args = prepare_args_for_mdp_functions(counter, mode="update")
-    mdp_results = (
+    mdp_updates = (
         update_MDP.override(task_id="update_mdp")
         .partial(iter_idx=counter)
         .expand(expand_args=expand_args)
     )
-    mdp_list = mdp_results.map(lambda x: x)
-    mdp_list = forward_values(mdp_list)
+    mdp_updates_list = list_from_xcom.override(task_id="get_mdp_update_list")(
+        mdp_updates
+    )
 
     # Run the next iteration
     input_top = get_file.override(task_id="get_top")(
         input_dir="ensemble_md", file_name="sys.top"
     )
-    next_step_input = prepare_next_step(input_top, mdp_list, swap_pattern, counter)
+    next_step_input = prepare_next_step(input_top, mdp_updates_list, swap_pattern, counter)
 
     dhdl_results = run_iteration(next_step_input)
     dhdl_dict = reduce_dhdl(dhdl_results, counter)
@@ -597,7 +582,6 @@ with DAG(
         task_id="trigger_self", trigger_dag_id="REXEE_continuation"
     )
     condition = check_condition(counter, NUM_ITERATIONS)
-    done = run_complete()
-    condition.set_upstream(dhdl_store)
-    trigger.set_upstream(condition)
-    done.set_upstream(condition)
+    run_complete = EmptyOperator(task_id="run_complete", trigger_rule="none_failed")
+
+    dhdl_store >> condition >> [trigger, run_complete]

@@ -1,6 +1,9 @@
-import importlib_metadata
+try:
+    from importlib.metadata import version as importlib_metadata_version
+except ImportError:
+    from importlib_metadata import version as importlib_metadata_version
 
-__version__ = importlib_metadata.version("airflow-provider-radical")
+__version__ = importlib_metadata_version("airflow-provider-radical")
 
 
 def get_provider_info():
@@ -21,6 +24,7 @@ def get_provider_info():
         ],
         "executors": [
             "airflowHPC.executors.radical_local_executor.RadicalLocalExecutor",
+            "airflowHPC.executors.radical_local_executor.RadicalExecutor",
             "airflowHPC.executors.zmq_sequential_executor.ZMQSequentialExecutor",
         ],
         "versions": [__version__],
