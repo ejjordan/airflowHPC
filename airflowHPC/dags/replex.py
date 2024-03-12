@@ -23,7 +23,7 @@ STATE_RANGES = [
     [2, 3, 4, 5, 6, 7],
     [3, 4, 5, 6, 7, 8],
 ]
-T = 300
+TEMPERATURE = 300
 
 
 @task.branch
@@ -243,7 +243,7 @@ def calc_prob_acc(swap, dhdl_files, states):
     new_state_0 = states[swap[1]] - shifts[swap[0]]
     new_state_1 = states[swap[0]] - shifts[swap[1]]
 
-    kT = 1.380649e-23 * 6.0221408e23 * T / 1000
+    kT = 1.380649e-23 * 6.0221408e23 * TEMPERATURE / 1000
     dU_0 = (dhdl_0[new_state_0] - dhdl_0[old_state_0]) / kT
     dU_1 = (dhdl_1[new_state_1] - dhdl_1[old_state_1]) / kT
     dU = dU_0 + dU_1
@@ -283,7 +283,6 @@ def get_swaps(iteration, dhdl_store):
     from itertools import combinations
     import numpy as np
     import logging
-    import random
     import json
     import copy
 
