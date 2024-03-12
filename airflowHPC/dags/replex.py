@@ -225,7 +225,7 @@ def calc_prob_acc(swap, dhdl_files, states):
     from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
 
     logging.info(dhdl_files)
-    shifts = [SHIFT_RANGE for i in range(NUM_SIMULATIONS)]
+    shifts = [SHIFT_RANGE] * NUM_SIMULATIONS
     f0, f1 = dhdl_files[swap[0]], dhdl_files[swap[1]]
     h0, h1 = get_headers(f0), get_headers(f1)
     data_0, data_1 = (
@@ -290,16 +290,21 @@ def get_swaps(iteration, dhdl_store):
         data = json.load(f)
 
     swap_list = []
-    swap_pattern = list(range(NUM_SIMULATIONS))
     state_ranges = copy.deepcopy(STATE_RANGES)
 
     dhdl_files = [
-        data["iteration"][str(iteration)][i]["dhdl"] for i in range(NUM_SIMULATIONS)
+        data["iteration"][str(iteration)][i]["dhdl"]
+        for i in range(len(data["iteration"][str(iteration)]))
     ]
     states = [
-        data["iteration"][str(iteration)][i]["state"] for i in range(NUM_SIMULATIONS)
+        data["iteration"][str(iteration)][i]["state"]
+        for i in range(len(data["iteration"][str(iteration)]))
     ]
-    sim_idx = list(range(NUM_SIMULATIONS))
+    sim_idx = [
+        data["iteration"][str(iteration)][i]["simulation_id"]
+        for i in range(len(data["iteration"][str(iteration)]))
+    ]
+    swap_pattern = copy.deepcopy(sim_idx)  # initialize with no swaps
 
     all_pairs = list(combinations(sim_idx, 2))
 
@@ -321,7 +326,7 @@ def get_swaps(iteration, dhdl_store):
 
     # Note that here we only implement the exhaustive exchange proposal scheme
     n_ex = int(np.floor(NUM_SIMULATIONS / 2))
-    shifts = [SHIFT_RANGE for i in range(NUM_SIMULATIONS)]
+    shifts = [SHIFT_RANGE] * NUM_SIMULATIONS
     for i in range(n_ex):
         if i >= 1:
             swappables = [
