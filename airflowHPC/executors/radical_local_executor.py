@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import contextlib
 import sys
+import time
 from typing import TYPE_CHECKING, Any, Optional, Tuple, Sequence
 
 from airflow.executors.base_executor import PARALLELISM, BaseExecutor
@@ -53,6 +54,7 @@ class RadicalExecutor(BaseExecutor):
 
     def start(self) -> None:
         """Start the executor."""
+        tic = time.perf_counter()
         self._rp_keys = dict()
         self._rp_results = queue.Queue()
         self._rp_session = rp.Session()
@@ -74,6 +76,8 @@ class RadicalExecutor(BaseExecutor):
             pilot.prepare_env(env_name=self._rp_env_name, env_spec=env_spec)
 
         self._rp_tmgr.add_pilots(pilot)
+        toc = time.perf_counter()
+        self._rp_log.info(f"=== RadicalExecutor: start took {toc - tic:0.4f} seconds")
 
         def state_cb(task, state):
             tid = task.uid

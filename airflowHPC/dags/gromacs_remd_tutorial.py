@@ -1,4 +1,3 @@
-import gmxapi
 import os
 from airflow import DAG
 from airflow.decorators import task
@@ -15,6 +14,7 @@ from airflowHPC.dags.tasks import (
     run_gmxapi_dataclass,
     update_gmxapi_input,
 )
+from gmxapi.commandline import cli_executable
 
 NUM_SIMULATIONS = 4
 
@@ -284,7 +284,7 @@ with DAG(
         input_data=grompp_input_list_sim
     )
     mdrun_sim = BashOperator(
-        bash_command=f"mpirun -np 4 {gmxapi.commandline.cli_executable()} mdrun -replex 100 -multidir sim/step_0/sim_[0123] -s sim.tpr",
+        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir sim/step_0/sim_[0123] -s sim.tpr",
         task_id="mdrun_sim",
         cwd=os.path.curdir,
     )
