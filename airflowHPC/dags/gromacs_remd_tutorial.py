@@ -87,79 +87,7 @@ def plot_histograms(data_list, labels, hatch_list, xlabel, title, output_file):
     plt.savefig(output_file)
 
 
-with DAG(
-    "system_setup",
-    start_date=timezone.utcnow(),
-    catchup=False,
-    render_template_as_native_obj=True,
-    max_active_runs=1,
-) as system_setup:
-    system_setup.doc = """Initial setup of a system for replica exchange."""
-
-    input_pdb = get_file.override(task_id="get_pdb")(
-        input_dir="ala_tripeptide_remd", file_name="ala_tripeptide.pdb"
-    )
-    prep_output_dir = "prep"
-    pdb2gmx = run_gmxapi.override(task_id="pdb2gmx")(
-        args=["pdb2gmx", "-ff", "charmm27", "-water", "tip3p"],
-        input_files={"-f": input_pdb},
-        output_files={"-o": "alanine.gro", "-p": "topol.top", "-i": "posre.itp"},
-        output_dir=prep_output_dir,
-    )
-    editconf = run_gmxapi.override(task_id="editconf")(
-        args=["editconf", "-c", "-box", "3", "3", "3"],
-        input_files={"-f": pdb2gmx["-o"]},
-        output_files={"-o": "alanine_box.gro"},
-        output_dir=prep_output_dir,
-    )
-    # gmx solvate does not allow specifying different file names for input and output top files.
-    # Here we rely on the fact that solvate overwrites the input top file with the solvated top file.
-    # Thus, after solvate, pdb2gmx["-p"] is what should be solvate["-p"].
-    solvate = run_gmxapi.override(task_id="solvate")(
-        args=["solvate"],
-        input_files={"-cp": editconf["-o"], "-cs": "spc216.gro", "-p": pdb2gmx["-p"]},
-        output_files={"-o": "alanine_solv.gro"},
-        output_dir=prep_output_dir,
-    )
-    mdp_json_em = get_file.override(task_id="get_min_mdp_json")(
-        input_dir="ala_tripeptide_remd", file_name="min.json"
-    )
-    mdp_em = update_write_mdp_json_as_mdp_from_file(mdp_json_file_path=mdp_json_em)
-    grompp_em = run_gmxapi.override(task_id="grompp_em")(
-        args=["grompp"],
-        input_files={"-f": mdp_em, "-c": solvate["-o"], "-p": pdb2gmx["-p"]},
-        output_files={"-o": "em.tpr"},
-        output_dir=prep_output_dir,
-    )
-    mdrun_em = run_gmxapi.override(task_id="mdrun_em")(
-        args=["mdrun", "-v", "-deffnm", "em"],
-        input_files={"-s": grompp_em["-o"]},
-        output_files={"-c": "em.gro"},
-        output_dir=prep_output_dir,
-    )
-    mdp_json_nvt = get_file.override(task_id="get_nvt_mdp_json")(
-        input_dir="ala_tripeptide_remd", file_name="nvt.json"
-    )
-    mdp_nvt = update_write_mdp_json_as_mdp_from_file(mdp_json_file_path=mdp_json_nvt)
-    grompp_nvt = run_gmxapi.override(task_id="grompp_nvt")(
-        args=["grompp"],
-        input_files={
-            "-f": mdp_nvt,
-            "-c": mdrun_em["-c"],
-            "-r": mdrun_em["-c"],
-            "-p": pdb2gmx["-p"],
-        },
-        output_files={"-o": "nvt.tpr"},
-        output_dir=prep_output_dir,
-    )
-    mdrun_nvt = run_gmxapi.override(task_id="mdrun_nvt")(
-        args=["mdrun", "-v", "-deffnm", "nvt"],
-        input_files={"-s": grompp_nvt["-o"]},
-        output_files={"-c": "nvt.gro"},
-        output_dir=prep_output_dir,
-    )
-
-
+"""
 with DAG(
     dag_id="equilibrate",
     start_date=timezone.utcnow(),
@@ -168,7 +96,7 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as equilibrate:
-    equilibrate.doc = """Equilibration of a system for replica exchange."""
+    
 
     gro_equil = get_file.override(task_id="get_equil_gro")(
         input_dir="prep", file_name="nvt.gro", use_ref_data=False
@@ -242,7 +170,6 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
 ) as simulate:
-    simulate.doc = """Simulation of a system for replica exchange."""
 
     gro_sim = (
         get_file.override(task_id="get_sim_gro")
@@ -317,7 +244,7 @@ with DAG(
     )
     grompp_sim >> mdrun_sim >> potential_energy_list_sim >> hist_sim
     mdrun_sim >> (get_final_tpr, get_final_xtc) >> plot_ramachandran
-
+"""
 
 with DAG(
     dag_id="coordinate",
@@ -326,6 +253,7 @@ with DAG(
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
+    params={"num_simulations": 4},
 ) as coordinate:
     coordinate.doc = """Reworking of gromacs tutorial for replica exchange MD.
         Source: https://gitlab.com/gromacs/online-tutorials/tutorials-in-progress.git"""
@@ -357,7 +285,7 @@ with DAG(
             use_ref_data=False,
             check_exists=True,
         )
-        .expand(input_dir=[f"equil/step_0/sim_{i}" for i in range(NUM_SIMULATIONS)])
+        .expand(input_dir=[f"equil/step_0/sim_{i}" for i in range(coordinate.params.get_param("num_simulations").value)])
     )
     trigger_equil = TriggerDagRunOperator(
         task_id="trigger_equil",

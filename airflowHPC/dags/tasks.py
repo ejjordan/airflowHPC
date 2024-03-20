@@ -8,6 +8,7 @@ __all__ = (
     "update_gmxapi_input",
     "prepare_gmxapi_input",
     "branch_task",
+    "branch_task_template",
 )
 
 
@@ -43,11 +44,12 @@ def get_file(
             return True
         else:
             return False
-    assert os.path.exists(file_to_get)
+    if not os.path.exists(file_to_get):
+        raise FileNotFoundError(f"File {file_to_get} does not exist")
     return file_to_get
 
 
-def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: str):
+def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None):
     import os
     import gmxapi
     import logging
@@ -61,7 +63,7 @@ def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: s
     cwd = os.getcwd()
     os.chdir(out_path)
     gmx = gmxapi.commandline_operation(
-        gmxapi.commandline.cli_executable(), args, input_files, output_files_paths
+        gmxapi.commandline.cli_executable(), args, input_files, output_files_paths, stdin
     )
     gmx.run()
     logging.info(gmx.output.stderr.result())
@@ -74,8 +76,8 @@ def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: s
 
 
 @task(multiple_outputs=True, queue="radical")
-def run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: str):
-    gmx = _run_gmxapi(args, input_files, output_files, output_dir)
+def run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None):
+    gmx = _run_gmxapi(args, input_files, output_files, output_dir, stdin)
     return {f"{key}": f"{gmx.output.file[key].result()}" for key in output_files.keys()}
 
 
@@ -178,6 +180,38 @@ def branch_task(
         return task_if_false
 
 
+@task.branch
+def branch_task_template(
+    statement: str, task_if_true: str, task_if_false: str
+) -> str:
+    """
+    Handle branching based on a jinja templated statement.
+    This is potentially dangerous as it can execute arbitrary python code,
+    so we check that there are no python identifiers in the statement.
+    This is not foolproof, but it should catch most cases.
+    """
+    if any([word.isidentifier() for word in statement.split()]):
+        raise ValueError("Template statement potentially contains python code")
+    if len(statement.split()) > 3:
+        raise ValueError("Template statement should be a simple comparison")
+    truth_value = eval(statement)
+
+    if truth_value:
+        return task_if_true
+    else:
+        return task_if_false
+
+
 @task
 def list_from_xcom(values):
     return list(values)
+
+
+@task
+def unpack_ref_t(**context):
+    """
+    It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
+    Thus, this task handles dynamic sizing of the ref_t_list.
+    """
+    temps_list = context["task"].render_template("{{ params.ref_t_list | list}}", context)
+    return list([{"ref_t": ref_t} for ref_t in temps_list])
