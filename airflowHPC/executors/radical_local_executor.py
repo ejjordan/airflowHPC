@@ -126,7 +126,7 @@ class RadicalExecutor(BaseExecutor):
             {
                 "source": f"task:///{out_path}",
                 "target": f"client:///{out_path}",
-                "action": rp.COPY,
+                "action": rp.TRANSFER,
             }
             for out_path in rp_out_paths
         ]

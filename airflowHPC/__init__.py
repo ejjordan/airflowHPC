@@ -1,11 +1,11 @@
 import importlib.metadata
 
-__version__ = importlib.metadata.version("airflow-provider-radical")
+__version__ = importlib.metadata.version("apache-airflow-provider-radical")
 
 
 def get_provider_info():
     return {
-        "package-name": "airflow-provider-radical",
+        "package-name": "apache-airflow-provider-radical",
         "name": "AirflowHPC",
         "description": "AirflowHPC is a provider package for Airflow",
         "operators": [
