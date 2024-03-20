@@ -235,14 +235,14 @@ with DAG(
 
 
 with DAG(
-    dag_id="simulate",
+    dag_id="simulate_ala",
     start_date=timezone.utcnow(),
     schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
-) as simulate:
-    simulate.doc = """Simulation of a system for replica exchange."""
+) as simulate_ala:
+    simulate_ala.doc = """Simulation of a system for replica exchange."""
 
     gro_sim = (
         get_file.override(task_id="get_sim_gro")
@@ -381,7 +381,7 @@ with DAG(
     )
     trigger_sim = TriggerDagRunOperator(
         task_id="trigger_sim",
-        trigger_dag_id="simulate",
+        trigger_dag_id="simulate_ala",
         wait_for_completion=True,
         poke_interval=10,
         trigger_rule="none_failed",
