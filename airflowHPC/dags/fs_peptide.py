@@ -1,6 +1,7 @@
 import os
 from airflow import DAG
 from airflow.decorators import task
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflowHPC.dags.tasks import run_if_needed
 
@@ -70,7 +71,7 @@ with DAG(
     npt_params = {
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "npt.json"},
-            "gro": {"directory": "npt", "filename": "nvt.gro"},
+            "gro": {"directory": "nvt_equil", "filename": "nvt.gro"},
             "top": {"directory": "prep", "filename": "topol.top"},
         },
         "ref_t_list": "{{ params.ref_t_list }}",
@@ -78,7 +79,7 @@ with DAG(
         "output_dir": "npt_equil",
         "expected_output": "npt.gro",
     }
-    npt_equil = run_if_needed.override(group_id="npt_equil")("npt_equil", nvt_params)
+    npt_equil = run_if_needed.override(group_id="npt_equil")("npt_equil", npt_params)
 
     sim_params = {
         "inputs": {
@@ -92,12 +93,19 @@ with DAG(
         "output_dir": "sim",
         "expected_output": "sim.gro",
     }
-    verify_files = verify_files.override(task_id="verify_files")(
+    verify_files = verify_files.override(task_id="check_sim_done")(
         input_dir="sim",
         filename="sim.gro",
         ref_t_list="{{ params.ref_t_list }}",
         step_number=0,
     )
-    simulate = run_if_needed.override(group_id="simulate")("simulate", sim_params)
+    simulate = TriggerDagRunOperator(
+        task_id=f"trigger_simulate",
+        trigger_dag_id="simulate",
+        wait_for_completion=True,
+        poke_interval=10,
+        trigger_rule="none_failed",
+        params=sim_params,
+    )
 
     setup >> minimize >> nvt_equil >> npt_equil >> verify_files >> simulate

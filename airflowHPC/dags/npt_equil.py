@@ -21,7 +21,7 @@ with DAG(
         "inputs": Param(
             {
                 "mdp": {"directory": "mdp", "filename": "npt.json"},
-                "gro": {"directory": "em", "filename": "em.gro"},
+                "gro": {"directory": "nvt_equil", "filename": "nvt.gro"},
                 "top": {"directory": "prep", "filename": "topol.top"},
             },
             type=["object", "null"],
