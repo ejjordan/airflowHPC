@@ -153,7 +153,8 @@ with DAG(
     )
     # If this task hangs try `export AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER=True`.
     mdrun_sim = BashOperator(
-        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir sim/step_0/sim_[0123] -s sim.tpr -deffnm sim",
+        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir "
+        + "{{ params.output_dir }}/step_{{ params.step_number }}/sim_[0123] -s sim.tpr -deffnm sim",
         task_id="mdrun_sim",
         cwd=os.path.curdir,
     )

@@ -1,14 +1,13 @@
 import os
 from airflow import DAG
 from airflow.decorators import task
-from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
-from airflowHPC.dags.tasks import run_if_needed
+from airflowHPC.dags.tasks import run_if_needed, run_if_false
 
 
-@task.short_circuit(trigger_rule="none_failed")
+@task(trigger_rule="none_failed")
 def verify_files(input_dir, filename, ref_t_list, step_number):
-    """Workaround for simulation step where multiple files are expected."""
+    """Workaround for steps where multiple files are expected."""
     import logging
 
     input_files = [
@@ -18,8 +17,8 @@ def verify_files(input_dir, filename, ref_t_list, step_number):
     for file in input_files:
         logging.info(f"Checking if {file} exists: {os.path.exists(file)}")
         if not os.path.exists(file):
-            return True
-    return False
+            return False
+    return True
 
 
 with DAG(
@@ -29,13 +28,13 @@ with DAG(
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
-    params={"ref_t_list": [300, 310, 320, 330]},
+    params={"ref_t_list": [300, 310, 320, 330], "output_dir": "fs_peptide"},
 ) as fs_peptide:
     fs_peptide.doc = """Replica exchange simulation of a peptide in water."""
 
     setup_params = {
         "inputs": {"pdb": {"directory": "fs_peptide", "filename": "fs.pdb"}},
-        "output_dir": "prep",
+        "output_dir": "{{ params.output_dir }}/prep",
         "box_size": 4,
         "force_field": "amber99sb-ildn",
         "water_model": "tip3p",
@@ -49,10 +48,16 @@ with DAG(
     minimize_params = {
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "min.json"},
-            "gro": {"directory": "prep", "filename": "system_prepared.gro"},
-            "top": {"directory": "prep", "filename": "topol.top"},
+            "gro": {
+                "directory": "{{ params.output_dir }}/prep",
+                "filename": "system_prepared.gro",
+            },
+            "top": {
+                "directory": "{{ params.output_dir }}/prep",
+                "filename": "topol.top",
+            },
         },
-        "output_dir": "em",
+        "output_dir": "{{ params.output_dir }}/em",
         "expected_output": "em.gro",
     }
     minimize = run_if_needed.override(group_id="minimize")("minimize", minimize_params)
@@ -60,10 +65,13 @@ with DAG(
     nvt_params = {
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "nvt.json"},
-            "gro": {"directory": "em", "filename": "em.gro"},
-            "top": {"directory": "prep", "filename": "topol.top"},
+            "gro": {"directory": "{{ params.output_dir }}/em", "filename": "em.gro"},
+            "top": {
+                "directory": "{{ params.output_dir }}/prep",
+                "filename": "topol.top",
+            },
         },
-        "output_dir": "nvt_equil",
+        "output_dir": "{{ params.output_dir }}/nvt_equil",
         "expected_output": "nvt.gro",
     }
     nvt_equil = run_if_needed.override(group_id="nvt_equil")("nvt_equil", nvt_params)
@@ -71,41 +79,67 @@ with DAG(
     npt_params = {
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "npt.json"},
-            "gro": {"directory": "nvt_equil", "filename": "nvt.gro"},
-            "top": {"directory": "prep", "filename": "topol.top"},
+            "gro": {
+                "directory": "{{ params.output_dir }}/nvt_equil",
+                "filename": "nvt.gro",
+            },
+            "top": {
+                "directory": "{{ params.output_dir }}/prep",
+                "filename": "topol.top",
+            },
         },
         "ref_t_list": "{{ params.ref_t_list }}",
         "step_number": 0,
-        "output_dir": "npt_equil",
+        "output_dir": "{{ params.output_dir }}/npt_equil",
         "expected_output": "npt.gro",
     }
-    npt_equil = run_if_needed.override(group_id="npt_equil")("npt_equil", npt_params)
+    npt_equil_has_run = verify_files.override(task_id="npt_equil_has_run")(
+        input_dir="{{ params.output_dir }}/npt_equil",
+        filename="npt.gro",
+        ref_t_list="{{ params.ref_t_list }}",
+        step_number=0,
+    )
+    npt_equil = run_if_false.override(group_id="npt_equil")(
+        "npt_equil", npt_params, npt_equil_has_run
+    )
 
     sim_params = {
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "sim.json"},
-            "gro": {"directory": "npt_equil", "filename": "npt.gro"},
-            "cpt": {"directory": "npt_equil", "filename": "npt.cpt"},
-            "top": {"directory": "prep", "filename": "topol.top"},
+            "gro": {
+                "directory": "{{ params.output_dir }}/npt_equil",
+                "filename": "npt.gro",
+            },
+            "cpt": {
+                "directory": "{{ params.output_dir }}/npt_equil",
+                "filename": "npt.cpt",
+            },
+            "top": {
+                "directory": "{{ params.output_dir }}/prep",
+                "filename": "topol.top",
+            },
         },
         "ref_t_list": "{{ params.ref_t_list }}",
         "step_number": 0,
-        "output_dir": "sim",
+        "output_dir": "{{ params.output_dir }}/sim",
         "expected_output": "sim.gro",
     }
-    verify_files = verify_files.override(task_id="check_sim_done")(
-        input_dir="sim",
+    sim_has_run = verify_files.override(task_id="sim_has_run")(
+        input_dir="{{ params.output_dir }}/sim",
         filename="sim.gro",
         ref_t_list="{{ params.ref_t_list }}",
         step_number=0,
     )
-    simulate = TriggerDagRunOperator(
-        task_id=f"trigger_simulate",
-        trigger_dag_id="simulate",
-        wait_for_completion=True,
-        poke_interval=10,
-        trigger_rule="none_failed",
-        params=sim_params,
+    simulate = run_if_false.override(group_id="simulate")(
+        "simulate", sim_params, sim_has_run
     )
 
-    setup >> minimize >> nvt_equil >> npt_equil >> verify_files >> simulate
+    (
+        setup
+        >> minimize
+        >> nvt_equil
+        >> npt_equil_has_run
+        >> npt_equil
+        >> sim_has_run
+        >> simulate
+    )

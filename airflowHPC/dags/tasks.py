@@ -11,6 +11,8 @@ __all__ = (
     "prepare_gmxapi_input",
     "branch_task",
     "branch_task_template",
+    "run_if_needed",
+    "run_if_false",
 )
 
 
@@ -241,7 +243,7 @@ def run_if_needed(dag_id, dag_params):
         wait_for_completion=True,
         poke_interval=10,
         trigger_rule="none_failed",
-        params=dag_params,
+        conf=dag_params,
     )
     dag_done = EmptyOperator(task_id=f"{dag_id}_done", trigger_rule="none_failed")
     dag_done_branch = branch_task.override(task_id=f"{dag_id}_done_branch")(
@@ -250,3 +252,22 @@ def run_if_needed(dag_id, dag_params):
         task_if_false=trigger_dag.task_id,
     )
     is_dag_done >> dag_done_branch >> [trigger_dag, dag_done]
+
+
+@task_group
+def run_if_false(dag_id, dag_params, truth_value: bool):
+    trigger_dag = TriggerDagRunOperator(
+        task_id=f"trigger_{dag_id}",
+        trigger_dag_id=dag_id,
+        wait_for_completion=True,
+        poke_interval=10,
+        trigger_rule="none_failed",
+        conf=dag_params,
+    )
+    dag_done = EmptyOperator(task_id=f"{dag_id}_done", trigger_rule="none_failed")
+    dag_done_branch = branch_task.override(task_id=f"{dag_id}_done_branch")(
+        truth_value=truth_value,
+        task_if_true=dag_done.task_id,
+        task_if_false=trigger_dag.task_id,
+    )
+    dag_done_branch >> [trigger_dag, dag_done]
