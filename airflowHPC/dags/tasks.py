@@ -85,7 +85,7 @@ def _run_gmxapi(
     return gmx
 
 
-@task(multiple_outputs=True, queue="radical")
+@task(multiple_outputs=True)
 def run_gmxapi(
     args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None
 ):

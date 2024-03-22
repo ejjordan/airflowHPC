@@ -1,14 +1,14 @@
 from airflow import DAG
 from airflow.utils import timezone
 from airflowHPC.dags.tasks import get_file, run_gmxapi
-
+from airflowHPC.operators.radical_gmxapi_bash_operator import RadicalGmxapiBashOperator
 
 with DAG(
-    "run_gmxapi",
+    "run_gmxapi_mpi",
     start_date=timezone.utcnow(),
     catchup=False,
     params={"output_dir": "outputs"},
-) as dag:
+) as run_gmxapi_mpi:
     input_gro = get_file.override(task_id="get_gro")(
         input_dir="ensemble_md", file_name="sys.gro"
     )
@@ -24,9 +24,19 @@ with DAG(
         output_files={"-o": "run.tpr"},
         output_dir="{{ params.output_dir }}",
     )
-    mdrun_result = run_gmxapi.override(task_id="mdrun")(
-        args=["mdrun"],
+
+    mdrun_result = RadicalGmxapiBashOperator(
+        task_id="mdrun",
+        arguments=["mdrun"],
         input_files={"-s": grompp_result["-o"]},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
         output_dir="{{ params.output_dir }}",
+        executor_config={
+            "RadicalExecutor": {
+                "use_mpi": True,
+                "ranks": 4,
+                "cores_per_rank": 2,
+            }
+        },
     )
+    grompp_result >> mdrun_result

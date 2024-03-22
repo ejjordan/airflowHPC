@@ -4,6 +4,7 @@ from airflow.operators.bash import BashOperator
 from airflow.utils import timezone
 from airflow.models.param import Param
 from airflowHPC.dags.tasks import get_file, run_gmxapi, branch_task_template
+from airflowHPC.operators.radical_gmxapi_bash_operator import RadicalGmxapiBashOperator
 from airflowHPC.utils.mdp2json import write_mdp_json_as_mdp
 
 
@@ -94,8 +95,9 @@ with DAG(
         output_files={"-o": "ions.tpr"},
         output_dir="{{ params.output_dir }}",
     )
-    genion = run_gmxapi.override(task_id="genion")(
-        args=[
+    genion = RadicalGmxapiBashOperator(
+        task_id="genion",
+        arguments=[
             "genion",
             "-neutral",
             "-conc",

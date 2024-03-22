@@ -1,4 +1,5 @@
 from __future__ import annotations
+import radical.pilot as rp
 
 import queue
 import contextlib
@@ -11,7 +12,6 @@ from airflow.executors.local_executor import LocalExecutor
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
 
-import radical.pilot as rp
 import logging
 
 
@@ -106,14 +106,21 @@ class RadicalExecutor(BaseExecutor):
 
         self._rp_log.info(f"=== execute_async {key}: {command}")
 
+        from airflow.models.taskinstance import TaskInstance as TI
+
         dag = get_dag(dag_id=key.dag_id, subdir=os.path.join("dags", key.dag_id))
         task = dag.get_task(key.task_id)
+        ti = TI(task, run_id=key.run_id)
+        context = ti.get_template_context()
+
         # Raise if the task does not have output_files - TODO: handle this in the task decorator
-        if "output_files" not in task.op_kwargs:
+        if not hasattr(task, "output_files"):
             raise AttributeError(f"Task {task} does not have output_files")
         rp_out_paths = [
-            os.path.join(task.op_kwargs["output_dir"], v)
-            for k, v in task.op_kwargs["output_files"].items()
+            context["task"].render_template(
+                os.path.join(task.output_dir, out_file), context
+            )
+            for out_file in task.output_files
         ]
 
         self.validate_airflow_tasks_run_command(command)
@@ -130,7 +137,11 @@ class RadicalExecutor(BaseExecutor):
             }
             for out_path in rp_out_paths
         ]
+        if "RadicalExecutor" in ti.executor_config:
+            for key, value in ti.executor_config["RadicalExecutor"].items():
+                setattr(td, key, value)
         logging.info(f"=== output_staging: {td.output_staging}")
+        logging.info(f"task: {td.as_dict()}")
 
         task = self._rp_tmgr.submit_tasks(td)
 
