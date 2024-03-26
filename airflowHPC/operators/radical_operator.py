@@ -11,15 +11,16 @@ from airflow.decorators.base import (
 
 
 class RadicalOperator(PythonOperator):
-    def __init__(self, *, python_callable, op_args, op_kwargs, **kwargs) -> None:
+    def __init__(self, **kwargs) -> None:
         super().__init__(
-            python_callable=python_callable,
-            op_args=op_args,
-            op_kwargs=op_kwargs,
+            # python_callable=python_callable,
+            # op_args=op_args,
+            # op_kwargs=op_kwargs,
             **kwargs,
         )
         # self.radical_task = self.radical_task()
 
+    """
     def radical_task(self) -> Any:
         import radical.pilot as rp
         import radical.utils as ru
@@ -33,6 +34,7 @@ class RadicalOperator(PythonOperator):
         )
         # self.log.info(f"Radical task: {task}")
         return task
+        """
 
 
 class _RadicalDecoratedOperator(DecoratedOperator, RadicalOperator):

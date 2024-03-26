@@ -1,6 +1,14 @@
 from airflow import DAG
 from airflow.utils import timezone
-from airflowHPC.dags.tasks import get_file, run_gmxapi
+from airflowHPC.dags.tasks import get_file, run_gmxapi, _run_gmxapi
+from airflowHPC.operators.radical_operator import RadicalOperator
+
+
+def _gmxapi(
+    args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None
+):
+    gmx = _run_gmxapi(args, input_files, output_files, output_dir, stdin)
+    return {f"{key}": f"{gmx.output.file[key].result()}" for key in output_files.keys()}
 
 
 with DAG(
@@ -24,9 +32,29 @@ with DAG(
         output_files={"-o": "run.tpr"},
         output_dir="{{ params.output_dir }}",
     )
+    mdrun_result = RadicalOperator(
+        task_id="mdrun",
+        python_callable=_gmxapi,
+        op_args=["mdrun"],
+        op_kwargs={
+            "input_files": {"-s": grompp_result["-o"]},
+            "output_files": {"-c": "result.gro", "-x": "result.xtc"},
+            "output_dir": "{{ params.output_dir }}",
+        },
+        queue="radical",
+        executor_config={
+            "RadicalExecutor": {
+                "use_mpi": True,
+                "ranks": 1,
+                "cores_per_rank": 2,
+            }
+        },
+    )
+    """
     mdrun_result = run_gmxapi.override(task_id="mdrun")(
         args=["mdrun"],
         input_files={"-s": grompp_result["-o"]},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
         output_dir="{{ params.output_dir }}",
     )
+    """

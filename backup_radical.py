@@ -1,33 +1,23 @@
 from __future__ import annotations
 
-# import radical.pilot as rp
-from radical.pilot import (
-    PilotDescription,
-    PilotManager,
-    TaskDescription,
-    TaskManager,
-    Session,
-)
-from radical.pilot.states import DONE, FAILED, FINAL
-from radical.pilot.constants import TRANSFER
-
 import queue
 import contextlib
-import sys
-import time
-from typing import TYPE_CHECKING, Any, Optional, Tuple, Sequence
+from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from airflow.executors.base_executor import PARALLELISM, BaseExecutor
 from airflow.executors.local_executor import LocalExecutor
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
 
+import radical.utils as ru
+import radical.pilot as rp
 import logging
 
 
 if TYPE_CHECKING:
     from airflow.executors.base_executor import CommandType
     from airflow.models.taskinstance import (
+        TaskInstanceStateType,
         SimpleTaskInstance,
         TaskInstance,
     )
@@ -46,7 +36,7 @@ if TYPE_CHECKING:
 
 
 class RadicalExecutor(BaseExecutor):
-    is_local: bool = False
+    is_local: bool = True
     supports_pickling: bool = False
 
     serve_logs: bool = True
@@ -64,73 +54,34 @@ class RadicalExecutor(BaseExecutor):
 
     def start(self) -> None:
         """Start the executor."""
-        tic = time.perf_counter()
         self._rp_keys = dict()
         self._rp_results = queue.Queue()
-        self._rp_session = Session()
-        # self._rp_log = logging  # TODO: should this be self._rp_session._log instead?
-        self._rp_pmgr = PilotManager(session=self._rp_session)
-        self._rp_tmgr = TaskManager(session=self._rp_session)
-        self._rp_env_name = "rp"
+        self._rp_session = rp.Session()
+        self._rp_log = logging  # self._rp_session._log
+        self._rp_pmgr = rp.PilotManager(session=self._rp_session)
+        self._rp_tmgr = rp.TaskManager(session=self._rp_session)
 
-        self.log.info(f"=== RadicalExecutor: start")
-        # TODO: make resource and runtime airflow configuration variables or expose in some way
-        pd = PilotDescription(
+        self._rp_log.info(f"=== RadicalExecutor: start")
+        pd = rp.PilotDescription(
             {"resource": "local.localhost", "cores": self.parallelism, "runtime": 30}
         )
         pilot = self._rp_pmgr.submit_pilots(pd)
-        if sys.prefix != sys.base_prefix:
-            # TODO: make this an airflow configuration variable
-            self._rp_env_name = "local_venv"
-            env_spec = {"type": "venv", "path": sys.prefix, "setup": []}
-            pilot.prepare_env(env_name=self._rp_env_name, env_spec=env_spec)
-
+        env_spec = {"type": "venv", "path": "/home/joe/pyenvs/py3.11", "setup": []}
+        pilot.prepare_env(env_name="local_venv", env_spec=env_spec)
         self._rp_tmgr.add_pilots(pilot)
-        toc = time.perf_counter()
-        self.log.info(f"=== RadicalExecutor: start took {toc - tic:0.4f} seconds")
 
         def state_cb(task, state):
             tid = task.uid
-            # self.log.info(f"=== {tid}: {state}")
-            if state in FINAL:
+            self._rp_log.info("=== task state %s: %s" % (tid, state))
+            if state in rp.FINAL:
                 key = self._rp_keys.pop(tid)
-                self.log.info(
-                    f"=== {tid}: DAG {key.dag_id}; Task {key.task_id}; {state}"
-                )
-                if state == DONE:
-                    self._rp_results.put((key, TaskInstanceState.SUCCESS))
+                self._rp_log.info("===      key   %s: %s" % (tid, key))
+                if state == rp.DONE:
+                    self._rp_results.put((key, TaskInstanceState.FAILED))
                 else:
-                    self.fail(key)
-                    # self._rp_results.put((key, TaskInstanceState.FAILED))
+                    self._rp_results.put((key, TaskInstanceState.SUCCESS))
 
         self._rp_tmgr.register_callback(state_cb)
-
-    def _process_tasks(self, task_tuples: list[TaskTuple]) -> None:
-        for key, command, queue, executor_config in task_tuples:
-            del self.queued_tasks[key]
-            self.execute_async(
-                key=key, command=command, queue=queue, executor_config=executor_config
-            )
-            self.running.add(key)
-
-    def queue_command(
-        self,
-        task_instance: TaskInstance,
-        command: CommandType,
-        priority: int = 1,
-        queue: str | None = None,
-    ):
-        """Queues command to task."""
-        if task_instance.key not in self.queued_tasks:
-            self.log.info("%s Adding to queue: %s", self.__class__.__name__, command)
-            self.queued_tasks[task_instance.key] = (
-                command,
-                priority,
-                queue,
-                task_instance,
-            )
-        else:
-            self.log.error("could not queue task %s", task_instance.key)
 
     def execute_async(
         self,
@@ -139,82 +90,32 @@ class RadicalExecutor(BaseExecutor):
         queue: str | None = None,
         executor_config: Any | None = None,
     ) -> None:
-        from airflow.utils.cli import get_dag
-        import os
-
-        # self.log.info(f"=== execute_async {key}: {command}")
-        self.log.info("%s running %s", self.__class__.__name__, command)
-
-        from airflow.models.taskinstance import TaskInstance as TI
-
-        dag = get_dag(dag_id=key.dag_id, subdir=os.path.join("dags", key.dag_id))
-        task = dag.get_task(key.task_id)
-        ti = TI(task, run_id=key.run_id)
-        context = ti.get_template_context()
-
-        # Raise if the task does not have output_files - TODO: handle this in the task decorator
-        # import ipdb; ipdb.set_trace()
-        if hasattr(task, "op_kwargs") and "output_files" in task.op_kwargs:
-            rp_out_paths = [
-                context["task"].render_template(
-                    os.path.join(task.op_kwargs["output_dir"], out_file), context
-                )
-                for out_file in task.op_kwargs["output_files"].values()
-            ]
-        elif hasattr(task, "output_files"):
-            rp_out_paths = [
-                context["task"].render_template(
-                    os.path.join(task.output_dir, out_file), context
-                )
-                for out_file in task.output_files.values()
-            ]
-        else:
-            raise AttributeError(f"Task {task} does not have output_files")
-
+        self._rp_log.info(f"=== execute_async {key}: {command}")
         self.validate_airflow_tasks_run_command(command)
-        td = TaskDescription()
+
+        td = rp.TaskDescription()
         td.executable = command[0]
         td.arguments = command[1:]
         td.metadata = {"key": key}
-        td.named_env = self._rp_env_name
-        td.output_staging = [
-            {
-                "source": f"task:///{out_path}",
-                "target": f"client:///{out_path}",
-                "action": TRANSFER,
-            }
-            for out_path in rp_out_paths
-        ]
-        if "RadicalExecutor" in ti.executor_config:
-            for k, v in ti.executor_config["RadicalExecutor"].items():
-                setattr(td, k, v)
-        logging.info(f"=== output_staging: {td.output_staging}")
-        logging.info(f"task: {td.as_dict()}")
-        # import ipdb; ipdb.set_trace()
+        td.named_env = "local_venv"
 
         task = self._rp_tmgr.submit_tasks(td)
-        # ti.set_state(TaskInstanceState.RUNNING)
 
         self._rp_keys[task.uid] = key
-        self.log.info(f"=== submitted task: {task}")
+        self._rp_log.info(f"=== submitted task: {task}")
 
     def sync(self) -> None:
         """Sync will get called periodically by the heartbeat method."""
-        if self.running:
-            self.log.debug("sync self.running: %s", self.running)
-        if self.queued_tasks:
-            self.log.debug("sync self.queued: %s", self.queued_tasks)
         with contextlib.suppress(queue.Empty):
             while True:
                 results = self._rp_results.get_nowait()
-                self.log.info(f"=== RadicalExecutor: sync {results}")
                 try:
                     self.change_state(*results)
                 finally:
                     self._rp_results.task_done()
 
     def end(self) -> None:
-        self.log.info(f"=== RadicalExecutor: end")
+        self._rp_log.info(f"=== RadicalExecutor: end")
         self._rp_session.close()
 
 
@@ -222,10 +123,6 @@ class RadicalLocalExecutor(LoggingMixin):
     is_local: bool = False
     is_single_threaded: bool = False
     is_production: bool = True
-
-    serve_logs: bool = True
-
-    RADICAL_QUEUE = "radical"
 
     def __init__(self, parallelism: int = PARALLELISM):
         super().__init__()
@@ -235,7 +132,7 @@ class RadicalLocalExecutor(LoggingMixin):
 
     @property
     def queued_tasks(self) -> dict[TaskInstanceKey, QueuedTaskInstanceType]:
-        """Return queued tasks from local and radical executor."""
+        """Return queued tasks from local and kubernetes executor."""
         queued_tasks = self.local_executor.queued_tasks.copy()
         queued_tasks.update(self.radical_executor.queued_tasks)
         logging.info(f"Queued tasks: {queued_tasks}")
@@ -244,13 +141,8 @@ class RadicalLocalExecutor(LoggingMixin):
 
     @property
     def running(self) -> set[TaskInstanceKey]:
-        """Return running tasks from local and radical executor."""
+        """Return running tasks from local and kubernetes executor."""
         return self.local_executor.running.union(self.radical_executor.running)
-
-    @property
-    def slots_available(self) -> int:
-        """Number of new tasks this executor instance can accept."""
-        return self.local_executor.slots_available
 
     def queue_command(
         self,
@@ -272,7 +164,7 @@ class RadicalLocalExecutor(LoggingMixin):
         self, simple_task_instance: SimpleTaskInstance
     ) -> LocalExecutor | RadicalExecutor:
         logging.info(f"Routing to queue: {simple_task_instance.queue}")
-        if simple_task_instance.queue == self.RADICAL_QUEUE:
+        if simple_task_instance.queue == "radical":
             return self.radical_executor
         return self.local_executor
 
@@ -289,7 +181,7 @@ class RadicalLocalExecutor(LoggingMixin):
         pool: str | None = None,
         cfg_path: str | None = None,
     ) -> None:
-        """Queues task instance via local or radical executor."""
+        """Queues task instance via local or kubernetes executor."""
         from airflow.models.taskinstance import SimpleTaskInstance
 
         executor = self._router(SimpleTaskInstance.from_ti(task_instance))
@@ -322,45 +214,34 @@ class RadicalLocalExecutor(LoggingMixin):
         self.radical_executor.end()
 
     def has_task(self, task_instance: TaskInstance) -> bool:
-        """Checks if a task is either queued or running in either local or radical executor."""
+        """
+        Checks if a task is either queued or running in either local or kubernetes executor.
+
+        :param task_instance: TaskInstance
+        :return: True if the task is known to this executor
+        """
         return self.local_executor.has_task(
             task_instance
         ) or self.radical_executor.has_task(task_instance)
 
     def heartbeat(self) -> None:
-        """Heartbeat sent to trigger new jobs in local and radical executor."""
+        """Heartbeat sent to trigger new jobs in local and kubernetes executor."""
         self.local_executor.heartbeat()
         self.radical_executor.heartbeat()
 
     def get_event_buffer(
         self, dag_ids: list[str] | None = None
     ) -> dict[TaskInstanceKey, EventBufferValueType]:
-        """Return and flush the event buffer from local and radical executor."""
+        """
+        Return and flush the event buffer from local and kubernetes executor.
+
+        :param dag_ids: dag_ids to return events for, if None returns all
+        :return: a dict of events
+        """
         cleared_events_from_local = self.local_executor.get_event_buffer(dag_ids)
         cleared_events_from_radical = self.radical_executor.get_event_buffer(dag_ids)
 
         return {**cleared_events_from_local, **cleared_events_from_radical}
-
-    def try_adopt_task_instances(
-        self, tis: Sequence[TaskInstance]
-    ) -> Sequence[TaskInstance]:
-        """
-        Try to adopt running task instances that have been abandoned by a SchedulerJob dying.
-
-        Anything that is not adopted will be cleared by the scheduler (and then become eligible for
-        re-scheduling)
-
-        :return: any TaskInstances that were unable to be adopted
-        """
-        local_tis = [ti for ti in tis if ti.queue != self.RADICAL_QUEUE]
-        radical_tis = [ti for ti in tis if ti.queue == self.RADICAL_QUEUE]
-        return [
-            *self.local_executor.try_adopt_task_instances(local_tis),
-            *self.radical_executor.try_adopt_task_instances(radical_tis),
-        ]
-
-    def cleanup_stuck_queued_tasks(self, tis: list[TaskInstance]) -> list[str]:
-        raise NotImplementedError()
 
     @staticmethod
     def get_cli_commands() -> list:

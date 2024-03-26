@@ -95,9 +95,8 @@ with DAG(
         output_files={"-o": "ions.tpr"},
         output_dir="{{ params.output_dir }}",
     )
-    genion = RadicalGmxapiBashOperator(
-        task_id="genion",
-        arguments=[
+    genion = run_gmxapi.override(task_id="genion")(
+        args=[
             "genion",
             "-neutral",
             "-conc",
