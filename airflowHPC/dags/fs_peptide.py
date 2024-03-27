@@ -24,7 +24,6 @@ def verify_files(input_dir, filename, ref_t_list, step_number):
 with DAG(
     dag_id="fs_peptide",
     start_date=timezone.utcnow(),
-    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
@@ -54,7 +53,7 @@ with DAG(
             },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
-                "filename": "topol.top",
+                "filename": "system_prepared.top",
             },
         },
         "output_dir": "{{ params.output_dir }}/em",
@@ -68,7 +67,7 @@ with DAG(
             "gro": {"directory": "{{ params.output_dir }}/em", "filename": "em.gro"},
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
-                "filename": "topol.top",
+                "filename": "system_prepared.top",
             },
         },
         "output_dir": "{{ params.output_dir }}/nvt_equil",
@@ -85,7 +84,7 @@ with DAG(
             },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
-                "filename": "topol.top",
+                "filename": "system_prepared.top",
             },
         },
         "ref_t_list": "{{ params.ref_t_list }}",
@@ -116,7 +115,7 @@ with DAG(
             },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
-                "filename": "topol.top",
+                "filename": "system_prepared.top",
             },
         },
         "ref_t_list": "{{ params.ref_t_list }}",

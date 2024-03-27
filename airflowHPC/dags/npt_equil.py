@@ -22,7 +22,7 @@ with DAG(
             {
                 "mdp": {"directory": "mdp", "filename": "npt.json"},
                 "gro": {"directory": "nvt_equil", "filename": "nvt.gro"},
-                "top": {"directory": "prep", "filename": "topol.top"},
+                "top": {"directory": "prep", "filename": "system_prepared.top"},
             },
             type=["object", "null"],
             title="Inputs list",

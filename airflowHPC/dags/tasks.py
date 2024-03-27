@@ -94,7 +94,7 @@ def run_gmxapi(
 
 
 @task(multiple_outputs=True, max_active_tis_per_dagrun=1, queue="radical")
-def run_gmxapi_dataclass(input_data):
+def run_gmxapi_dataclass(input_data: GmxapiInputHolder):
     """Ideally this could be an overload with multipledispatch but that does not play well with airflow"""
     from dataclasses import asdict
 
