@@ -1,7 +1,8 @@
 from airflow import DAG
 from airflow.decorators import task
 from airflow.utils import timezone
-from airflowHPC.dags.tasks import get_file, run_gmxapi
+from airflowHPC.dags.tasks import get_file, run_gmxapi, run_gmxapi_mpi
+from airflowHPC.operators.radical_gmxapi_bash_operator import RadicalGmxapiBashOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
@@ -18,7 +19,7 @@ with DAG(
     catchup=False,
     params={
         "output_dir": "outputs",
-        "num_sims": 2,
+        "num_sims": 4,
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "basic_md.json"},
             "gro": {"directory": "ensemble_md", "filename": "sys.gro"},
@@ -40,6 +41,7 @@ with DAG(
     )
     mdp_sim = update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_sim_update")(
         mdp_json_file_path=input_mdp,
+        update_dict={"nsteps": 25000},
     )
     grompp_result = run_gmxapi.override(task_id="grompp")(
         args=["grompp"],
@@ -48,12 +50,14 @@ with DAG(
         output_dir="{{ params.output_dir }}",
     )
     outputs_dirs = outputs_list.override(task_id="get_output_dirs")()
-    mdrun_result = (
-        run_gmxapi.override(task_id="mdrun")
-        .partial(
-            args=["mdrun"],
-            input_files={"-s": grompp_result["-o"]},
-            output_files={"-c": "result.gro", "-x": "result.xtc"},
-        )
-        .expand(output_dir=outputs_dirs)
-    )
+    mdrun_result = RadicalGmxapiBashOperator.partial(
+        task_id="mdrun",
+        mpi_executable="mpirun",
+        mpi_arguments=["-np", "4"],
+        gmx_arguments=["mdrun", "-ntomp", "2"],
+        input_files={"-s": grompp_result["-o"]},
+        output_files={"-c": "result.gro", "-x": "result.xtc"},
+        pool="mpi_pool",
+        pool_slots=8,
+    ).expand(output_dir=outputs_dirs)
+    grompp_result >> mdrun_result
