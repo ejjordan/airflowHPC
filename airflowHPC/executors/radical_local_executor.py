@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import contextlib
-import logging
-import os
 import queue
+import contextlib
 import sys
 import time
 from typing import TYPE_CHECKING, Any, Optional, Tuple, Sequence
@@ -12,10 +10,9 @@ from airflow.executors.base_executor import PARALLELISM, BaseExecutor
 from airflow.executors.local_executor import LocalExecutor
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
-from airflow.utils.cli import get_dag
-from airflow.models.taskinstance import TaskInstance as TI
 
 import radical.pilot as rp
+import logging
 
 
 if TYPE_CHECKING:
@@ -51,6 +48,7 @@ class RadicalExecutor(BaseExecutor):
         self._rp_keys = None
         self._rp_results = None
         self._rp_session = None
+        self._rp_log = None
         self._rp_pmgr = None
         self._rp_tmgr = None
 
@@ -60,11 +58,12 @@ class RadicalExecutor(BaseExecutor):
         self._rp_keys = dict()
         self._rp_results = queue.Queue()
         self._rp_session = rp.Session()
+        self._rp_log = logging  # TODO: should this be self._rp_session._log instead?
         self._rp_pmgr = rp.PilotManager(session=self._rp_session)
         self._rp_tmgr = rp.TaskManager(session=self._rp_session)
         self._rp_env_name = "rp"
 
-        self.log.info(f"=== RadicalExecutor: start")
+        self._rp_log.info(f"=== RadicalExecutor: start")
         # TODO: make resource and runtime airflow configuration variables or expose in some way
         pd = rp.PilotDescription(
             {"resource": "local.localhost", "cores": self.parallelism, "runtime": 30}
@@ -78,20 +77,20 @@ class RadicalExecutor(BaseExecutor):
 
         self._rp_tmgr.add_pilots(pilot)
         toc = time.perf_counter()
-        self.log.info(f"=== RadicalExecutor: start took {toc - tic:0.4f} seconds")
+        self._rp_log.info(f"=== RadicalExecutor: start took {toc - tic:0.4f} seconds")
 
         def state_cb(task, state):
             tid = task.uid
-            self.log.info(f"=== {tid}: {state}")
+            self._rp_log.info(f"=== {tid}: {state}")
             if state in rp.FINAL:
                 key = self._rp_keys.pop(tid)
-                self.log.info(
+                self._rp_log.info(
                     f"=== {tid}: DAG {key.dag_id}; Task {key.task_id}; {state}"
                 )
                 if state == rp.DONE:
-                    self._rp_results.put((key, TaskInstanceState.SUCCESS))
-                else:
                     self._rp_results.put((key, TaskInstanceState.FAILED))
+                else:
+                    self._rp_results.put((key, TaskInstanceState.SUCCESS))
 
         self._rp_tmgr.register_callback(state_cb)
 
@@ -102,59 +101,20 @@ class RadicalExecutor(BaseExecutor):
         queue: str | None = None,
         executor_config: Any | None = None,
     ) -> None:
-        self.log.info("%s running %s", self.__class__.__name__, command)
+        from airflow.utils.cli import get_dag
+        import os
+
+        self._rp_log.info(f"=== execute_async {key}: {command}")
 
         dag = get_dag(dag_id=key.dag_id, subdir=os.path.join("dags", key.dag_id))
         task = dag.get_task(key.task_id)
-        ti = TI(task, run_id=key.run_id)
-        ti_context = ti.get_template_context()
-
         # Raise if the task does not have output_files - TODO: handle this in the task decorator
-        if hasattr(task, "op_kwargs") and "output_files" in task.op_kwargs:
-            rp_out_paths = [
-                ti_context["task"].render_template(
-                    os.path.join(task.op_kwargs["output_dir"], out_file), ti_context
-                )
-                for out_file in task.op_kwargs["output_files"].values()
-            ]
-        elif (
-            hasattr(task, "op_kwargs_expand_input")
-            and "output_files" in task.op_kwargs_expand_input.value
-        ):
-            rp_out_paths = [
-                ti_context["task"].render_template(
-                    os.path.join(
-                        task.op_kwargs_expand_input.value["output_dir"], out_file
-                    ),
-                    ti_context,
-                )
-                for out_file in task.op_kwargs_expand_input["output_files"].values()
-            ]
-        elif hasattr(task, "op_kwargs") and "input_data" in task.op_kwargs:
-            rp_out_paths = [
-                ti_context["task"].render_template(
-                    os.path.join(task.input_data["output_dir"], out_file), ti_context
-                )
-                for out_file in task.input_data["output_files"].values()
-            ]
-        elif (
-            hasattr(task, "op_kwargs_expand_input")
-            and "input_data" in task.op_kwargs_expand_input.value
-        ):
-            rp_out_paths = [
-                ti_context["task"].render_template(
-                    os.path.join(
-                        task.op_kwargs_expand_input.value["input_data"]["output_dir"],
-                        out_file,
-                    ),
-                    ti_context,
-                )
-                for out_file in task.op_kwargs_expand_input["output_files"].values()
-            ]
-        else:
-            self.log.warning(f"No output_files found for task {key.task_id}")
-            self._rp_results.put((key, TaskInstanceState.FAILED))
-            return
+        if "output_files" not in task.op_kwargs:
+            raise AttributeError(f"Task {task} does not have output_files")
+        rp_out_paths = [
+            os.path.join(task.op_kwargs["output_dir"], v)
+            for k, v in task.op_kwargs["output_files"].items()
+        ]
 
         self.validate_airflow_tasks_run_command(command)
         td = rp.TaskDescription()
@@ -175,7 +135,7 @@ class RadicalExecutor(BaseExecutor):
         task = self._rp_tmgr.submit_tasks(td)
 
         self._rp_keys[task.uid] = key
-        self.log.info(f"=== submitted task: {task}")
+        self._rp_log.info(f"=== submitted task: {task}")
 
     def sync(self) -> None:
         """Sync will get called periodically by the heartbeat method."""
@@ -188,7 +148,7 @@ class RadicalExecutor(BaseExecutor):
                     self._rp_results.task_done()
 
     def end(self) -> None:
-        self.log.info(f"=== RadicalExecutor: end")
+        self._rp_log.info(f"=== RadicalExecutor: end")
         self._rp_session.close()
 
 
