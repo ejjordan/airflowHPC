@@ -19,10 +19,19 @@ python3 -m venv airflowHPC_env
 source airflowHPC_env/bin/activate
 pip install --upgrade pip
 pip install -e airflowHPC/
+```
+
+### Install the package requirements
+```bash
 pip install -r airflowHPC/requirements.txt
 ```
 
-This will also install all the necessary dependencies.
+It may be necessary to first install gmxapi manually as described in the
+[gmxapi installation instructions](https://manual.gromacs.org/current/gmxapi/userguide/install.html).
+
+```bash
+gmxapi_ROOT=/path/to/gromacs pip install --no-cache-dir gmxapi
+```
 
 ### Simplest demonstration
 This demo show how a replica exchange molecular dynamics simulation might look as 

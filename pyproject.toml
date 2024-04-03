@@ -12,7 +12,14 @@ classifiers = [
 
 dependencies = [
     "apache-airflow",
-    "gmxapi",
+    "radical.pilot",
+]
+[project.optional-dependencies]
+mysql = [
+    "apache-airflow[mysql]"
+]
+postgres = [
+    "apache-airflow[postgres]"
 ]
 
 [project.urls]
@@ -21,12 +28,6 @@ dependencies = [
 [project.readme]
 file = "README.md"
 content-type = "text/markdown"
-
-[project.optional-dependencies]
-test = [
-    "build",
-    "packaging",
-]
 
 target-version = ['py39', 'py310', 'py311']
 

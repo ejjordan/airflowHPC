@@ -16,7 +16,7 @@ with DAG(
             {
                 "mdp": {"directory": "mdp", "filename": "min.json"},
                 "gro": {"directory": "prep", "filename": "system_prepared.gro"},
-                "top": {"directory": "prep", "filename": "topol.top"},
+                "top": {"directory": "prep", "filename": "system_prepared.top"},
             },
             type=["object", "null"],
             title="Inputs list",

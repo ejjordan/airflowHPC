@@ -73,7 +73,6 @@ with DAG(
 with DAG(
     dag_id="simulate",
     start_date=timezone.utcnow(),
-    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
@@ -83,7 +82,7 @@ with DAG(
                 "mdp": {"directory": "mdp", "filename": "sim.json"},
                 "gro": {"directory": "npt_equil", "filename": "npt.gro"},
                 "cpt": {"directory": "npt_equil", "filename": "npt.cpt"},
-                "top": {"directory": "prep", "filename": "topol.top"},
+                "top": {"directory": "prep", "filename": "system_prepared.top"},
             },
             type=["object", "null"],
             title="Inputs list",
