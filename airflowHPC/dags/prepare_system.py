@@ -55,6 +55,13 @@ with DAG(
         output_files={"-o": "system_initial.gro", "-p": "topol.top", "-i": "posre.itp"},
         output_dir="{{ params.output_dir }}",
     )
+    # We need to wait here because there is apparently some delay in the file transfer by rp
+    rename_pdb2gmx_top = BashOperator(
+        task_id="rename_pdb2gmx_top",
+        bash_command="sleep 4;cp {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.output_dir }}/pdb2gmx.top",
+        cwd=os.path.curdir,
+    )
+
     editconf = run_gmxapi.override(task_id="editconf")(
         args=[
             "editconf",
@@ -69,25 +76,36 @@ with DAG(
         output_dir="{{ params.output_dir }}",
     )
     # gmx solvate does not allow specifying different file names for input and output top files.
-    # Here we rely on the fact that solvate overwrites the input top file with the solvated top file.
-    # Thus, after solvate, pdb2gmx["-p"] is what should be solvate["-p"].
+    # Thus, we have to manually manage the files for each stage in the pipeline.
     solvate = run_gmxapi.override(task_id="solvate")(
         args=["solvate"],
         input_files={"-cp": editconf["-o"], "-cs": "spc216.gro", "-p": pdb2gmx["-p"]},
         output_files={"-o": "system_solv.gro"},
         output_dir="{{ params.output_dir }}",
     )
-    rename_after_solvate = BashOperator(
-        task_id="rename_solvate",
-        bash_command="cp {{ params.output_dir }}/system_solv.gro {{ params.output_dir }}/{{ params.expected_output }}",
+    rename_solvate_top = BashOperator(
+        task_id="rename_solvate_top",
+        bash_command="cp {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.output_dir }}/solvate.top",
         cwd=os.path.curdir,
     )
-    genion_mdp = write_mdp_json_as_mdp.override(task_id="genion_mdp")(mdp_data={})
+
+    rename_solvate_gro_output = BashOperator(
+        task_id="rename_solvate_gro_output",
+        bash_command="mv {{ params.output_dir }}/system_solv.gro {{ params.output_dir }}/{{ params.expected_output }}",
+        cwd=os.path.curdir,
+    )
+    rename_solvate_top_output = BashOperator(
+        task_id="rename_solvate_top_output",
+        bash_command="mv {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.output_dir }}/{{ params.expected_output | replace('.gro', '.top') }}",
+        cwd=os.path.curdir,
+    )
+
     prepare_done_branch = branch_task_template.override(task_id="prepare_done_branch")(
         statement="{{ params.ion_concentration }} > 0.0",
-        task_if_true="genion_mdp",
-        task_if_false=rename_after_solvate.task_id,
+        task_if_true=rename_solvate_top.task_id,
+        task_if_false=rename_solvate_gro_output.task_id,
     )
+    genion_mdp = write_mdp_json_as_mdp.override(task_id="genion_mdp")(mdp_data={})
     genion_grompp = run_gmxapi.override(task_id="genion_grompp")(
         args=["grompp"],
         input_files={"-f": genion_mdp, "-c": solvate["-o"], "-p": pdb2gmx["-p"]},
@@ -110,11 +128,25 @@ with DAG(
         output_dir="{{ params.output_dir }}",
         stdin="SOL",
     )
-    rename_after_genion = BashOperator(
-        task_id="rename_genion",
-        bash_command="cp {{ params.output_dir }}/system_solv_ions.gro {{ params.output_dir }}/{{ params.expected_output }}",
+    rename_genion_gro_output = BashOperator(
+        task_id="rename_genion_gro_output",
+        bash_command="sleep 4;mv {{ params.output_dir }}/system_solv_ions.gro {{ params.output_dir }}/{{ params.expected_output }}",
+        cwd=os.path.curdir,
+    )
+    rename_genion_top_output = BashOperator(
+        task_id="rename_genion_top_output",
+        bash_command="mv {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.output_dir }}/{{ params.expected_output | replace('.gro', '.top') }}",
         cwd=os.path.curdir,
     )
 
-    solvate >> prepare_done_branch >> [genion_mdp, rename_after_solvate]
-    genion_mdp >> genion_grompp >> genion >> rename_after_genion
+    input_pdb >> pdb2gmx >> rename_pdb2gmx_top >> solvate
+    solvate >> prepare_done_branch >> [rename_solvate_top, rename_solvate_gro_output]
+    rename_solvate_gro_output >> rename_solvate_top_output
+    (
+        rename_solvate_top
+        >> genion_mdp
+        >> genion_grompp
+        >> genion
+        >> rename_genion_gro_output
+        >> rename_genion_top_output
+    )
