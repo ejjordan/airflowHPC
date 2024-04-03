@@ -1,26 +1,20 @@
 from __future__ import annotations
 
 import contextlib
-import logging
-import os
 import subprocess
-from abc import abstractmethod
 from multiprocessing import Manager, Process
 from queue import Empty
 from typing import TYPE_CHECKING, Any, Optional, Tuple
 
-from setproctitle import getproctitle, setproctitle
+from setproctitle import setproctitle
 
 from airflow import settings
 from airflow.exceptions import AirflowException
 from airflow.executors.base_executor import PARALLELISM, BaseExecutor
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
-from radical.utils import get_exception_trace
-from mpi4py.futures import MPIPoolExecutor
 
 if TYPE_CHECKING:
-    from multiprocessing.managers import SyncManager
     from queue import Queue
 
     from airflow.executors.base_executor import CommandType
@@ -180,72 +174,6 @@ class TestExecutor(BaseExecutor):
         self.queue.join()
         self.sync()
         self.manager.shutdown()
-
-    def _flush_task_queue(self) -> None:
-        if TYPE_CHECKING:
-            assert self.task_queue
-
-        self.log.debug(
-            "Executor shutting down, task_queue approximate size=%d",
-            self.task_queue.qsize(),
-        )
-        with contextlib.suppress(Empty):
-            while True:
-                task = self.task_queue.get_nowait()
-                # This is a new task to run thus ok to ignore.
-                self.log.warning("Executor shutting down, will NOT run task=%s", task)
-                self.task_queue.task_done()
-
-    def _flush_result_queue(self) -> None:
-        if TYPE_CHECKING:
-            assert self.result_queue
-
-        self.log.debug(
-            "Executor shutting down, result_queue approximate size=%d",
-            self.result_queue.qsize(),
-        )
-        with contextlib.suppress(Empty):
-            while True:
-                results = self.result_queue.get_nowait()
-                self.log.warning("Executor shutting down, flushing results=%s", results)
-                try:
-                    key, state = results
-                    self.log.info(
-                        "Changing state of %s to %s : resource_version=%d",
-                        results,
-                        state,
-                    )
-                    try:
-                        self.change_state(key, state)
-                    except Exception as e:
-                        self.log.exception(
-                            "Ignoring exception: %s when attempting to change state of %s to %s.",
-                            e,
-                            results,
-                            state,
-                        )
-                finally:
-                    self.result_queue.task_done()
-
-    """
-    def end(self) -> None:
-        if TYPE_CHECKING:
-            assert self.task_queue
-            assert self.result_queue
-
-        self.log.info("Shutting down Kubernetes executor")
-        try:
-            self.log.debug("Flushing task_queue...")
-            self._flush_task_queue()
-            self.log.debug("Flushing result_queue...")
-            self._flush_result_queue()
-            # Both queues should be empty...
-            self.task_queue.join()
-            self.result_queue.join()
-        except ConnectionResetError:
-            self.log.exception("Connection Reset error while flushing task_queue and result_queue.")
-        self.manager.shutdown()
-    """
 
     def terminate(self):
         """Terminate the executor is not doing anything."""

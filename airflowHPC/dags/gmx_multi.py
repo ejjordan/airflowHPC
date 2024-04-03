@@ -1,7 +1,7 @@
 from airflow import DAG
 from airflow.decorators import task
 from airflow.utils import timezone
-from airflowHPC.dags.tasks import get_file, run_gmxapi, run_gmxapi_mpi
+from airflowHPC.dags.tasks import get_file, run_gmxapi
 from airflowHPC.operators.radical_gmxapi_bash_operator import RadicalGmxapiBashOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
