@@ -23,6 +23,7 @@ def get_provider_info():
             "airflowHPC.executors.radical_local_executor.RadicalLocalExecutor",
             "airflowHPC.executors.radical_local_executor.RadicalExecutor",
             "airflowHPC.executors.zmq_sequential_executor.ZMQSequentialExecutor",
+            "airflowHPC.executors.test_executor.TestExecutor",
         ],
         "versions": [__version__],
         "docs-url": "https://github.com/ejjordan/airflowHPC/blob/main/README.md",
