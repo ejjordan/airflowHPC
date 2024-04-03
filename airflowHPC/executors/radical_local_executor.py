@@ -106,16 +106,24 @@ class RadicalExecutor(BaseExecutor):
 
         dag = get_dag(dag_id=key.dag_id, subdir=os.path.join("dags", key.dag_id))
         task = dag.get_task(key.task_id)
-        ti = TI(task, run_id=key.run_id)
+        ti = TI(task, run_id=key.run_id, map_index=key.map_index)
         ti_context = ti.get_template_context()
 
         # Raise if the task does not have output_files - TODO: handle this in the task decorator
+        """
         if hasattr(task, "op_kwargs") and "output_files" in task.op_kwargs:
             rp_out_paths = [
                 ti_context["task"].render_template(
                     os.path.join(task.op_kwargs["output_dir"], out_file), ti_context
                 )
                 for out_file in task.op_kwargs["output_files"].values()
+            ]
+        elif hasattr(task, "output_files") and hasattr(task, "output_dir"):
+            rp_out_paths = [
+                ti_context["task"].render_template(
+                    os.path.join(task.output_dir, out_file), ti_context
+                )
+                for out_file in task.output_files.values()
             ]
         elif (
             hasattr(task, "op_kwargs_expand_input")
@@ -151,9 +159,14 @@ class RadicalExecutor(BaseExecutor):
                 )
                 for out_file in task.op_kwargs_expand_input["output_files"].values()
             ]
+        """
+        if hasattr(task, "output_files") and hasattr(task, "output_dir"):
+            import ipdb
+
+            ipdb.set_trace()
+            rp_out_paths = []
         else:
-            self.log.warning(f"No output_files found for task {key.task_id}")
-            self._rp_results.put((key, TaskInstanceState.FAILED))
+            ti.handle_failure(f"No output_files found for task {key.task_id}")
             return
 
         self.validate_airflow_tasks_run_command(command)

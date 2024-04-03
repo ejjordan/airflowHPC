@@ -173,8 +173,10 @@ def prepare_gmxapi_input(
                 )
             )
         )
-
-    return inputHolderList
+    if len(inputHolderList) == 1:
+        return inputHolderList[0]
+    else:
+        return inputHolderList
 
 
 @task.branch
