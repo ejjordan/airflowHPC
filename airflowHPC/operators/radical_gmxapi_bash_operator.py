@@ -89,7 +89,7 @@ class SubprocessHook(BaseHook):
 class RadicalGmxapiBashOperator(BaseOperator):
     template_fields: Sequence[str] = (
         "mpi_executable",
-        "mpi_arguments",
+        "mpi_ranks",
         "gmx_executable",
         "gmx_arguments",
         "input_files",
@@ -102,7 +102,7 @@ class RadicalGmxapiBashOperator(BaseOperator):
         "gmx_executable": "bash",
         "mpi_executable": "bash",
         "gmx_arguments": "py",
-        "mpi_arguments": "py",
+        "mpi_ranks": "py",
         "input_files": "py",
         "output_files": "py",
         "output_dir": "py",
@@ -115,7 +115,9 @@ class RadicalGmxapiBashOperator(BaseOperator):
         *,
         mpi_executable: str | None = None,
         gmx_executable: str | None = None,
-        mpi_arguments: list,
+        mpi_ranks: int,
+        cpus_per_task: int = 1,
+        # gpus: list[int] = None,
         gmx_arguments: list,
         input_files: dict,
         output_files: dict,
@@ -133,7 +135,8 @@ class RadicalGmxapiBashOperator(BaseOperator):
         self.gmx_executable = gmx_executable
         self.mpi_executable = mpi_executable
         self.gmx_arguments = gmx_arguments
-        self.mpi_arguments = mpi_arguments
+        self.mpi_ranks = mpi_ranks
+        self.cpus_per_task = cpus_per_task
         self.input_files = input_files
         self.output_files = output_files
         self.output_dir = output_dir
@@ -156,6 +159,12 @@ class RadicalGmxapiBashOperator(BaseOperator):
         )
         self.cwd = cwd
         self.append_env = append_env
+        for i, arg in enumerate(self.gmx_arguments):
+            if arg in ["-ntomp", "-ntmpi", "-nt"]:
+                if self.gmx_arguments[i + 1] != str(self.cpus_per_task):
+                    raise ValueError(
+                        f"Argument {arg} must be the same as cpus_per_task: {self.cpus_per_task}"
+                    )
 
     def get_env(self, context):
         """Build the set of environment variables to be exposed for the bash command."""
@@ -194,7 +203,7 @@ class RadicalGmxapiBashOperator(BaseOperator):
         if self.mpi_executable is None:
             self.mpi_executable = "mpirun"
         self.log.info(f"mpi_executable: {self.mpi_executable}")
-        self.log.info(f"mpi_arguments: {self.mpi_arguments}")
+        self.log.info(f"mpi_ranks: {self.mpi_ranks}")
         self.log.info(f"gmx_executable: {self.gmx_executable}")
         self.log.info(f"gmx_arguments: {self.gmx_arguments}")
         self.log.info(f"input_files: {self.input_files}")
@@ -203,7 +212,7 @@ class RadicalGmxapiBashOperator(BaseOperator):
             gmx_executable=self.gmx_executable,
             gmx_arguments=self.gmx_arguments,
             mpi_executable=self.mpi_executable,
-            mpi_arguments=self.mpi_arguments,
+            mpi_ranks=self.mpi_ranks,
             input_files=self.input_files,
             output_files=output_files_paths,
         )
@@ -247,7 +256,7 @@ class RadicalGmxapiBashOperator(BaseOperator):
         gmx_executable=None,
         gmx_arguments=(),
         mpi_executable=None,
-        mpi_arguments=(),
+        mpi_ranks: int = 1,
         input_files: Union[dict, Iterable[dict]] = None,
         output_files: Union[dict, Iterable[dict]] = None,
     ) -> str:
@@ -275,12 +284,10 @@ class RadicalGmxapiBashOperator(BaseOperator):
             )
         if isinstance(gmx_arguments, (str, bytes)):
             gmx_arguments = [gmx_arguments]
-        if isinstance(mpi_arguments, (str, bytes)):
-            gmx_arguments = [mpi_arguments]
 
         call = list()
         call.append(mpi_executable)
-        call.extend(mpi_arguments)
+        call.extend(["-np", str(mpi_ranks)])
         call.append(gmx_executable)
         call.extend(gmx_arguments)
         call.extend(self.flatten_dict(input_files))

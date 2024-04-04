@@ -53,11 +53,11 @@ with DAG(
     mdrun_result = RadicalGmxapiBashOperator.partial(
         task_id="mdrun",
         mpi_executable="mpirun",
-        mpi_arguments=["-np", "4"],
+        mpi_ranks=4,
+        cpus_per_task=2,
+        pool_slots=8,
         gmx_arguments=["mdrun", "-ntomp", "2"],
         input_files={"-s": grompp_result["-o"]},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
-        pool="mpi_pool",
-        pool_slots=8,
     ).expand(output_dir=outputs_dirs)
     grompp_result >> mdrun_result
