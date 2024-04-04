@@ -4,11 +4,14 @@ import os
 import shutil
 import warnings
 from functools import cached_property
-from typing import TYPE_CHECKING, Container, Sequence, Union, Iterable
+from types import ClassMethodDescriptorType
+from typing import TYPE_CHECKING, Container, Sequence, Union, Iterable, Callable
 
 from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.models.baseoperator import BaseOperator
+from airflow.models.baseoperator import partial as airflow_partial
 from airflow.utils.operator_helpers import context_to_airflow_vars
+from airflow.models.mappedoperator import OperatorPartial
 
 if TYPE_CHECKING:
     from airflow.utils.context import Context
@@ -86,6 +89,38 @@ class SubprocessHook(BaseHook):
             os.killpg(os.getpgid(self.sub_process.pid), signal.SIGTERM)
 
 
+def pool_slots_partial(*args, **kwargs):
+    if not kwargs.get("cpus_per_task"):
+        raise ValueError("cpus_per_task is required")
+    if not kwargs.get("mpi_ranks"):
+        raise ValueError("mpi_ranks is required")
+    kwargs.update({"pool_slots": kwargs["mpi_ranks"] * kwargs["cpus_per_task"]})
+    return airflow_partial(*args, **kwargs)
+
+
+class PoolPartialDescriptor:
+    """
+    A descriptor that guards against ``.partial`` being called on Task objects.
+    This is copied from airflow.models.baseoperator but overrides the pool_slots
+    parameter to be calculated from mpi_ranks and cpus_per_task.
+    """
+
+    class_method: ClassMethodDescriptorType = pool_slots_partial
+
+    def __get__(
+        self, obj: BaseOperator, cls: type[BaseOperator] | None = None
+    ) -> Callable[..., OperatorPartial]:
+        # Call this "partial" so it looks nicer in stack traces.
+        def partial(**kwargs):
+            raise TypeError(
+                "partial can only be called on Operator classes, not Tasks themselves"
+            )
+
+        if obj is not None:
+            return partial
+        return self.class_method.__get__(cls, cls)
+
+
 class RadicalGmxapiBashOperator(BaseOperator):
     template_fields: Sequence[str] = (
         "mpi_executable",
@@ -110,6 +145,8 @@ class RadicalGmxapiBashOperator(BaseOperator):
     }
     ui_color = "#f0ede4"
 
+    partial: Callable[..., OperatorPartial] = PoolPartialDescriptor()  # type: ignore
+
     def __init__(
         self,
         *,
@@ -131,6 +168,7 @@ class RadicalGmxapiBashOperator(BaseOperator):
         cwd: str | None = None,
         **kwargs,
     ) -> None:
+        kwargs.update({"pool_slots": mpi_ranks * cpus_per_task})
         super().__init__(**kwargs)
         self.gmx_executable = gmx_executable
         self.mpi_executable = mpi_executable

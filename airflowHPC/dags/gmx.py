@@ -29,7 +29,6 @@ with DAG(
         mpi_executable="mpirun",
         mpi_ranks=4,
         cpus_per_task=2,
-        pool_slots=8,
         gmx_arguments=["mdrun", "-ntomp", "2"],
         input_files={"-s": grompp_result["-o"]},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
