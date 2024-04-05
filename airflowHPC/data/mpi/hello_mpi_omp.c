@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
 #pragma omp parallel private(omp_thread)
   {
     omp_thread = omp_get_thread_num();
-    printf("Hello from MPI rank %d, OMP rank %d\n", mpi_rank, omp_thread);
+    printf("Hello from MPI rank %d, OMP thread %d\n", mpi_rank, omp_thread);
   }
   MPI_Finalize();
 }

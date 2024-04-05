@@ -3,7 +3,7 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.utils import timezone
-from airflowHPC.operators.radical_gmxapi_bash_operator import RadicalBashOperator
+from airflowHPC.operators.radical_bash_operator import RadicalBashOperator
 from airflowHPC.dags.tasks import get_file
 
 
