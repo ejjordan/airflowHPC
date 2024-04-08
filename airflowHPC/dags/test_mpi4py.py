@@ -26,10 +26,6 @@ with DAG(
         python_callable=mpi4py_hello,
         mpi_ranks="4",
     )
-    """
     RadicalExternalPythonOperator.partial(
         task_id="mpi4py_hello_multi", python_callable=mpi4py_hello
-    ).expand(
-        mpi_ranks="4",
-    )
-    """
+    ).expand(mpi_ranks=["4", "8"])

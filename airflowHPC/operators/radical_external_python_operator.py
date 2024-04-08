@@ -38,9 +38,6 @@ class RadicalExternalPythonOperator(ExternalPythonOperator):
             self.mpi_executable = mpi_executable
         self.mpi_ranks = mpi_ranks
 
-    def execute(self, context):
-        return super().execute(context)
-
     def _execute_python_callable_in_subprocess(self, python_path: Path):
         with TemporaryDirectory(prefix="venv-call") as tmp:
             tmp_dir = Path(tmp)
