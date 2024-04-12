@@ -7,19 +7,56 @@ import subprocess
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from types import ClassMethodDescriptorType
+from typing import Any, Callable
 
 from airflow.exceptions import (
     AirflowException,
     AirflowSkipException,
 )
+from airflow.models import BaseOperator
+from airflow.models.baseoperator import partial as airflow_partial
+from airflow.models.mappedoperator import OperatorPartial
 from airflow.operators.python import ExternalPythonOperator
 from airflow.utils.file import get_unique_dag_module_name
 from airflow.utils.process_utils import execute_in_subprocess
 from airflow.utils.python_virtualenv import write_python_script
 
 
+def pool_slots_partial(*args, **kwargs):
+    if not kwargs.get("mpi_ranks"):
+        raise ValueError("mpi_ranks is required and cannot be mapped")
+    else:
+        kwargs.update({"pool_slots": int(kwargs["mpi_ranks"])})
+    return airflow_partial(*args, **kwargs)
+
+
+class PoolPartialDescriptor:
+    """
+    A descriptor that guards against ``.partial`` being called on Task objects.
+    This is copied from airflow.models.baseoperator but overrides the pool_slots
+    parameter to be calculated from mpi_ranks and cpus_per_task.
+    """
+
+    class_method: ClassMethodDescriptorType = pool_slots_partial
+
+    def __get__(
+        self, obj: BaseOperator, cls: type[BaseOperator] | None = None
+    ) -> Callable[..., OperatorPartial]:
+        # Call this "partial" so it looks nicer in stack traces.
+        def partial(**kwargs):
+            raise TypeError(
+                "partial can only be called on Operator classes, not Tasks themselves"
+            )
+
+        if obj is not None:
+            return partial
+        return self.class_method.__get__(cls, cls)
+
+
 class RadicalExternalPythonOperator(ExternalPythonOperator):
+    partial: Callable[..., OperatorPartial] = PoolPartialDescriptor()  # type: ignore
+
     def __init__(
         self,
         *,
@@ -31,12 +68,13 @@ class RadicalExternalPythonOperator(ExternalPythonOperator):
         if python is None:
             python = os.path.join(sys.prefix, "bin", "python")
             kwargs.update({"python": python})
+        self.mpi_ranks = mpi_ranks
+        kwargs.update({"pool_slots": int(self.mpi_ranks)})
         super().__init__(**kwargs)
         if mpi_executable is None:
             self.mpi_executable = "mpirun"
         else:
             self.mpi_executable = mpi_executable
-        self.mpi_ranks = mpi_ranks
 
     def _execute_python_callable_in_subprocess(self, python_path: Path):
         with TemporaryDirectory(prefix="venv-call") as tmp:

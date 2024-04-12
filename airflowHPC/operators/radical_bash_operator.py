@@ -20,9 +20,9 @@ if TYPE_CHECKING:
 
 def pool_slots_partial(*args, **kwargs):
     if not kwargs.get("cpus_per_task"):
-        raise ValueError("cpus_per_task is required")
+        raise ValueError("cpus_per_task is required and cannot be mapped")
     if not kwargs.get("mpi_ranks"):
-        raise ValueError("mpi_ranks is required")
+        raise ValueError("mpi_ranks is required and cannot be mapped")
     kwargs.update({"pool_slots": kwargs["mpi_ranks"] * kwargs["cpus_per_task"]})
     return airflow_partial(*args, **kwargs)
 
