@@ -35,7 +35,12 @@ class PoolPartialDescriptor:
     """
     A descriptor that guards against ``.partial`` being called on Task objects.
     This is copied from airflow.models.baseoperator but overrides the pool_slots
-    parameter to be calculated from mpi_ranks and cpus_per_task.
+    parameter to be calculated from mpi_ranks.
+
+    This class reimplements _PartialDescriptor from airflow.models.baseoperator
+    because class methods cannot be overridden via inheritance, only via. e.g.,
+    `_PartialDescriptor.class_method = pool_slots_partial`, but this doesn't work
+    if you need to set different class methods for different operators.
     """
 
     class_method: ClassMethodDescriptorType = pool_slots_partial

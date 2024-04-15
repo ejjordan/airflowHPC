@@ -32,7 +32,7 @@ with DAG(
     )
     multi = RadicalExternalPythonOperator.partial(
         task_id="mpi4py_op_args", python_callable=mpi4py_hello, mpi_ranks="8"
-    ).expand(op_kwargs=[{"delay": 1}, {"delay": 2}, {"delay": 3}])
+    ).expand(op_kwargs=[{"delay": 5}, {"delay": 4}, {"delay": 3}])
 
     single >> multi
 

@@ -10,7 +10,7 @@ else
    echo "Chose: $1"
   exit 1
 fi
-export AIRFLOW__CORE__EXECUTOR=airflowHPC.executors.radical_local_executor.RadicalLocalExecutor
+export AIRFLOW__CORE__EXECUTOR=airflowHPC.executors.test_executor.TestExecutor
 export AIRFLOW__CORE__LOAD_EXAMPLES=False
 export AIRFLOW__CORE__DAGS_FOLDER=$AirflowHPC_dir/airflowHPC/dags
 export AIRFLOW__WEBSERVER__DAG_DEFAULT_VIEW="graph"
