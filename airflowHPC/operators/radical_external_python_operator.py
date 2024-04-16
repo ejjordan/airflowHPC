@@ -78,12 +78,21 @@ class RadicalExternalPythonOperator(ExternalPythonOperator):
         kwargs.update({"pool_slots": int(self.mpi_ranks)})
         super().__init__(**kwargs)
         if mpi_executable is None:
-            for executable in ["mpirun", "mpiexec", "srun"]:
+            for executable, num_ranks_flag in [
+                ("mpirun", "-np"),
+                ("mpiexec", "-np"),
+                ("srun", "-n"),
+            ]:
                 if shutil.which(executable):
                     self.mpi_executable = executable
+                    self.num_ranks_flag = num_ranks_flag
                     break
         else:
             self.mpi_executable = mpi_executable
+            if "srun" in mpi_executable:
+                self.num_ranks_flag = "-n"
+            else:
+                self.num_ranks_flag = "-np"
 
     def _execute_python_callable_in_subprocess(self, python_path: Path):
         with TemporaryDirectory(prefix="venv-call") as tmp:
@@ -124,7 +133,7 @@ class RadicalExternalPythonOperator(ExternalPythonOperator):
                 execute_in_subprocess(
                     cmd=[
                         self.mpi_executable,
-                        "-np",
+                        self.num_ranks_flag,
                         self.mpi_ranks,
                         os.fspath(python_path),
                         os.fspath(script_path),

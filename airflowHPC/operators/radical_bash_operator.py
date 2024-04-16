@@ -97,12 +97,21 @@ class RadicalBashOperator(BaseOperator):
         super().__init__(**kwargs)
         self.bash_command = bash_command
         if mpi_executable is None:
-            for executable in ["mpirun", "mpiexec", "srun"]:
+            for executable, num_ranks_flag in [
+                ("mpirun", "-np"),
+                ("mpiexec", "-np"),
+                ("srun", "-n"),
+            ]:
                 if shutil.which(executable):
                     self.mpi_executable = executable
+                    self.num_ranks_flag = num_ranks_flag
                     break
         else:
             self.mpi_executable = mpi_executable
+            if "srun" in mpi_executable:
+                self.num_ranks_flag = "-n"
+            else:
+                self.num_ranks_flag = "-np"
 
         self.stdin = stdin
         self.env = env
@@ -205,6 +214,6 @@ class RadicalBashOperator(BaseOperator):
 
         call = list()
         call.append(mpi_executable)
-        call.extend(["-np", str(mpi_ranks)])
+        call.extend([self.num_ranks_flag, str(mpi_ranks)])
         call.append(bash_command)
         return " ".join(map(str, call))
