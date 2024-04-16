@@ -96,7 +96,13 @@ class RadicalBashOperator(BaseOperator):
         kwargs.update({"pool_slots": self.mpi_ranks * self.cpus_per_task})
         super().__init__(**kwargs)
         self.bash_command = bash_command
-        self.mpi_executable = mpi_executable
+        if mpi_executable is None:
+            for executable in ["mpirun", "mpiexec", "srun"]:
+                if shutil.which(executable):
+                    self.mpi_executable = executable
+                    break
+        else:
+            self.mpi_executable = mpi_executable
 
         self.stdin = stdin
         self.env = env
@@ -147,8 +153,6 @@ class RadicalBashOperator(BaseOperator):
         if self.cwd is not None:
             if not os.path.exists(self.cwd):
                 os.makedirs(self.cwd)
-        if self.mpi_executable is None:
-            self.mpi_executable = "mpirun"
         if self.bash_command is None:
             raise ValueError("bash_command is a required argument")
         self.log.info(f"mpi_executable: {self.mpi_executable}")

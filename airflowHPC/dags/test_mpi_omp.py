@@ -29,7 +29,6 @@ with DAG(
     mdrun_result = RadicalBashOperator(
         task_id="hello_mpi_omp",
         bash_command="./hello_mpi_omp",
-        mpi_executable="mpirun",
         mpi_ranks="4",
         cpus_per_task="2",
         cwd="{{ task_instance.xcom_pull(task_ids='tempdir') }}",

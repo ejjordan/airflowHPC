@@ -76,8 +76,6 @@ class RadicalGmxapiBashOperator(RadicalBashOperator):
             from gmxapi.commandline import cli_executable
 
             self.gmx_executable = cli_executable()
-        if self.mpi_executable is None:
-            self.mpi_executable = "mpirun"
         self.log.info(f"mpi_executable: {self.mpi_executable}")
         self.log.info(f"mpi_ranks: {self.mpi_ranks}")
         self.log.info(f"gmx_executable: {self.gmx_executable}")

@@ -52,7 +52,6 @@ with DAG(
     outputs_dirs = outputs_list.override(task_id="get_output_dirs")()
     mdrun_result = RadicalGmxapiBashOperator.partial(
         task_id="mdrun",
-        mpi_executable="mpirun",
         mpi_ranks=4,
         cpus_per_task=2,
         gmx_arguments=["mdrun", "-ntomp", "2"],

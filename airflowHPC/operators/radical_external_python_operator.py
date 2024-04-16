@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import shutil
 import inspect
 import subprocess
 
@@ -77,7 +78,10 @@ class RadicalExternalPythonOperator(ExternalPythonOperator):
         kwargs.update({"pool_slots": int(self.mpi_ranks)})
         super().__init__(**kwargs)
         if mpi_executable is None:
-            self.mpi_executable = "mpirun"
+            for executable in ["mpirun", "mpiexec", "srun"]:
+                if shutil.which(executable):
+                    self.mpi_executable = executable
+                    break
         else:
             self.mpi_executable = mpi_executable
 
