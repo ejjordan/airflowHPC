@@ -149,7 +149,7 @@ class RadicalGmxapiBashOperator(RadicalBashOperator):
 
         call = list()
         call.append(mpi_executable)
-        call.extend(["-np", str(mpi_ranks)])
+        call.extend([self.num_ranks_flag, str(mpi_ranks)])
         call.append(gmx_executable)
         call.extend(gmx_arguments)
         call.extend(self.flatten_dict(input_files))
