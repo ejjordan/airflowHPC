@@ -28,24 +28,34 @@ import contextlib
 import logging
 import os
 import subprocess
+import time
 from abc import abstractmethod
 from multiprocessing import Manager, Process
 from queue import Empty
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional, Tuple, List
 
+from airflow.settings import Session
+from airflow.stats import Stats
+from airflow.utils.session import provide_session, NEW_SESSION
+from radical.pilot import Slot
 from setproctitle import getproctitle, setproctitle
 
 from airflow import settings
 from airflow.exceptions import AirflowException
-from airflow.executors.base_executor import PARALLELISM, BaseExecutor
+from airflow.executors.base_executor import BaseExecutor
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
+from airflow.utils.event_scheduler import EventScheduler
+
+import radical.utils as ru
+import radical.pilot as rp
+from sqlalchemy import select, update
 
 if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
     from queue import Queue
 
-    from airflow.executors.base_executor import CommandType
+    from airflow.executors.base_executor import CommandType, TaskTuple
     from airflow.models.taskinstance import TaskInstanceStateType
     from airflow.models.taskinstancekey import TaskInstanceKey
 
@@ -216,16 +226,23 @@ class ResourceExecutor(BaseExecutor):
 
     serve_logs: bool = True
 
-    def __init__(self, parallelism: int = PARALLELISM):
-        super().__init__(parallelism=parallelism)
+    def __init__(self):
+        rcfgs = ru.Config("radical.pilot.resource", name="*", expand=False)
+        site = os.environ.get("RADICAL_PILOT_SITE", "dardel")
+        platform = os.environ.get("RADICAL_PILOT_PLATFORM", "dardel_gpu")
+        resource_config = ru.Config(cfg=rcfgs[site][platform])
+        self.cores_per_node = resource_config.cores_per_node
+        self.gpus_per_node = resource_config.gpus_per_node
+        self.mem_per_node = resource_config.mem_per_node
+        self.num_nodes = os.environ.get("RADICAL_NUM_NODES", 1)
+        super().__init__(parallelism=self.num_nodes * self.cores_per_node)
         if self.parallelism < 0:
             raise AirflowException("parallelism must be bigger than or equal to 0")
         self.manager: SyncManager | None = None
         self.result_queue: Queue[TaskInstanceStateType] | None = None
         self.task_queue: Queue[ExecutorWorkType] | None = None
         self.workers: list[QueuedResourceWorker] = []
-        self.workers_used: int = 0
-        self.workers_active: int = 0
+        self.slots_dict: dict[TaskInstanceKey, List[Slot]] = {}
 
     def start(self) -> None:
         """Start the executor."""
@@ -235,16 +252,32 @@ class ResourceExecutor(BaseExecutor):
         setproctitle(old_proctitle)
         self.result_queue = self.manager.Queue()
         self.workers = []
-        self.workers_used = 0
         self.workers_active = 0
+
+        nodes = [
+            {
+                "index": i,
+                "name": "node_%05d" % i,
+                "cores": [
+                    rp.ResourceOccupation(index=core_idx, occupation=rp.FREE)
+                    for core_idx in range(self.cores_per_node)
+                ],
+                "gpus": [
+                    rp.ResourceOccupation(index=gpu_idx, occupation=rp.FREE)
+                    for gpu_idx in range(self.gpus_per_node)
+                ],
+                "mem": self.mem_per_node,
+            }
+            for i in range(self.num_nodes)
+        ]
+
+        self.nodes_list = rp.NodeList(nodes=[rp.NodeResources(ni) for ni in nodes])
 
         self.task_queue = self.manager.Queue()
         self.workers = [
             QueuedResourceWorker(self.task_queue, self.result_queue)
             for _ in range(self.parallelism)
         ]
-
-        self.workers_used = len(self.workers)
 
         for worker in self.workers:
             worker.start()
@@ -257,8 +290,6 @@ class ResourceExecutor(BaseExecutor):
         executor_config: Any | None = None,
     ) -> None:
         """Execute asynchronously."""
-        if TYPE_CHECKING:
-            assert self.impl
 
         self.validate_airflow_tasks_run_command(command)
 
@@ -267,6 +298,25 @@ class ResourceExecutor(BaseExecutor):
 
         self.task_queue.put((key, command))
 
+    def _process_tasks(self, task_tuples: list[TaskTuple]) -> None:
+        for key, command, queue, executor_config in task_tuples:
+            if executor_config:
+                gpu_occupation = executor_config.get("gpu_occupation", 1.0)
+                resource_req = rp.RankRequirements(
+                    n_cores=executor_config["mpi_ranks"],
+                    n_gpus=executor_config["gpu_per_rank"],
+                    gpu_occupation=gpu_occupation,
+                )
+                slots = self.nodes_list.find_slots(resource_req)
+                self.slots_dict[key] = slots
+                if not slots:
+                    return
+            del self.queued_tasks[key]
+            self.execute_async(
+                key=key, command=command, queue=queue, executor_config=executor_config
+            )
+            self.running.add(key)
+
     def sync(self) -> None:
         """Sync will get called periodically by the heartbeat method."""
         with contextlib.suppress(Empty):
@@ -274,6 +324,7 @@ class ResourceExecutor(BaseExecutor):
                 results = self.result_queue.get_nowait()
                 try:
                     self.change_state(*results)
+                    self.nodes_list.release_slots(self.slots_dict[results[0]])
                 finally:
                     self.result_queue.task_done()
 
