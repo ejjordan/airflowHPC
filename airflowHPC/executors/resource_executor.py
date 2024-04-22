@@ -324,7 +324,9 @@ class ResourceExecutor(BaseExecutor):
                 results = self.result_queue.get_nowait()
                 try:
                     self.change_state(*results)
-                    self.nodes_list.release_slots(self.slots_dict[results[0]])
+                    if results[0] in self.slots_dict:
+                        self.nodes_list.release_slots(self.slots_dict[results[0]])
+                        self.slots_dict.pop(results[0])
                 finally:
                     self.result_queue.task_done()
 
