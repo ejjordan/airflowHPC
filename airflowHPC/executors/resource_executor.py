@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     ExecutorWorkType = Tuple[Optional[TaskInstanceKey], Optional[CommandType]]
 
 
-class ResourceWorkerBase(Process, LoggingMixin):
+class ResourceWorker(Process, LoggingMixin):
     """
     ResourceWorkerBase implementation to run airflow commands.
 
@@ -74,9 +74,14 @@ class ResourceWorkerBase(Process, LoggingMixin):
     :param result_queue: the queue to store result state
     """
 
-    def __init__(self, result_queue: Queue[TaskInstanceStateType]):
+    def __init__(
+        self,
+        task_queue: Queue[ExecutorWorkType],
+        result_queue: Queue[TaskInstanceStateType],
+    ):
         super().__init__(target=self.do_work)
         self.daemon: bool = True
+        self.task_queue = task_queue
         self.result_queue: Queue[TaskInstanceStateType] = result_queue
 
     def run(self):
@@ -152,54 +157,6 @@ class ResourceWorkerBase(Process, LoggingMixin):
             logging.shutdown()
             os._exit(ret)
 
-    @abstractmethod
-    def do_work(self):
-        """Execute tasks; called in the subprocess."""
-        raise NotImplementedError()
-
-
-class ResourceWorker(ResourceWorkerBase):
-    """
-    Resource worker that executes the task.
-
-    :param result_queue: queue where results of the tasks are put.
-    :param key: key identifying task instance
-    :param command: Command to execute
-    """
-
-    def __init__(
-        self,
-        result_queue: Queue[TaskInstanceStateType],
-        key: TaskInstanceKey,
-        command: CommandType,
-    ):
-        super().__init__(result_queue)
-        self.key: TaskInstanceKey = key
-        self.command: CommandType = command
-
-    def do_work(self) -> None:
-        self.execute_work(key=self.key, command=self.command)
-
-
-class QueuedResourceWorker(ResourceWorkerBase):
-    """
-    ResourceWorker implementation that is waiting for tasks from a queue.
-
-    Will continue executing commands as they become available in the queue.
-    It will terminate execution once the poison token is found.
-
-    :param task_queue: queue from which worker reads tasks
-    :param result_queue: queue where worker puts results after finishing tasks
-    """
-
-    def __init__(
-        self,
-        task_queue: Queue[ExecutorWorkType],
-        result_queue: Queue[TaskInstanceStateType],
-    ):
-        super().__init__(result_queue=result_queue)
-        self.task_queue = task_queue
-
     def do_work(self) -> None:
         while True:
             try:
@@ -241,8 +198,8 @@ class ResourceExecutor(BaseExecutor):
         self.manager: SyncManager | None = None
         self.result_queue: Queue[TaskInstanceStateType] | None = None
         self.task_queue: Queue[ExecutorWorkType] | None = None
-        self.workers: list[QueuedResourceWorker] = []
-        self.slots_dict: dict[TaskInstanceKey, List[Slot]] = {}
+        self.workers: list[ResourceWorker] = []
+        self.slots_dict: dict[TaskInstanceKey, Slot] = {}
 
     def start(self) -> None:
         """Start the executor."""
@@ -275,7 +232,7 @@ class ResourceExecutor(BaseExecutor):
 
         self.task_queue = self.manager.Queue()
         self.workers = [
-            QueuedResourceWorker(self.task_queue, self.result_queue)
+            ResourceWorker(self.task_queue, self.result_queue)
             for _ in range(self.parallelism)
         ]
 
@@ -298,19 +255,70 @@ class ResourceExecutor(BaseExecutor):
 
         self.task_queue.put((key, command))
 
+    def trigger_tasks(self, open_slots: int) -> None:
+        """
+        Initiate async execution of the queued tasks, up to the number of available slots.
+
+        :param open_slots: Number of open slots
+        """
+        sorted_queue = self.order_queued_tasks_by_priority()
+        task_tuples = []
+
+        for _ in range(min((open_slots, len(self.queued_tasks)))):
+            key, (command, _, queue, ti) = sorted_queue.pop(0)
+
+            # If a task makes it here but is still understood by the executor
+            # to be running, it generally means that the task has been killed
+            # externally and not yet been marked as failed.
+            #
+            # However, when a task is deferred, there is also a possibility of
+            # a race condition where a task might be scheduled again during
+            # trigger processing, even before we are able to register that the
+            # deferred task has completed. In this case and for this reason,
+            # we make a small number of attempts to see if the task has been
+            # removed from the running set in the meantime.
+            if key in self.running:
+                attempt = self.attempts[key]
+                if attempt.can_try_again():
+                    # if it hasn't been much time since first check, let it be checked again next time
+                    self.log.info(
+                        "queued but still running; attempt=%s task=%s",
+                        attempt.total_tries,
+                        key,
+                    )
+                    continue
+                # Otherwise, we give up and remove the task from the queue.
+                self.log.error(
+                    "could not queue task %s (still running after %d attempts)",
+                    key,
+                    attempt.total_tries,
+                )
+                del self.attempts[key]
+                del self.queued_tasks[key]
+            else:
+                if key in self.attempts:
+                    del self.attempts[key]
+                task_tuples.append((key, command, queue, ti))
+
+        if task_tuples:
+            self._process_tasks(task_tuples)
+
     def _process_tasks(self, task_tuples: list[TaskTuple]) -> None:
-        for key, command, queue, executor_config in task_tuples:
+        for key, command, queue, ti in task_tuples:
+            executor_config = ti.executor_config
             if executor_config:
                 gpu_occupation = executor_config.get("gpu_occupation", 1.0)
                 resource_req = rp.RankRequirements(
                     n_cores=executor_config["mpi_ranks"],
-                    n_gpus=executor_config["gpu_per_rank"],
+                    n_gpus=executor_config["gpus"],
                     gpu_occupation=gpu_occupation,
                 )
                 slots = self.nodes_list.find_slots(resource_req)
-                self.slots_dict[key] = slots
                 if not slots:
                     return
+                if len(slots) > 1:
+                    raise RuntimeError("Should have only gotten one slot.")
+                self.slots_dict[key] = slots[0]
             del self.queued_tasks[key]
             self.execute_async(
                 key=key, command=command, queue=queue, executor_config=executor_config
@@ -321,12 +329,12 @@ class ResourceExecutor(BaseExecutor):
         """Sync will get called periodically by the heartbeat method."""
         with contextlib.suppress(Empty):
             while True:
-                results = self.result_queue.get_nowait()
+                key, state = self.result_queue.get_nowait()
                 try:
-                    self.change_state(*results)
-                    if results[0] in self.slots_dict:
-                        self.nodes_list.release_slots(self.slots_dict[results[0]])
-                        self.slots_dict.pop(results[0])
+                    self.change_state(key, state)
+                    if key in self.slots_dict:
+                        self.nodes_list.release_slots([self.slots_dict[key]])
+                        self.slots_dict.pop(key)
                 finally:
                     self.result_queue.task_done()
 

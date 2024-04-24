@@ -72,16 +72,16 @@ class RadicalBashOperator(BaseOperator):
     }
     ui_color = "#f0ede4"
 
-    partial: Callable[..., OperatorPartial] = PoolPartialDescriptor()  # type: ignore
+    # partial: Callable[..., OperatorPartial] = PoolPartialDescriptor()  # type: ignore
 
     def __init__(
         self,
         *,
         bash_command: str | None = None,
         mpi_executable: str | None = None,
-        mpi_ranks: str,
-        cpus_per_task: str,
-        # gpus: list[int] = None,
+        mpi_ranks: int,
+        cpus_per_task: int | None = None,
+        gpus: int | None = None,
         stdin=None,
         env: dict[str, str] | None = None,
         append_env: bool = False,
@@ -91,9 +91,45 @@ class RadicalBashOperator(BaseOperator):
         cwd: str | None = None,
         **kwargs,
     ) -> None:
+        if "executor_config" in kwargs:
+            executor_config = kwargs.pop("executor_config")
+            if (
+                "mpi_ranks" in executor_config
+                and mpi_ranks != executor_config["mpi_ranks"]
+            ):
+                raise ValueError(
+                    "The mpi_ranks argument cannot be set to different values in executor_config and operator."
+                )
+            if (
+                "cpus_per_task" in executor_config
+                and cpus_per_task != executor_config["cpus_per_task"]
+            ):
+                raise ValueError(
+                    "The cpus_per_task argument cannot be set to different values in executor_config and operator."
+                )
+            if "gpus" in executor_config and gpus != executor_config["gpus"]:
+                raise ValueError(
+                    "The gpus argument cannot be set to different values in executor_config and operator."
+                )
+            executor_config.update(
+                {"mpi_ranks": mpi_ranks, "cpus_per_task": cpus_per_task, "gpus": gpus}
+            )
+            kwargs.update({"executor_config": executor_config})
+        else:
+            kwargs.update(
+                {
+                    "executor_config": {
+                        "mpi_ranks": mpi_ranks,
+                        "cpus_per_task": cpus_per_task,
+                        "gpus": gpus,
+                    }
+                }
+            )
+
         self.mpi_ranks = int(mpi_ranks)
-        self.cpus_per_task = int(cpus_per_task)
-        kwargs.update({"pool_slots": self.mpi_ranks * self.cpus_per_task})
+        self.cpus_per_task = int(cpus_per_task) if cpus_per_task is not None else 1
+        self.gpus = int(gpus) if gpus is not None else 0
+        # kwargs.update({"pool_slots": self.mpi_ranks * self.cpus_per_task})
         super().__init__(**kwargs)
         self.bash_command = bash_command
         if mpi_executable is None:
@@ -132,6 +168,14 @@ class RadicalBashOperator(BaseOperator):
         )
         self.cwd = cwd
         self.append_env = append_env
+        self.gpu_ids = (
+            []
+        )  # This is set by the executor because it knows the available GPUs
+        self.gpu_type = "amd"
+
+    def update_gpu_ids(self, gpu_ids: list[int], gpu_type: str):
+        self.gpu_ids = gpu_ids
+        self.gpu_type = gpu_type
 
     def get_env(self, context):
         """Build the set of environment variables to be exposed for the bash command."""
@@ -151,6 +195,11 @@ class RadicalBashOperator(BaseOperator):
         )
         env.update(airflow_context_vars)
         env.update({"OMP_NUM_THREADS": str(self.cpus_per_task)})
+        if self.gpu_type == "nvidia":
+            env.update({"CUDA_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
+        if self.gpu_type == "amd":
+            env.update({"ROCR_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
+
         return env
 
     @cached_property
@@ -164,13 +213,15 @@ class RadicalBashOperator(BaseOperator):
                 os.makedirs(self.cwd)
         if self.bash_command is None:
             raise ValueError("bash_command is a required argument")
+        bash_path = shutil.which("bash") or "bash"
+        env = self.get_env(context)
+
         self.log.info(f"mpi_executable: {self.mpi_executable}")
         self.log.info(f"mpi_ranks: {self.mpi_ranks}")
         self.log.info(f"cpus_per_task: {self.cpus_per_task}")
         self.log.info(f"cwd: {self.cwd}")
-        bash_path = shutil.which("bash") or "bash"
+        self.log.info(f"gpu_ids: {self.gpu_ids}")
 
-        env = self.get_env(context)
         self.call = self.create_call(
             mpi_executable=self.mpi_executable,
             mpi_ranks=self.mpi_ranks,
