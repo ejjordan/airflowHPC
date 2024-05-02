@@ -58,14 +58,22 @@ class PoolPartialDescriptor:
 class RadicalBashOperator(BaseOperator):
     template_fields: Sequence[str] = (
         "bash_command",
-        "mpi_executable",
+        "mpi_ranks",
+        "cpus_per_task",
+        "gpus",
+        "gpu_ids",
+        "gpu_type",
         "env",
         "stdin",
         "cwd",
     )
     template_fields_renderers = {
         "bash_command": "bash",
-        "mpi_executable": "bash",
+        "mpi_ranks": "py",
+        "cpus_per_task": "py",
+        "gpus": "py",
+        "gpu_ids": "py",
+        "gpu_type": "py",
         "env": "json",
         "stdin": "py",
         "cwd": "py",
@@ -82,6 +90,8 @@ class RadicalBashOperator(BaseOperator):
         mpi_ranks: int,
         cpus_per_task: int | None = None,
         gpus: int | None = None,
+        gpu_ids: list[int] | None = None,
+        gpu_type: str | None = None,
         stdin=None,
         env: dict[str, str] | None = None,
         append_env: bool = False,
@@ -129,6 +139,7 @@ class RadicalBashOperator(BaseOperator):
         self.mpi_ranks = int(mpi_ranks)
         self.cpus_per_task = int(cpus_per_task) if cpus_per_task is not None else 1
         self.gpus = int(gpus) if gpus is not None else 0
+        self.gpu_type = gpu_type
         # kwargs.update({"pool_slots": self.mpi_ranks * self.cpus_per_task})
         super().__init__(**kwargs)
         self.bash_command = bash_command
@@ -168,14 +179,9 @@ class RadicalBashOperator(BaseOperator):
         )
         self.cwd = cwd
         self.append_env = append_env
-        self.gpu_ids = (
-            []
-        )  # This is set by the executor because it knows the available GPUs
-        self.gpu_type = "amd"
-
-    def update_gpu_ids(self, gpu_ids: list[int], gpu_type: str):
-        self.gpu_ids = gpu_ids
-        self.gpu_type = gpu_type
+        if gpu_ids is None:
+            # This is set by the executor because it knows the available GPUs
+            self.gpu_ids = []
 
     def get_env(self, context):
         """Build the set of environment variables to be exposed for the bash command."""
@@ -195,11 +201,24 @@ class RadicalBashOperator(BaseOperator):
         )
         env.update(airflow_context_vars)
         env.update({"OMP_NUM_THREADS": str(self.cpus_per_task)})
+        if self.gpu_type == None:
+            if self.gpus > 0:
+                raise ValueError("Set gpus > 0 but did not specify gpu_type.")
+        if self.gpus > 0:
+            if "GPU_IDS" in env.keys():
+                self.log.debug(f"visible: {env['GPU_IDS']}")
+                self.gpu_ids = [int(id) for id in env["GPU_IDS"].split(",")]
+            else:
+                raise RuntimeError(
+                    f"Set gpu_type to {self.gpu_type} but did not specify gpu_ids. \
+                    If you requested gpus and get this error, please contact the project maintainers."
+                )
+        if self.gpu_type == "rocm":
+            env.update({"ROCR_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
+        if self.gpu_type == "hip":
+            env.update({"HIP_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
         if self.gpu_type == "nvidia":
             env.update({"CUDA_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
-        if self.gpu_type == "amd":
-            env.update({"ROCR_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
-
         return env
 
     @cached_property

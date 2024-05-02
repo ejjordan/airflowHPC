@@ -25,18 +25,12 @@ ResourceExecutor.
 from __future__ import annotations
 
 import contextlib
-import logging
 import os
 import subprocess
-import time
-from abc import abstractmethod
 from multiprocessing import Manager, Process
 from queue import Empty
 from typing import TYPE_CHECKING, Any, Optional, Tuple, List
 
-from airflow.settings import Session
-from airflow.stats import Stats
-from airflow.utils.session import provide_session, NEW_SESSION
 from radical.pilot import Slot
 from setproctitle import getproctitle, setproctitle
 
@@ -45,24 +39,25 @@ from airflow.exceptions import AirflowException
 from airflow.executors.base_executor import BaseExecutor
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
-from airflow.utils.event_scheduler import EventScheduler
+from airflow.models.taskinstance import TaskInstance
 
 import radical.utils as ru
 import radical.pilot as rp
-from sqlalchemy import select, update
 
 if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
     from queue import Queue
 
-    from airflow.executors.base_executor import CommandType, TaskTuple
+    from airflow.executors.base_executor import CommandType
     from airflow.models.taskinstance import TaskInstanceStateType
     from airflow.models.taskinstancekey import TaskInstanceKey
 
     # This is a work to be executed by a worker.
     # It can Key and Command - but it can also be None, None which is actually a
     # "Poison Pill" - worker seeing Poison Pill should take the pill and ... die instantly.
-    ExecutorWorkType = Tuple[Optional[TaskInstanceKey], Optional[CommandType]]
+    ExecutorWorkType = Tuple[
+        Optional[TaskInstanceKey], Optional[CommandType], Optional[list[int]]
+    ]
 
 
 class ResourceWorker(Process, LoggingMixin):
@@ -91,7 +86,9 @@ class ResourceWorker(Process, LoggingMixin):
         setproctitle("airflow worker -- ResourceExecutor")
         return super().run()
 
-    def execute_work(self, key: TaskInstanceKey, command: CommandType) -> None:
+    def execute_work(
+        self, key: TaskInstanceKey, command: CommandType, gpu_ids: list[int]
+    ) -> None:
         """
         Execute command received and stores result state in queue.
 
@@ -103,64 +100,28 @@ class ResourceWorker(Process, LoggingMixin):
 
         self.log.info("%s running %s", self.__class__.__name__, command)
         setproctitle(f"airflow worker -- ResourceExecutor: {command}")
-        if settings.EXECUTE_TASKS_NEW_PYTHON_INTERPRETER:
-            state = self._execute_work_in_subprocess(command)
-        else:
-            state = self._execute_work_in_fork(command)
-
+        env = os.environ.copy()
+        visible_devices = ",".join(map(str, gpu_ids))
+        env.update({"GPU_IDS": visible_devices})
+        state = self._execute_work_in_subprocess(command, env)
         self.result_queue.put((key, state))
         # Remove the command since the worker is done executing the task
         setproctitle("airflow worker -- ResourceExecutor")
 
-    def _execute_work_in_subprocess(self, command: CommandType) -> TaskInstanceState:
+    def _execute_work_in_subprocess(
+        self, command: CommandType, env
+    ) -> TaskInstanceState:
         try:
-            subprocess.check_call(command, close_fds=True)
+            subprocess.check_call(command, close_fds=True, env=env)
             return TaskInstanceState.SUCCESS
         except subprocess.CalledProcessError as e:
             self.log.error("Failed to execute task %s.", e)
             return TaskInstanceState.FAILED
 
-    def _execute_work_in_fork(self, command: CommandType) -> TaskInstanceState:
-        pid = os.fork()
-        if pid:
-            # In parent, wait for the child
-            pid, ret = os.waitpid(pid, 0)
-            return TaskInstanceState.SUCCESS if ret == 0 else TaskInstanceState.FAILED
-
-        from airflow.sentry import Sentry
-
-        ret = 1
-        try:
-            import signal
-
-            from airflow.cli.cli_parser import get_parser
-
-            signal.signal(signal.SIGINT, signal.SIG_DFL)
-            signal.signal(signal.SIGTERM, signal.SIG_DFL)
-            signal.signal(signal.SIGUSR2, signal.SIG_DFL)
-
-            parser = get_parser()
-            # [1:] - remove "airflow" from the start of the command
-            args = parser.parse_args(command[1:])
-            args.shut_down_logging = False
-
-            setproctitle(f"airflow task supervisor: {command}")
-
-            args.func(args)
-            ret = 0
-            return TaskInstanceState.SUCCESS
-        except Exception as e:
-            self.log.exception("Failed to execute task %s.", e)
-            return TaskInstanceState.FAILED
-        finally:
-            Sentry.flush()
-            logging.shutdown()
-            os._exit(ret)
-
     def do_work(self) -> None:
         while True:
             try:
-                key, command = self.task_queue.get()
+                key, command, gpu_ids = self.task_queue.get()
             except EOFError:
                 self.log.info(
                     "Failed to read tasks from the task queue because the other "
@@ -172,14 +133,14 @@ class ResourceWorker(Process, LoggingMixin):
                 if key is None or command is None:
                     # Received poison pill, no more tasks to run
                     break
-                self.execute_work(key=key, command=command)
+                self.execute_work(key=key, command=command, gpu_ids=gpu_ids)
             finally:
                 self.task_queue.task_done()
 
 
 class ResourceExecutor(BaseExecutor):
     is_local: bool = True
-    supports_pickling: bool = False
+    supports_pickling: bool = True
 
     serve_logs: bool = True
 
@@ -200,6 +161,9 @@ class ResourceExecutor(BaseExecutor):
         self.task_queue: Queue[ExecutorWorkType] | None = None
         self.workers: list[ResourceWorker] = []
         self.slots_dict: dict[TaskInstanceKey, Slot] = {}
+        self.task_resource_requests: dict[
+            TaskInstanceKey, rp.RankRequirements | None
+        ] = {}
 
     def start(self) -> None:
         """Start the executor."""
@@ -239,6 +203,37 @@ class ResourceExecutor(BaseExecutor):
         for worker in self.workers:
             worker.start()
 
+    def queue_command(
+        self,
+        task_instance: TaskInstance,
+        command: CommandType,
+        priority: int = 1,
+        queue: str | None = None,
+    ):
+        """Queues command to task."""
+        if task_instance.key not in self.queued_tasks:
+            self.log.info("Adding to queue: %s", command)
+            if task_instance.executor_config:
+                resource_req = rp.RankRequirements(
+                    n_cores=task_instance.executor_config["mpi_ranks"],
+                    n_gpus=task_instance.executor_config["gpus"],
+                    gpu_occupation=task_instance.executor_config.get(
+                        "gpu_occupation", 1.0
+                    ),
+                )
+                self.task_resource_requests[task_instance.key] = resource_req
+            else:
+                self.task_resource_requests[task_instance.key] = None
+            self.queued_tasks[task_instance.key] = (
+                command,
+                priority,
+                queue,
+                task_instance,
+            )
+
+        else:
+            self.log.error("could not queue task %s", task_instance.key)
+
     def execute_async(
         self,
         key: TaskInstanceKey,
@@ -253,7 +248,8 @@ class ResourceExecutor(BaseExecutor):
         if TYPE_CHECKING:
             assert self.task_queue
 
-        self.task_queue.put((key, command))
+        gpu_ids = [slot.index for slot in self.slots_dict[key].gpus]
+        self.task_queue.put((key, command, gpu_ids))
 
     def trigger_tasks(self, open_slots: int) -> None:
         """
@@ -265,7 +261,7 @@ class ResourceExecutor(BaseExecutor):
         task_tuples = []
 
         for _ in range(min((open_slots, len(self.queued_tasks)))):
-            key, (command, _, queue, ti) = sorted_queue.pop(0)
+            key, (command, priority, queue, ti) = sorted_queue.pop(0)
 
             # If a task makes it here but is still understood by the executor
             # to be running, it generally means that the task has been killed
@@ -296,34 +292,24 @@ class ResourceExecutor(BaseExecutor):
                 del self.attempts[key]
                 del self.queued_tasks[key]
             else:
+                resource_req = self.task_resource_requests[key]
+                slots = self.nodes_list.find_slots(resource_req, n_slots=1)
+                if not slots:
+                    sorted_queue.append(
+                        (key, (command, priority, queue, ti.executor_config))
+                    )
+                    break
+                assert len(slots) == 1
+                slot = slots[0]
+                self.log.debug("Allocated slots %s", slot)
+
                 if key in self.attempts:
                     del self.attempts[key]
+                self.slots_dict[key] = slot
                 task_tuples.append((key, command, queue, ti))
 
         if task_tuples:
             self._process_tasks(task_tuples)
-
-    def _process_tasks(self, task_tuples: list[TaskTuple]) -> None:
-        for key, command, queue, ti in task_tuples:
-            executor_config = ti.executor_config
-            if executor_config:
-                gpu_occupation = executor_config.get("gpu_occupation", 1.0)
-                resource_req = rp.RankRequirements(
-                    n_cores=executor_config["mpi_ranks"],
-                    n_gpus=executor_config["gpus"],
-                    gpu_occupation=gpu_occupation,
-                )
-                slots = self.nodes_list.find_slots(resource_req)
-                if not slots:
-                    return
-                if len(slots) > 1:
-                    raise RuntimeError("Should have only gotten one slot.")
-                self.slots_dict[key] = slots[0]
-            del self.queued_tasks[key]
-            self.execute_async(
-                key=key, command=command, queue=queue, executor_config=executor_config
-            )
-            self.running.add(key)
 
     def sync(self) -> None:
         """Sync will get called periodically by the heartbeat method."""
@@ -331,10 +317,13 @@ class ResourceExecutor(BaseExecutor):
             while True:
                 key, state = self.result_queue.get_nowait()
                 try:
-                    self.change_state(key, state)
-                    if key in self.slots_dict:
-                        self.nodes_list.release_slots([self.slots_dict[key]])
-                        self.slots_dict.pop(key)
+                    self.change_state(key=key, state=state)
+                    if state in {TaskInstanceState.SUCCESS, TaskInstanceState.FAILED}:
+                        if key in self.slots_dict:
+                            self.nodes_list.release_slots([self.slots_dict[key]])
+                            self.slots_dict.pop(key)
+                        else:
+                            self.log.info(f"Could not find {key} in slots dict.")
                 finally:
                     self.result_queue.task_done()
 
@@ -348,7 +337,7 @@ class ResourceExecutor(BaseExecutor):
             "; waiting for running tasks to finish.  Signal again if you don't want to wait."
         )
         for _ in self.workers:
-            self.task_queue.put((None, None))
+            self.task_queue.put((None, None, None))
 
         # Wait for commands to finish
         self.task_queue.join()
