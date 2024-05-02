@@ -102,8 +102,10 @@ class ResourceWorker(Process, LoggingMixin):
         self.log.info("%s running %s", self.__class__.__name__, command)
         setproctitle(f"airflow worker -- ResourceExecutor: {command}")
         env = os.environ.copy()
-        visible_devices = ",".join(map(str, gpu_ids))
-        env.update({self.gpu_env_var_name: visible_devices})
+        if gpu_ids:
+            visible_devices = ",".join(map(str, gpu_ids))
+            self.log.debug(f"Setting {self.gpu_env_var_name} to {visible_devices}")
+            env.update({self.gpu_env_var_name: visible_devices})
         state = self._execute_work_in_subprocess(command, env)
         self.result_queue.put((key, state))
         # Remove the command since the worker is done executing the task
