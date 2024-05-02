@@ -12,6 +12,8 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.models.baseoperator import partial as airflow_partial
 from airflow.utils.operator_helpers import context_to_airflow_vars
 from airflow.models.mappedoperator import OperatorPartial
+
+from airflowHPC.hooks.gpu import GPUHook
 from airflowHPC.hooks.subprocess import SubprocessHook
 
 if TYPE_CHECKING:
@@ -140,6 +142,7 @@ class RadicalBashOperator(BaseOperator):
         self.cpus_per_task = int(cpus_per_task) if cpus_per_task is not None else 1
         self.gpus = int(gpus) if gpus is not None else 0
         self.gpu_type = gpu_type
+        self.gpu_hook = GPUHook()
         # kwargs.update({"pool_slots": self.mpi_ranks * self.cpus_per_task})
         super().__init__(**kwargs)
         self.bash_command = bash_command
@@ -205,9 +208,11 @@ class RadicalBashOperator(BaseOperator):
             if self.gpus > 0:
                 raise ValueError("Set gpus > 0 but did not specify gpu_type.")
         if self.gpus > 0:
-            if "GPU_IDS" in env.keys():
-                self.log.debug(f"visible: {env['GPU_IDS']}")
-                self.gpu_ids = [int(id) for id in env["GPU_IDS"].split(",")]
+            if self.gpu_hook.gpu_env_var_name in env.keys():
+                self.log.debug(f"visible: {env[self.gpu_hook.gpu_env_var_name]}")
+                self.gpu_ids = [
+                    int(id) for id in env[self.gpu_hook.gpu_env_var_name].split(",")
+                ]
             else:
                 raise RuntimeError(
                     f"Set gpu_type to {self.gpu_type} but did not specify gpu_ids. \

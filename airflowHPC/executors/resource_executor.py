@@ -41,8 +41,7 @@ from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
 from airflow.models.taskinstance import TaskInstance
 
-import radical.utils as ru
-import radical.pilot as rp
+from airflowHPC.hooks.gpu import GPUHook
 
 if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
@@ -73,11 +72,13 @@ class ResourceWorker(Process, LoggingMixin):
         self,
         task_queue: Queue[ExecutorWorkType],
         result_queue: Queue[TaskInstanceStateType],
+        gpu_env_var_name: str | None = None,
     ):
         super().__init__(target=self.do_work)
         self.daemon: bool = True
         self.task_queue = task_queue
         self.result_queue: Queue[TaskInstanceStateType] = result_queue
+        self.gpu_env_var_name = gpu_env_var_name
 
     def run(self):
         # We know we've just started a new process, so lets disconnect from the metadata db now
@@ -102,7 +103,7 @@ class ResourceWorker(Process, LoggingMixin):
         setproctitle(f"airflow worker -- ResourceExecutor: {command}")
         env = os.environ.copy()
         visible_devices = ",".join(map(str, gpu_ids))
-        env.update({"GPU_IDS": visible_devices})
+        env.update({self.gpu_env_var_name: visible_devices})
         state = self._execute_work_in_subprocess(command, env)
         self.result_queue.put((key, state))
         # Remove the command since the worker is done executing the task
@@ -145,15 +146,10 @@ class ResourceExecutor(BaseExecutor):
     serve_logs: bool = True
 
     def __init__(self):
-        rcfgs = ru.Config("radical.pilot.resource", name="*", expand=False)
-        site = os.environ.get("RADICAL_PILOT_SITE", "dardel")
-        platform = os.environ.get("RADICAL_PILOT_PLATFORM", "dardel_gpu")
-        resource_config = ru.Config(cfg=rcfgs[site][platform])
-        self.cores_per_node = resource_config.cores_per_node
-        self.gpus_per_node = resource_config.gpus_per_node
-        self.mem_per_node = resource_config.mem_per_node
-        self.num_nodes = os.environ.get("RADICAL_NUM_NODES", 1)
-        super().__init__(parallelism=self.num_nodes * self.cores_per_node)
+        self.gpu_hook = GPUHook()
+        super().__init__(
+            parallelism=self.gpu_hook.num_nodes * self.gpu_hook.cores_per_node
+        )
         if self.parallelism < 0:
             raise AirflowException("parallelism must be bigger than or equal to 0")
         self.manager: SyncManager | None = None
@@ -161,9 +157,6 @@ class ResourceExecutor(BaseExecutor):
         self.task_queue: Queue[ExecutorWorkType] | None = None
         self.workers: list[ResourceWorker] = []
         self.slots_dict: dict[TaskInstanceKey, Slot] = {}
-        self.task_resource_requests: dict[
-            TaskInstanceKey, rp.RankRequirements | None
-        ] = {}
 
     def start(self) -> None:
         """Start the executor."""
@@ -175,28 +168,11 @@ class ResourceExecutor(BaseExecutor):
         self.workers = []
         self.workers_active = 0
 
-        nodes = [
-            {
-                "index": i,
-                "name": "node_%05d" % i,
-                "cores": [
-                    rp.ResourceOccupation(index=core_idx, occupation=rp.FREE)
-                    for core_idx in range(self.cores_per_node)
-                ],
-                "gpus": [
-                    rp.ResourceOccupation(index=gpu_idx, occupation=rp.FREE)
-                    for gpu_idx in range(self.gpus_per_node)
-                ],
-                "mem": self.mem_per_node,
-            }
-            for i in range(self.num_nodes)
-        ]
-
-        self.nodes_list = rp.NodeList(nodes=[rp.NodeResources(ni) for ni in nodes])
-
         self.task_queue = self.manager.Queue()
         self.workers = [
-            ResourceWorker(self.task_queue, self.result_queue)
+            ResourceWorker(
+                self.task_queue, self.result_queue, self.gpu_hook.gpu_env_var_name
+            )
             for _ in range(self.parallelism)
         ]
 
@@ -214,16 +190,20 @@ class ResourceExecutor(BaseExecutor):
         if task_instance.key not in self.queued_tasks:
             self.log.info("Adding to queue: %s", command)
             if task_instance.executor_config:
-                resource_req = rp.RankRequirements(
-                    n_cores=task_instance.executor_config["mpi_ranks"],
-                    n_gpus=task_instance.executor_config["gpus"],
-                    gpu_occupation=task_instance.executor_config.get(
-                        "gpu_occupation", 1.0
-                    ),
+                self.gpu_hook.set_task_resources(
+                    task_instance_key=task_instance.key,
+                    num_cores=task_instance.executor_config["mpi_ranks"],
+                    num_gpus=task_instance.executor_config["gpus"],
                 )
-                self.task_resource_requests[task_instance.key] = resource_req
             else:
-                self.task_resource_requests[task_instance.key] = None
+                self.log.info(
+                    f"Setting task resources to 1 core and 0 gpus for task {task_instance.key}"
+                )
+                self.gpu_hook.set_task_resources(
+                    task_instance_key=task_instance.key,
+                    num_cores=1,
+                    num_gpus=0,
+                )
             self.queued_tasks[task_instance.key] = (
                 command,
                 priority,
@@ -248,7 +228,7 @@ class ResourceExecutor(BaseExecutor):
         if TYPE_CHECKING:
             assert self.task_queue
 
-        gpu_ids = [slot.index for slot in self.slots_dict[key].gpus]
+        gpu_ids = self.gpu_hook.get_gpu_ids(key)
         self.task_queue.put((key, command, gpu_ids))
 
     def trigger_tasks(self, open_slots: int) -> None:
@@ -292,20 +272,15 @@ class ResourceExecutor(BaseExecutor):
                 del self.attempts[key]
                 del self.queued_tasks[key]
             else:
-                resource_req = self.task_resource_requests[key]
-                slots = self.nodes_list.find_slots(resource_req, n_slots=1)
-                if not slots:
+                found_slots = self.gpu_hook.assign_task_resources(key)
+                if not found_slots:
                     sorted_queue.append(
                         (key, (command, priority, queue, ti.executor_config))
                     )
                     break
-                assert len(slots) == 1
-                slot = slots[0]
-                self.log.debug("Allocated slots %s", slot)
 
                 if key in self.attempts:
                     del self.attempts[key]
-                self.slots_dict[key] = slot
                 task_tuples.append((key, command, queue, ti))
 
         if task_tuples:
@@ -319,11 +294,7 @@ class ResourceExecutor(BaseExecutor):
                 try:
                     self.change_state(key=key, state=state)
                     if state in {TaskInstanceState.SUCCESS, TaskInstanceState.FAILED}:
-                        if key in self.slots_dict:
-                            self.nodes_list.release_slots([self.slots_dict[key]])
-                            self.slots_dict.pop(key)
-                        else:
-                            self.log.info(f"Could not find {key} in slots dict.")
+                        self.gpu_hook.release_task_resources(key)
                 finally:
                     self.result_queue.task_done()
 
