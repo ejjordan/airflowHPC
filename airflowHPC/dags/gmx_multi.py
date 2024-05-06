@@ -58,6 +58,7 @@ with DAG(
             "gpus": 2,
             "gpu_type": "rocm",
         },
+        gmx_executable="gmx_mpi",
         gmx_arguments=["mdrun", "-ntomp", "2"],
         input_files={"-s": grompp_result["-o"]},
         output_files={"-c": "result.gro", "-x": "result.xtc"},

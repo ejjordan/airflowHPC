@@ -140,6 +140,9 @@ class ResourceGmxOperator(ResourceBashOperator):
         if isinstance(gmx_arguments, (str, bytes)):
             gmx_arguments = [gmx_arguments]
 
+        if self.gpu_ids:
+            gmx_arguments.extend(["-gpu_id", ",".join(map(str, self.gpu_ids))])
+
         call = list()
         call.append(mpi_executable)
         call.extend([self.num_ranks_flag, str(mpi_ranks)])
