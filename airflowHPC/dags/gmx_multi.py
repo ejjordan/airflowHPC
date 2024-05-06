@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.decorators import task
 from airflow.utils import timezone
 from airflowHPC.dags.tasks import get_file, run_gmxapi
-from airflowHPC.operators.radical_gmxapi_bash_operator import RadicalGmxapiBashOperator
+from airflowHPC.operators.resource_gmx_operator import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
@@ -14,7 +14,7 @@ def outputs_list(**context):
 
 
 with DAG(
-    "run_gmxapi_multi",
+    "gmx_multi",
     start_date=timezone.utcnow(),
     catchup=False,
     params={
@@ -50,10 +50,14 @@ with DAG(
         output_dir="{{ params.output_dir }}",
     )
     outputs_dirs = outputs_list.override(task_id="get_output_dirs")()
-    mdrun_result = RadicalGmxapiBashOperator.partial(
+    mdrun_result = ResourceGmxOperator.partial(
         task_id="mdrun",
-        mpi_ranks=4,
-        cpus_per_task=2,
+        executor_config={
+            "mpi_ranks": 4,
+            "cpus_per_task": 2,
+            "gpus": 2,
+            "gpu_type": "rocm",
+        },
         gmx_arguments=["mdrun", "-ntomp", "2"],
         input_files={"-s": grompp_result["-o"]},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
