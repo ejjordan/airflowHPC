@@ -17,15 +17,33 @@ with DAG(
         "inputs": Param(
             {"pdb": {"directory": "fs_peptide", "filename": "fs.pdb"}},
             type=["object", "null"],
-            title="Inputs list",
+            title="Inputs",
             items={
                 "type": "object",
                 "properties": {"pdb": {"type": ["object", "null"]}},
                 "required": ["pdb"],
             },
-            section="inputs",
+            section="Data",
         ),
-        "output_dir": "prep",
+        "outputs": Param(
+            {
+                "directory": "prep",
+                "gro": "system_prepared.gro",
+                "top": "system_prepared.top",
+            },
+            type=["object", "null"],
+            title="Outputs",
+            items={
+                "type": "object",
+                "properties": {
+                    "directory": {"type": "string"},
+                    "gro": {"type": "string"},
+                    "top": {"type": "string"},
+                },
+                "required": ["directory", "gro", "top"],
+            },
+            section="Data",
+        ),
         "box_size": 4,
         "force_field": "amber99sb-ildn",
         "water_model": "tip3p",
@@ -34,7 +52,6 @@ with DAG(
             type="number",
             title="Ion concentration",
         ),
-        "expected_output": "system_prepared.gro",
     },
 ) as prepare:
     prepare.doc = """Generic gromacs setup. If param ion_concentration is 0.0, genion is not run."""
@@ -53,12 +70,11 @@ with DAG(
         ],
         input_files={"-f": input_pdb},
         output_files={"-o": "system_initial.gro", "-p": "topol.top", "-i": "posre.itp"},
-        output_dir="{{ params.output_dir }}",
+        output_dir="{{ params.outputs.directory }}",
     )
-    # We need to wait here because there is apparently some delay in the file transfer by rp
     rename_pdb2gmx_top = BashOperator(
         task_id="rename_pdb2gmx_top",
-        bash_command="sleep 4;cp {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.output_dir }}/pdb2gmx.top",
+        bash_command="cp {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.outputs.directory }}/pdb2gmx.top",
         cwd=os.path.curdir,
     )
 
@@ -73,7 +89,7 @@ with DAG(
         ],
         input_files={"-f": pdb2gmx["-o"]},
         output_files={"-o": "system_box.gro"},
-        output_dir="{{ params.output_dir }}",
+        output_dir="{{ params.outputs.directory }}",
     )
     # gmx solvate does not allow specifying different file names for input and output top files.
     # Thus, we have to manually manage the files for each stage in the pipeline.
@@ -81,22 +97,22 @@ with DAG(
         args=["solvate"],
         input_files={"-cp": editconf["-o"], "-cs": "spc216.gro", "-p": pdb2gmx["-p"]},
         output_files={"-o": "system_solv.gro"},
-        output_dir="{{ params.output_dir }}",
+        output_dir="{{ params.outputs.directory }}",
     )
     rename_solvate_top = BashOperator(
         task_id="rename_solvate_top",
-        bash_command="cp {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.output_dir }}/solvate.top",
+        bash_command="cp {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.outputs.directory }}/solvate.top",
         cwd=os.path.curdir,
     )
 
     rename_solvate_gro_output = BashOperator(
         task_id="rename_solvate_gro_output",
-        bash_command="mv {{ params.output_dir }}/system_solv.gro {{ params.output_dir }}/{{ params.expected_output }}",
+        bash_command="mv {{ params.outputs.directory }}/system_solv.gro {{ params.outputs.directory }}/{{ params.outputs.gro }}",
         cwd=os.path.curdir,
     )
     rename_solvate_top_output = BashOperator(
         task_id="rename_solvate_top_output",
-        bash_command="mv {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.output_dir }}/{{ params.expected_output | replace('.gro', '.top') }}",
+        bash_command="mv {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.outputs.directory }}/{{ params.outputs.top }}",
         cwd=os.path.curdir,
     )
 
@@ -110,7 +126,7 @@ with DAG(
         args=["grompp"],
         input_files={"-f": genion_mdp, "-c": solvate["-o"], "-p": pdb2gmx["-p"]},
         output_files={"-o": "ions.tpr"},
-        output_dir="{{ params.output_dir }}",
+        output_dir="{{ params.outputs.directory }}",
     )
     genion = run_gmxapi.override(task_id="genion")(
         args=[
@@ -125,28 +141,27 @@ with DAG(
         ],
         input_files={"-s": genion_grompp["-o"], "-p": pdb2gmx["-p"]},
         output_files={"-o": "system_solv_ions.gro"},
-        output_dir="{{ params.output_dir }}",
+        output_dir="{{ params.outputs.directory }}",
         stdin="SOL",
     )
     rename_genion_gro_output = BashOperator(
         task_id="rename_genion_gro_output",
-        bash_command="sleep 4;mv {{ params.output_dir }}/system_solv_ions.gro {{ params.output_dir }}/{{ params.expected_output }}",
+        bash_command="mv {{ params.outputs.directory }}/system_solv_ions.gro {{ params.outputs.directory }}/{{ params.outputs.gro }}",
         cwd=os.path.curdir,
     )
     rename_genion_top_output = BashOperator(
         task_id="rename_genion_top_output",
-        bash_command="mv {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.output_dir }}/{{ params.expected_output | replace('.gro', '.top') }}",
+        bash_command="mv {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.outputs.directory }}/{{ params.outputs.top }}",
         cwd=os.path.curdir,
     )
 
     input_pdb >> pdb2gmx >> rename_pdb2gmx_top >> solvate
     solvate >> prepare_done_branch >> [rename_solvate_top, rename_solvate_gro_output]
-    rename_solvate_gro_output >> rename_solvate_top_output
+    prepare_done_branch >> [rename_solvate_gro_output, rename_solvate_top_output]
     (
         rename_solvate_top
         >> genion_mdp
         >> genion_grompp
         >> genion
-        >> rename_genion_gro_output
-        >> rename_genion_top_output
+        >> [rename_genion_gro_output, rename_genion_top_output]
     )
