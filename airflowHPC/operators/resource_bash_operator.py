@@ -64,10 +64,13 @@ class ResourceBashOperator(BaseOperator):
                 )
             if "cpus_per_task" not in executor_config:
                 executor_config["cpus_per_task"] = 1
-            if "gpu_type" in executor_config:
+            if (
+                "gpu_type" in executor_config
+                and executor_config["gpu_type"] is not None
+            ):
                 if executor_config["gpu_type"] not in ["rocm", "hip", "nvidia"]:
                     raise ValueError(
-                        "The gpu_type argument must be set to 'rocm', 'hip', or 'nvidia' in executor_config."
+                        "The gpu_type argument must be set to 'rocm', 'hip', 'nvidia' or 'None' in executor_config."
                     )
                 if "gpus" not in executor_config or executor_config["gpus"] == 0:
                     raise ValueError(

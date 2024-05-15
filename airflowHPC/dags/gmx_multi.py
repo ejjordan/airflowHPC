@@ -19,7 +19,7 @@ with DAG(
     catchup=False,
     params={
         "output_dir": "outputs",
-        "num_sims": 4,
+        "num_sims": 8,
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "basic_md.json"},
             "gro": {"directory": "ensemble_md", "filename": "sys.gro"},
@@ -55,8 +55,8 @@ with DAG(
         executor_config={
             "mpi_ranks": 4,
             "cpus_per_task": 2,
-            "gpus": 2,
-            "gpu_type": "rocm",
+            "gpus": 0,
+            "gpu_type": None,
         },
         gmx_executable="gmx_mpi",
         gmx_arguments=["mdrun", "-ntomp", "2"],
