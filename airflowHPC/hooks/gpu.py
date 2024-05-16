@@ -303,27 +303,28 @@ class GPUHook(BaseHook):
         site = os.environ.get("RADICAL_PILOT_SITE", "dardel")
         platform = os.environ.get("RADICAL_PILOT_PLATFORM", "dardel_gpu")
         resource_config = ru.Config(cfg=rcfgs[site][platform])
-        self.tasks_per_node = os.environ.get(
-            "SLURM_TASKS_PER_NODE", resource_config.cores_per_node
+        num_tasks = os.environ.get("SLURM_TASKS_PER_NODE")
+        self.tasks_per_node = (
+            int(num_tasks.split("(")[0])
+            if num_tasks
+            else resource_config.cores_per_node
         )
-        self.cpus_per_task = os.environ.get(
-            "SLURM_CPUS_PER_TASK", resource_config.system_architecture.smt
+        self.cpus_per_task = int(
+            os.environ.get(
+                "SLURM_CPUS_PER_TASK", resource_config.system_architecture.smt
+            )
         )
         self.gpus_per_node = (
             resource_config.gpus_per_node
         )  # TODO: use XXX-smi to get the number of GPUs
-        self.mem_per_node = os.environ.get(
-            "SLURM_TASKS_PER_NODE", resource_config.mem_per_node
-        )
-        self.num_nodes = os.environ.get("SLURM_NNODES", 1)
+        self.mem_per_node = resource_config.mem_per_node
+        self.num_nodes = int(os.environ.get("SLURM_NNODES", 1))
         nodelist = os.environ.get("SLURM_JOB_NODELIST")
         if nodelist:
             self.node_names = ru.get_hostlist(nodelist)
         else:
             if self.num_nodes > 1:
-                raise ValueError(
-                    "SLURM_JOB_NODELIST not set and SLURM_NNODES > 1"
-                )
+                raise ValueError("SLURM_JOB_NODELIST not set and SLURM_NNODES > 1")
             self.node_names = [socket.gethostname()]
         nodes = [
             NodeManager(
