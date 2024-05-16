@@ -30,8 +30,6 @@ import subprocess
 from multiprocessing import Manager, Process
 from queue import Empty
 from typing import TYPE_CHECKING, Any, Optional, Tuple, List
-
-from radical.pilot import Slot
 from setproctitle import getproctitle, setproctitle
 
 from airflow import settings
@@ -41,7 +39,7 @@ from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
 from airflow.models.taskinstance import TaskInstance
 
-from airflowHPC.hooks.gpu import GPUHook
+from airflowHPC.hooks.gpu import GPUHook, Slot
 
 if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
@@ -150,7 +148,7 @@ class ResourceExecutor(BaseExecutor):
     def __init__(self):
         self.gpu_hook = GPUHook()
         super().__init__(
-            parallelism=self.gpu_hook.num_nodes * self.gpu_hook.cores_per_node
+            parallelism=self.gpu_hook.num_nodes * self.gpu_hook.tasks_per_node
         )
         if self.parallelism < 0:
             raise AirflowException("parallelism must be bigger than or equal to 0")
