@@ -76,6 +76,14 @@ class ResourceBashOperator(BaseOperator):
                     raise ValueError(
                         "The gpus argument must be set to a value greater than 0 in executor_config if gpu_type is set."
                     )
+            if "gpus" in executor_config and executor_config["gpus"] > 0:
+                if (
+                    "gpu_type" not in executor_config
+                    or executor_config["gpu_type"] is None
+                ):
+                    raise ValueError(
+                        "The gpu_type argument must be set to 'rocm', 'hip', 'nvidia' in executor_config if gpus is set."
+                    )
             kwargs.update({"executor_config": executor_config})
         else:
             raise ValueError(

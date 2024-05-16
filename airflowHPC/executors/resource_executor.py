@@ -29,7 +29,7 @@ import os
 import subprocess
 from multiprocessing import Manager, Process
 from queue import Empty
-from typing import TYPE_CHECKING, Any, Optional, Tuple, List
+from typing import TYPE_CHECKING, Any, Optional, Tuple
 from setproctitle import getproctitle, setproctitle
 
 from airflow import settings
@@ -272,11 +272,17 @@ class ResourceExecutor(BaseExecutor):
                 del self.attempts[key]
                 del self.queued_tasks[key]
             else:
-                found_slots = self.gpu_hook.assign_task_resources(key)
-                if not found_slots:
-                    sorted_queue.append(
-                        (key, (command, priority, queue, ti.executor_config))
-                    )
+                try:
+                    found_slots = self.gpu_hook.assign_task_resources(key)
+                    if not found_slots:
+                        sorted_queue.append(
+                            (key, (command, priority, queue, ti.executor_config))
+                        )
+                        break
+                except:
+                    self.log.error(f"No viable resource assignment for task: {key}.")
+                    del self.queued_tasks[key]
+                    self.change_state(key=key, state=TaskInstanceState.FAILED)
                     break
 
                 if key in self.attempts:
