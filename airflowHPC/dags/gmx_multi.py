@@ -19,7 +19,7 @@ with DAG(
     catchup=False,
     params={
         "output_dir": "outputs",
-        "num_sims": 8,
+        "num_sims": 4,
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "basic_md.json"},
             "gro": {"directory": "ensemble_md", "filename": "sys.gro"},

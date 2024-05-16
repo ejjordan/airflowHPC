@@ -53,7 +53,10 @@ if TYPE_CHECKING:
     # It can Key and Command - but it can also be None, None which is actually a
     # "Poison Pill" - worker seeing Poison Pill should take the pill and ... die instantly.
     ExecutorWorkType = Tuple[
-        Optional[TaskInstanceKey], Optional[CommandType], Optional[list[int]]
+        Optional[TaskInstanceKey],
+        Optional[CommandType],
+        Optional[list[int]],
+        Optional[str],
     ]
 
 
@@ -71,12 +74,14 @@ class ResourceWorker(Process, LoggingMixin):
         task_queue: Queue[ExecutorWorkType],
         result_queue: Queue[TaskInstanceStateType],
         gpu_env_var_name: str | None = None,
+        hostname_env_var_name: str | None = None,
     ):
         super().__init__(target=self.do_work)
         self.daemon: bool = True
         self.task_queue = task_queue
         self.result_queue: Queue[TaskInstanceStateType] = result_queue
         self.gpu_env_var_name = gpu_env_var_name
+        self.hostname_env_var_name = hostname_env_var_name
 
     def run(self):
         # We know we've just started a new process, so lets disconnect from the metadata db now
@@ -86,7 +91,11 @@ class ResourceWorker(Process, LoggingMixin):
         return super().run()
 
     def execute_work(
-        self, key: TaskInstanceKey, command: CommandType, gpu_ids: list[int]
+        self,
+        key: TaskInstanceKey,
+        command: CommandType,
+        gpu_ids: list[int],
+        node_name: str,
     ) -> None:
         """
         Execute command received and stores result state in queue.
@@ -104,6 +113,9 @@ class ResourceWorker(Process, LoggingMixin):
             visible_devices = ",".join(map(str, gpu_ids))
             self.log.debug(f"Setting {self.gpu_env_var_name} to {visible_devices}")
             env.update({self.gpu_env_var_name: visible_devices})
+        if node_name:
+            self.log.debug(f"Setting {self.hostname_env_var_name} to {node_name}")
+            env.update({self.hostname_env_var_name: node_name})
         state = self._execute_work_in_subprocess(command, env)
         self.result_queue.put((key, state))
         # Remove the command since the worker is done executing the task
@@ -122,7 +134,7 @@ class ResourceWorker(Process, LoggingMixin):
     def do_work(self) -> None:
         while True:
             try:
-                key, command, gpu_ids = self.task_queue.get()
+                key, command, gpu_ids, node_name = self.task_queue.get()
             except EOFError:
                 self.log.info(
                     "Failed to read tasks from the task queue because the other "
@@ -134,7 +146,9 @@ class ResourceWorker(Process, LoggingMixin):
                 if key is None or command is None:
                     # Received poison pill, no more tasks to run
                     break
-                self.execute_work(key=key, command=command, gpu_ids=gpu_ids)
+                self.execute_work(
+                    key=key, command=command, gpu_ids=gpu_ids, node_name=node_name
+                )
             finally:
                 self.task_queue.task_done()
 
@@ -171,7 +185,10 @@ class ResourceExecutor(BaseExecutor):
         self.task_queue = self.manager.Queue()
         self.workers = [
             ResourceWorker(
-                self.task_queue, self.result_queue, self.gpu_hook.gpu_env_var_name
+                self.task_queue,
+                self.result_queue,
+                self.gpu_hook.gpu_env_var_name,
+                self.gpu_hook.hostname_env_var_name,
             )
             for _ in range(self.parallelism)
         ]
@@ -229,7 +246,8 @@ class ResourceExecutor(BaseExecutor):
             assert self.task_queue
 
         gpu_ids = self.gpu_hook.get_gpu_ids(key)
-        self.task_queue.put((key, command, gpu_ids))
+        node_name = self.gpu_hook.get_node_name(key)
+        self.task_queue.put((key, command, gpu_ids, node_name))
 
     def trigger_tasks(self, open_slots: int) -> None:
         """
@@ -314,7 +332,7 @@ class ResourceExecutor(BaseExecutor):
             "; waiting for running tasks to finish.  Signal again if you don't want to wait."
         )
         for _ in self.workers:
-            self.task_queue.put((None, None, None))
+            self.task_queue.put((None, None, None, None))
 
         # Wait for commands to finish
         self.task_queue.join()

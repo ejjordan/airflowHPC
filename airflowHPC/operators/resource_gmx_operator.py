@@ -75,6 +75,7 @@ class ResourceGmxOperator(ResourceBashOperator):
         self.log.info(f"input_files: {self.input_files}")
         self.log.info(f"output_files: {output_files_paths}")
         self.log.info(f"gpu_ids: {self.gpu_ids}")
+        self.log.info(f"hostname: {self.hostname}")
 
         self.bash_command = self.create_gmxapi_call(
             gmx_executable=self.gmx_executable,
@@ -137,6 +138,19 @@ class ResourceGmxOperator(ResourceBashOperator):
                 "This operator requires paths and names to be strings. *executable* argument is "
                 f"{type(mpi_executable)}."
             )
+        host_flag = "-host"
+        if mpi_executable is None:
+            mpi_executable = "mpirun"
+        elif mpi_executable == "mpirun":
+            pass
+        elif mpi_executable == "mpiexec":
+            pass
+        elif mpi_executable == "srun":
+            host_flag = "--nodelist"
+        else:
+            raise ValueError(
+                f"Unrecognized mpi_executable: {mpi_executable}. Must be one of ['mpirun', 'mpiexec', 'srun']"
+            )
         if isinstance(gmx_arguments, (str, bytes)):
             gmx_arguments = [gmx_arguments]
 
@@ -146,6 +160,7 @@ class ResourceGmxOperator(ResourceBashOperator):
         call = list()
         call.append(mpi_executable)
         call.extend([self.num_ranks_flag, str(mpi_ranks)])
+        call.extend([host_flag, self.hostname])
         call.append(gmx_executable)
         call.extend(gmx_arguments)
         call.extend(self.flatten_dict(input_files))

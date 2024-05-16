@@ -141,6 +141,8 @@ class ResourceBashOperator(BaseOperator):
         self.append_env = append_env
         # This is set by the executor because it knows the available GPUs
         self.gpu_ids = []
+        # This is also set by the executor
+        self.hostname = ""
 
     def get_env(self, context):
         """Build the set of environment variables to be exposed for the bash command."""
@@ -180,6 +182,7 @@ class ResourceBashOperator(BaseOperator):
             env.update({"HIP_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
         if self.gpu_type == "nvidia":
             env.update({"CUDA_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
+        self.hostname = env.get(self.gpu_hook.hostname_env_var_name, "")
         return env
 
     @cached_property
