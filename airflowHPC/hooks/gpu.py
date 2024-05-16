@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import radical.utils as ru
 from airflow.hooks.base import BaseHook
 from airflow.models.taskinstancekey import TaskInstanceKey
@@ -315,19 +316,20 @@ class GPUHook(BaseHook):
             "SLURM_TASKS_PER_NODE", resource_config.mem_per_node
         )
         self.num_nodes = os.environ.get("SLURM_NNODES", 1)
-        if self.num_nodes > 1:
-            nodelist = os.environ.get("SLURM_JOB_NODELIST")
-            if nodelist:
-                self.node_names = ru.get_hostlist(nodelist)
-            else:
-                raise ValueError("SLURM_JOB_NODELIST not set")
+        nodelist = os.environ.get("SLURM_JOB_NODELIST")
+        if nodelist:
+            self.node_names = ru.get_hostlist(nodelist)
         else:
-            self.node_names = None
+            if self.num_nodes > 1:
+                raise ValueError(
+                    "SLURM_JOB_NODELIST not set and SLURM_NNODES > 1"
+                )
+            self.node_names = [socket.gethostname()]
         nodes = [
             NodeManager(
                 NodeResources(
                     index=i,
-                    name=f"node_{i:05d}",
+                    name=self.node_names[i],
                     cores=[
                         ResourceOccupation(index=core_idx, occupation=FREE)
                         for core_idx in range(self.tasks_per_node)
@@ -348,12 +350,19 @@ class GPUHook(BaseHook):
         self.task_resource_requests: dict[TaskInstanceKey, RankRequirements | None] = {}
         self.slots_dict: dict[TaskInstanceKey, Slot] = {}
         self.gpu_env_var_name = "GPU_IDS"
+        self.hostname_env_var_name = "HOSTNAME"
 
-    def get_gpu_ids(self, task_instance_key: TaskInstanceKey):
+    def get_gpu_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
         if task_instance_key not in self.slots_dict:
             self.log.info(f"Task keys {self.task_resource_requests.keys()}")
             raise ValueError(f"Resource not allocated for task {task_instance_key}")
         return [gpu.index for gpu in self.slots_dict[task_instance_key].gpus]
+
+    def get_node_name(self, task_instance_key: TaskInstanceKey) -> str:
+        if task_instance_key not in self.slots_dict:
+            self.log.info(f"Task keys {self.task_resource_requests.keys()}")
+            raise ValueError(f"Resource not allocated for task {task_instance_key}")
+        return self.slots_dict[task_instance_key].node_name
 
     def set_task_resources(
         self, task_instance_key: TaskInstanceKey, num_cores: int, num_gpus: int
