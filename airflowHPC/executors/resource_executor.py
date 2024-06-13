@@ -1,27 +1,3 @@
-#
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-"""
-ResourceExecutor.
-
-.. seealso::
-    For more information on how the ResourceExecutor works, take a look at the guide:
-    :ref:`executor:ResourceExecutor`
-"""
 from __future__ import annotations
 
 import contextlib
@@ -39,7 +15,7 @@ from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
 from airflow.models.taskinstance import TaskInstance
 
-from airflowHPC.hooks.gpu import GPUHook, Slot
+from airflowHPC.hooks.slurm import SlurmHook, Slot
 
 if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
@@ -66,7 +42,10 @@ class ResourceWorker(Process, LoggingMixin):
 
     Executes the given command and puts the result into a result queue when done, terminating execution.
 
-    :param result_queue: the queue to store result state
+    :param task_queue: the queue to get the tasks from
+    :param result_queue: the queue to put the results in
+    :param gpu_env_var_name: the name of the environment variable to set the GPU IDs
+    :param hostname_env_var_name: the name of the environment variable to set the hostname
     """
 
     def __init__(
@@ -102,6 +81,8 @@ class ResourceWorker(Process, LoggingMixin):
 
         :param key: the key to identify the task instance
         :param command: the command to execute
+        :param gpu_ids: the GPU IDs to use
+        :param node_name: the hostname of the node
         """
         if key is None:
             return
@@ -160,9 +141,9 @@ class ResourceExecutor(BaseExecutor):
     serve_logs: bool = True
 
     def __init__(self):
-        self.gpu_hook = GPUHook()
+        self.slurm_hook = SlurmHook()
         super().__init__(
-            parallelism=self.gpu_hook.num_nodes * self.gpu_hook.tasks_per_node
+            parallelism=self.slurm_hook.num_nodes * self.slurm_hook.tasks_per_node
         )
         if self.parallelism < 0:
             raise AirflowException("parallelism must be bigger than or equal to 0")
@@ -187,8 +168,8 @@ class ResourceExecutor(BaseExecutor):
             ResourceWorker(
                 self.task_queue,
                 self.result_queue,
-                self.gpu_hook.gpu_env_var_name,
-                self.gpu_hook.hostname_env_var_name,
+                self.slurm_hook.gpu_env_var_name,
+                self.slurm_hook.hostname_env_var_name,
             )
             for _ in range(self.parallelism)
         ]
@@ -207,7 +188,7 @@ class ResourceExecutor(BaseExecutor):
         if task_instance.key not in self.queued_tasks:
             self.log.info("Adding to queue: %s", command)
             if task_instance.executor_config:
-                self.gpu_hook.set_task_resources(
+                self.slurm_hook.set_task_resources(
                     task_instance_key=task_instance.key,
                     num_cores=task_instance.executor_config["mpi_ranks"],
                     num_gpus=task_instance.executor_config["gpus"],
@@ -216,7 +197,7 @@ class ResourceExecutor(BaseExecutor):
                 self.log.info(
                     f"Setting task resources to 1 core and 0 gpus for task {task_instance.key}"
                 )
-                self.gpu_hook.set_task_resources(
+                self.slurm_hook.set_task_resources(
                     task_instance_key=task_instance.key,
                     num_cores=1,
                     num_gpus=0,
@@ -245,8 +226,8 @@ class ResourceExecutor(BaseExecutor):
         if TYPE_CHECKING:
             assert self.task_queue
 
-        gpu_ids = self.gpu_hook.get_gpu_ids(key)
-        node_name = self.gpu_hook.get_node_name(key)
+        gpu_ids = self.slurm_hook.get_gpu_ids(key)
+        node_name = self.slurm_hook.get_node_name(key)
         self.task_queue.put((key, command, gpu_ids, node_name))
 
     def trigger_tasks(self, open_slots: int) -> None:
@@ -291,7 +272,7 @@ class ResourceExecutor(BaseExecutor):
                 del self.queued_tasks[key]
             else:
                 try:
-                    found_slots = self.gpu_hook.assign_task_resources(key)
+                    found_slots = self.slurm_hook.assign_task_resources(key)
                     if not found_slots:
                         sorted_queue.append(
                             (key, (command, priority, queue, ti.executor_config))
@@ -318,7 +299,7 @@ class ResourceExecutor(BaseExecutor):
                 try:
                     self.change_state(key=key, state=state)
                     if state in {TaskInstanceState.SUCCESS, TaskInstanceState.FAILED}:
-                        self.gpu_hook.release_task_resources(key)
+                        self.slurm_hook.release_task_resources(key)
                 finally:
                     self.result_queue.task_done()
 

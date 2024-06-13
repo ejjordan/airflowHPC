@@ -60,7 +60,7 @@ class PoolPartialDescriptor:
         return self.class_method.__get__(cls, cls)
 
 
-class RadicalExternalPythonOperator(ExternalPythonOperator):
+class MPIExternalPythonOperator(ExternalPythonOperator):
     partial: Callable[..., OperatorPartial] = PoolPartialDescriptor()  # type: ignore
 
     def __init__(

@@ -1,8 +1,8 @@
 from airflow import DAG
 from airflow.utils import timezone
 
-from airflowHPC.operators.radical_external_python_operator import (
-    RadicalExternalPythonOperator,
+from airflowHPC.operators.mpi_external_python_operator import (
+    MPIExternalPythonOperator,
 )
 
 
@@ -32,7 +32,7 @@ with DAG(
     start_date=timezone.utcnow(),
     catchup=False,
 ) as dag:
-    single = RadicalExternalPythonOperator(
+    single = MPIExternalPythonOperator(
         task_id="torch_hello",
         python_callable=torch_hello,
         mpi_ranks="4",

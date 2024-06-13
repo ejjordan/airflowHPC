@@ -10,7 +10,7 @@ from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.models.baseoperator import BaseOperator
 from airflow.utils.operator_helpers import context_to_airflow_vars
 
-from airflowHPC.hooks.gpu import GPUHook
+from airflowHPC.hooks.slurm import SlurmHook
 from airflowHPC.hooks.subprocess import SubprocessHook
 
 if TYPE_CHECKING:
@@ -100,7 +100,7 @@ class ResourceBashOperator(BaseOperator):
         self.gpu_type = (
             executor_config["gpu_type"] if "gpu_type" in executor_config else None
         )
-        self.gpu_hook = GPUHook()
+        self.slurm_hook = SlurmHook()
         super().__init__(**kwargs)
         self.bash_command = bash_command
         if mpi_executable is None:
@@ -166,10 +166,10 @@ class ResourceBashOperator(BaseOperator):
             if self.gpus > 0:
                 raise ValueError("Set gpus > 0 but did not specify gpu_type.")
         if self.gpus > 0:
-            if self.gpu_hook.gpu_env_var_name in env.keys():
-                self.log.debug(f"visible: {env[self.gpu_hook.gpu_env_var_name]}")
+            if self.slurm_hook.gpu_env_var_name in env.keys():
+                self.log.debug(f"visible: {env[self.slurm_hook.gpu_env_var_name]}")
                 self.gpu_ids = [
-                    int(id) for id in env[self.gpu_hook.gpu_env_var_name].split(",")
+                    int(id) for id in env[self.slurm_hook.gpu_env_var_name].split(",")
                 ]
             else:
                 raise RuntimeError(
@@ -182,7 +182,7 @@ class ResourceBashOperator(BaseOperator):
             env.update({"HIP_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
         if self.gpu_type == "nvidia":
             env.update({"CUDA_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
-        self.hostname = env.get(self.gpu_hook.hostname_env_var_name, "")
+        self.hostname = env.get(self.slurm_hook.hostname_env_var_name, "")
         return env
 
     @cached_property

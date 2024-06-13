@@ -1,8 +1,8 @@
 from airflow import DAG
 from airflow.utils import timezone
 
-from airflowHPC.operators.radical_external_python_operator import (
-    RadicalExternalPythonOperator,
+from airflowHPC.operators.mpi_external_python_operator import (
+    MPIExternalPythonOperator,
 )
 
 
@@ -24,13 +24,13 @@ with DAG(
     start_date=timezone.utcnow(),
     catchup=False,
 ) as dag:
-    single = RadicalExternalPythonOperator(
+    single = MPIExternalPythonOperator(
         task_id="mpi4py_hello",
         python_callable=mpi4py_hello,
         mpi_ranks="4",
         op_args=[1],
     )
-    multi = RadicalExternalPythonOperator.partial(
+    multi = MPIExternalPythonOperator.partial(
         task_id="mpi4py_op_args", python_callable=mpi4py_hello, mpi_ranks="8"
     ).expand(op_kwargs=[{"delay": 5}, {"delay": 4}, {"delay": 3}])
 

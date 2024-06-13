@@ -18,7 +18,7 @@ from airflowHPC.hooks.resource import (
 )
 
 
-class GPUHook(BaseHook):
+class SlurmHook(BaseHook):
     def __init__(self, **kwargs) -> None:
         rcfgs = ru.Config("radical.pilot.resource", name="*", expand=False)
         site = os.environ.get("RADICAL_PILOT_SITE", "dardel")
