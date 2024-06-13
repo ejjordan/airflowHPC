@@ -116,7 +116,7 @@ class ResourceBashOperator(BaseOperator):
         else:
             self.mpi_executable = mpi_executable
             if "srun" in mpi_executable:
-                self.num_ranks_flag = "-n"
+                self.num_ranks_flag = "--ntasks"
             else:
                 self.num_ranks_flag = "-np"
 

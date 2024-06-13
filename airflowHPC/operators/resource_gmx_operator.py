@@ -146,7 +146,6 @@ class ResourceGmxOperator(ResourceBashOperator):
         elif mpi_executable == "mpiexec":
             pass
         elif mpi_executable == "srun":
-            # Todo: it seems like the '--relative' flag is the one that is needed
             host_flag = "--nodelist"
         else:
             raise ValueError(
