@@ -1,7 +1,7 @@
 from airflow import DAG
 from airflow.utils import timezone
 from airflowHPC.dags.tasks import get_file, run_gmxapi
-from airflowHPC.operators.radical_gmxapi_bash_operator import RadicalGmxapiBashOperator
+from airflowHPC.operators.mpi_gmx_bash_operator import MPIGmxBashOperator
 
 with DAG(
     "run_gmxapi",
@@ -24,7 +24,7 @@ with DAG(
         output_files={"-o": "run.tpr"},
         output_dir="{{ params.output_dir }}",
     )
-    mdrun_result = RadicalGmxapiBashOperator(
+    mdrun_result = MPIGmxBashOperator(
         task_id="mdrun",
         mpi_ranks=4,
         cpus_per_task=2,

@@ -10,13 +10,13 @@ from airflow.models.mappedoperator import OperatorPartial
 if TYPE_CHECKING:
     from airflow.utils.context import Context
 
-from airflowHPC.operators.radical_bash_operator import (
-    RadicalBashOperator,
+from airflowHPC.operators.mpi_bash_operator import (
+    MPIBashOperator,
     PoolPartialDescriptor,
 )
 
 
-class RadicalGmxapiBashOperator(RadicalBashOperator):
+class MPIGmxBashOperator(MPIBashOperator):
     template_fields: Sequence[str] = (
         "mpi_executable",
         "gmx_executable",
@@ -73,9 +73,14 @@ class RadicalGmxapiBashOperator(RadicalBashOperator):
             for k, v in self.output_files.items()
         }
         if self.gmx_executable is None:
-            from gmxapi.commandline import cli_executable
+            try:
+                from gmxapi.commandline import cli_executable
 
-            self.gmx_executable = cli_executable()
+                self.gmx_executable = cli_executable()
+            except ImportError:
+                raise ImportError(
+                    "The gmx_executable argument must be set if the gmxapi package is not installed."
+                )
         self.log.info(f"mpi_executable: {self.mpi_executable}")
         self.log.info(f"mpi_ranks: {self.mpi_ranks}")
         self.log.info(f"gmx_executable: {self.gmx_executable}")

@@ -11,7 +11,16 @@ from airflow.executors.local_executor import LocalExecutor
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
 
-import radical.pilot as rp
+from radical.pilot import (
+    PilotManager,
+    TaskManager,
+    PilotDescription,
+    TaskDescription,
+    TRANSFER,
+    FINAL,
+    DONE,
+    Session,
+)
 import logging
 
 
@@ -57,15 +66,15 @@ class RadicalExecutor(BaseExecutor):
         tic = time.perf_counter()
         self._rp_keys = dict()
         self._rp_results = queue.Queue()
-        self._rp_session = rp.Session()
+        self._rp_session = Session()
         self._rp_log = logging  # TODO: should this be self._rp_session._log instead?
-        self._rp_pmgr = rp.PilotManager(session=self._rp_session)
-        self._rp_tmgr = rp.TaskManager(session=self._rp_session)
+        self._rp_pmgr = PilotManager(session=self._rp_session)
+        self._rp_tmgr = TaskManager(session=self._rp_session)
         self._rp_env_name = "rp"
 
         self._rp_log.info(f"=== RadicalExecutor: start")
         # TODO: make resource and runtime airflow configuration variables or expose in some way
-        pd = rp.PilotDescription(
+        pd = PilotDescription(
             {"resource": "local.localhost", "cores": self.parallelism, "runtime": 30}
         )
         pilot = self._rp_pmgr.submit_pilots(pd)
@@ -82,12 +91,12 @@ class RadicalExecutor(BaseExecutor):
         def state_cb(task, state):
             tid = task.uid
             self._rp_log.info(f"=== {tid}: {state}")
-            if state in rp.FINAL:
+            if state in FINAL:
                 key = self._rp_keys.pop(tid)
                 self._rp_log.info(
                     f"=== {tid}: DAG {key.dag_id}; Task {key.task_id}; {state}"
                 )
-                if state == rp.DONE:
+                if state == DONE:
                     self._rp_results.put((key, TaskInstanceState.FAILED))
                 else:
                     self._rp_results.put((key, TaskInstanceState.SUCCESS))
@@ -117,7 +126,7 @@ class RadicalExecutor(BaseExecutor):
         ]
 
         self.validate_airflow_tasks_run_command(command)
-        td = rp.TaskDescription()
+        td = TaskDescription()
         td.executable = command[0]
         td.arguments = command[1:]
         td.metadata = {"key": key}
@@ -126,7 +135,7 @@ class RadicalExecutor(BaseExecutor):
             {
                 "source": f"task:///{out_path}",
                 "target": f"client:///{out_path}",
-                "action": rp.TRANSFER,
+                "action": TRANSFER,
             }
             for out_path in rp_out_paths
         ]

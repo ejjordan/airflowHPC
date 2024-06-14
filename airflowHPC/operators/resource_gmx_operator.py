@@ -62,9 +62,14 @@ class ResourceGmxOperator(ResourceBashOperator):
             for k, v in self.output_files.items()
         }
         if self.gmx_executable is None:
-            from gmxapi.commandline import cli_executable
+            try:
+                from gmxapi.commandline import cli_executable
 
-            self.gmx_executable = cli_executable()
+                self.gmx_executable = cli_executable()
+            except ImportError:
+                raise ImportError(
+                    "The gmx_executable argument must be set if the gmxapi package is not installed."
+                )
         bash_path = shutil.which("bash") or "bash"
         env = self.get_env(context)
 

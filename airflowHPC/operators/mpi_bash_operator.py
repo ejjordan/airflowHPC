@@ -57,7 +57,7 @@ class PoolPartialDescriptor:
         return self.class_method.__get__(cls, cls)
 
 
-class RadicalBashOperator(BaseOperator):
+class MPIBashOperator(BaseOperator):
     template_fields: Sequence[str] = (
         "bash_command",
         "mpi_ranks",

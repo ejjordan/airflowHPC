@@ -3,7 +3,7 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.utils import timezone
-from airflowHPC.operators.radical_bash_operator import RadicalBashOperator
+from airflowHPC.operators.mpi_bash_operator import MPIBashOperator
 from airflowHPC.dags.tasks import get_file
 
 
@@ -26,11 +26,11 @@ with DAG(
         cwd="{{ task_instance.xcom_pull(task_ids='tempdir') }}",
     )
     compile_code.template_fields = ("bash_command", "env", "cwd")
-    mdrun_result = RadicalBashOperator(
+    mdrun_result = MPIBashOperator(
         task_id="hello_mpi_omp",
         bash_command="./hello_mpi_omp",
-        mpi_ranks="4",
-        cpus_per_task="2",
+        mpi_ranks=4,
+        cpus_per_task=2,
         cwd="{{ task_instance.xcom_pull(task_ids='tempdir') }}",
     )
     mdrun_result.template_fields = ("bash_command", "env", "cwd")

@@ -21,14 +21,14 @@ class RadicalOperator(PythonOperator):
         # self.radical_task = self.radical_task()
 
     def radical_task(self) -> Any:
-        import radical.pilot as rp
-        import radical.utils as ru
+        from radical.pilot import TaskDescription, PythonTask, TASK_FUNCTION
+        from radical.utils import generate_id, ID_CUSTOM
 
-        task = rp.TaskDescription()
+        task = TaskDescription()
         task.name = self.python_callable.__name__
-        task.mode = rp.TASK_FUNCTION
-        task.raptor_id = ru.generate_id("task.%(item_counter)06d", ru.ID_CUSTOM)
-        task.function = rp.PythonTask(
+        task.mode = TASK_FUNCTION
+        task.raptor_id = generate_id("task.%(item_counter)06d", ID_CUSTOM)
+        task.function = PythonTask(
             self.python_callable, *self.op_args, **self.op_kwargs
         )
         # self.log.info(f"Radical task: {task}")

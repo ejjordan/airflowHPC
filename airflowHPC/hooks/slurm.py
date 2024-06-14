@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
-import radical.utils as ru
+from radical.utils import Config, get_hostlist
 from airflow.hooks.base import BaseHook
 from airflow.models.taskinstancekey import TaskInstanceKey
 from typing import List
@@ -20,10 +20,10 @@ from airflowHPC.hooks.resource import (
 
 class SlurmHook(BaseHook):
     def __init__(self, **kwargs) -> None:
-        rcfgs = ru.Config("radical.pilot.resource", name="*", expand=False)
+        rcfgs = Config("radical.pilot.resource", name="*", expand=False)
         site = os.environ.get("RADICAL_PILOT_SITE", "dardel")
         platform = os.environ.get("RADICAL_PILOT_PLATFORM", "dardel_gpu")
-        resource_config = ru.Config(cfg=rcfgs[site][platform])
+        resource_config = Config(cfg=rcfgs[site][platform])
         num_tasks = os.environ.get("SLURM_TASKS_PER_NODE")
         self.tasks_per_node = (
             int(num_tasks.split("(")[0])
@@ -42,7 +42,7 @@ class SlurmHook(BaseHook):
         self.num_nodes = int(os.environ.get("SLURM_NNODES", 1))
         nodelist = os.environ.get("SLURM_JOB_NODELIST")
         if nodelist:
-            self.node_names = ru.get_hostlist(nodelist)
+            self.node_names = get_hostlist(nodelist)
         else:
             if self.num_nodes > 1:
                 raise ValueError("SLURM_JOB_NODELIST not set and SLURM_NNODES > 1")

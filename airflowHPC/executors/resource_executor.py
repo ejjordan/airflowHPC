@@ -106,9 +106,17 @@ class ResourceWorker(Process, LoggingMixin):
         self, command: CommandType, env
     ) -> TaskInstanceState:
         try:
-            subprocess.check_call(command, close_fds=True, env=env)
+            subprocess.run(
+                command,
+                stdin=None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                shell=False,
+                env=env,
+            )
             return TaskInstanceState.SUCCESS
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             self.log.error("Failed to execute task %s.", e)
             return TaskInstanceState.FAILED
 
