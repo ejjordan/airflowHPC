@@ -13,7 +13,6 @@ from airflow.models.baseoperator import partial as airflow_partial
 from airflow.utils.operator_helpers import context_to_airflow_vars
 from airflow.models.mappedoperator import OperatorPartial
 
-from airflowHPC.hooks.slurm import SlurmHook
 from airflowHPC.hooks.subprocess import SubprocessHook
 
 if TYPE_CHECKING:
@@ -58,13 +57,29 @@ class PoolPartialDescriptor:
 
 
 class MPIBashOperator(BaseOperator):
+    """
+    This operator manages the execution of a bash command using MPI and also tries to
+    ensure that resources are not oversubscribed. It does this by setting the number of
+    pool_slots to be equal to the number of MPI ranks multiplied by the number of
+    cpus_per_task. It will automatically use the pool named mpi_pool as ensured by the
+    policy in airflowHPC/policies.py. Thus, it is necessary to have a pool named mpi_pool
+    with the correct number of slots available corresponding to the number processors
+    on the system.
+
+    Note that while this can be used on HPC resources, it will only work for the single
+    node case. For multi-node jobs, please see the ResourceBashOperator. Note however
+    that this operator works with any executor, not just the ResourceExecutor.
+
+    Note also that no attempt is made to manage GPU resources. It should still work to
+    give GPU ids to programs that accept such values, but in particular this operator
+    will work poorly with software designed to greedily consume all available GPUs if
+    no GPU ids are provided.
+    """
+
     template_fields: Sequence[str] = (
         "bash_command",
         "mpi_ranks",
         "cpus_per_task",
-        "gpus",
-        "gpu_ids",
-        "gpu_type",
         "env",
         "stdin",
         "cwd",
@@ -73,16 +88,13 @@ class MPIBashOperator(BaseOperator):
         "bash_command": "bash",
         "mpi_ranks": "py",
         "cpus_per_task": "py",
-        "gpus": "py",
-        "gpu_ids": "py",
-        "gpu_type": "py",
         "env": "json",
         "stdin": "py",
         "cwd": "py",
     }
     ui_color = "#f0ede4"
 
-    # partial: Callable[..., OperatorPartial] = PoolPartialDescriptor()  # type: ignore
+    partial: Callable[..., OperatorPartial] = PoolPartialDescriptor()  # type: ignore
 
     def __init__(
         self,
@@ -91,9 +103,6 @@ class MPIBashOperator(BaseOperator):
         mpi_executable: str | None = None,
         mpi_ranks: int,
         cpus_per_task: int | None = None,
-        gpus: int | None = None,
-        gpu_ids: list[int] | None = None,
-        gpu_type: str | None = None,
         stdin=None,
         env: dict[str, str] | None = None,
         append_env: bool = False,
@@ -119,12 +128,8 @@ class MPIBashOperator(BaseOperator):
                 raise ValueError(
                     "The cpus_per_task argument cannot be set to different values in executor_config and operator."
                 )
-            if "gpus" in executor_config and gpus != executor_config["gpus"]:
-                raise ValueError(
-                    "The gpus argument cannot be set to different values in executor_config and operator."
-                )
             executor_config.update(
-                {"mpi_ranks": mpi_ranks, "cpus_per_task": cpus_per_task, "gpus": gpus}
+                {"mpi_ranks": mpi_ranks, "cpus_per_task": cpus_per_task}
             )
             kwargs.update({"executor_config": executor_config})
         else:
@@ -133,17 +138,13 @@ class MPIBashOperator(BaseOperator):
                     "executor_config": {
                         "mpi_ranks": mpi_ranks,
                         "cpus_per_task": cpus_per_task,
-                        "gpus": gpus,
                     }
                 }
             )
 
         self.mpi_ranks = int(mpi_ranks)
         self.cpus_per_task = int(cpus_per_task) if cpus_per_task is not None else 1
-        self.gpus = int(gpus) if gpus is not None else 0
-        self.gpu_type = gpu_type
-        self.slurm_hook = SlurmHook()
-        # kwargs.update({"pool_slots": self.mpi_ranks * self.cpus_per_task})
+        kwargs.update({"pool_slots": self.mpi_ranks * self.cpus_per_task})
         super().__init__(**kwargs)
         self.bash_command = bash_command
         if mpi_executable is None:
@@ -182,9 +183,6 @@ class MPIBashOperator(BaseOperator):
         )
         self.cwd = cwd
         self.append_env = append_env
-        if gpu_ids is None:
-            # This is set by the executor because it knows the available GPUs
-            self.gpu_ids = []
 
     def get_env(self, context):
         """Build the set of environment variables to be exposed for the bash command."""
@@ -204,26 +202,6 @@ class MPIBashOperator(BaseOperator):
         )
         env.update(airflow_context_vars)
         env.update({"OMP_NUM_THREADS": str(self.cpus_per_task)})
-        if self.gpu_type == None:
-            if self.gpus > 0:
-                raise ValueError("Set gpus > 0 but did not specify gpu_type.")
-        if self.gpus > 0:
-            if self.slurm_hook.gpu_env_var_name in env.keys():
-                self.log.debug(f"visible: {env[self.slurm_hook.gpu_env_var_name]}")
-                self.gpu_ids = [
-                    int(id) for id in env[self.slurm_hook.gpu_env_var_name].split(",")
-                ]
-            else:
-                raise RuntimeError(
-                    f"Set gpu_type to {self.gpu_type} but did not specify gpu_ids. \
-                    If you requested gpus and get this error, please contact the project maintainers."
-                )
-        if self.gpu_type == "rocm":
-            env.update({"ROCR_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
-        if self.gpu_type == "hip":
-            env.update({"HIP_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
-        if self.gpu_type == "nvidia":
-            env.update({"CUDA_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
         return env
 
     @cached_property
@@ -244,7 +222,6 @@ class MPIBashOperator(BaseOperator):
         self.log.info(f"mpi_ranks: {self.mpi_ranks}")
         self.log.info(f"cpus_per_task: {self.cpus_per_task}")
         self.log.info(f"cwd: {self.cwd}")
-        self.log.info(f"gpu_ids: {self.gpu_ids}")
 
         self.call = self.create_call(
             mpi_executable=self.mpi_executable,

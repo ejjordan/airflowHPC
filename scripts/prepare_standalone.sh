@@ -14,4 +14,6 @@ export AIRFLOW__CORE__EXECUTOR=airflowHPC.executors.resource_executor.ResourceEx
 export AIRFLOW__CORE__LOAD_EXAMPLES=False
 export AIRFLOW__CORE__DAGS_FOLDER=$AirflowHPC_dir/airflowHPC/dags
 export AIRFLOW__WEBSERVER__DAG_DEFAULT_VIEW="graph"
+# Silence an annoying warning from radical.utils
+export RADICAL_UTILS_NO_ATFORK=1
 airflow standalone

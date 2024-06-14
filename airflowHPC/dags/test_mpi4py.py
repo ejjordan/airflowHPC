@@ -37,6 +37,6 @@ with DAG(
     single >> multi
 
     """Can't map mpi_ranks because it is used to set unmappable pool_slots arg
-    RadicalExternalPythonOperator.partial(
+    MPIExternalPythonOperator.partial(
         task_id="mpi4py_expand_mpi", python_callable=mpi4py_hello, op_kwargs={"delay": 1}
     ).expand(mpi_ranks=["4", "8"])"""

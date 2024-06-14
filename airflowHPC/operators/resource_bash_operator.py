@@ -20,22 +20,12 @@ if TYPE_CHECKING:
 class ResourceBashOperator(BaseOperator):
     template_fields: Sequence[str] = (
         "bash_command",
-        "mpi_ranks",
-        "cpus_per_task",
-        "gpus",
-        "gpu_ids",
-        "gpu_type",
         "env",
         "stdin",
         "cwd",
     )
     template_fields_renderers = {
         "bash_command": "bash",
-        "mpi_ranks": "py",
-        "cpus_per_task": "py",
-        "gpus": "py",
-        "gpu_ids": "py",
-        "gpu_type": "py",
         "env": "json",
         "stdin": "py",
         "cwd": "py",
