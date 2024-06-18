@@ -4,7 +4,7 @@ from airflowHPC.dags.tasks import get_file, run_gmxapi
 from airflowHPC.operators.mpi_gmx_bash_operator import MPIGmxBashOperator
 
 with DAG(
-    "run_gmxapi",
+    "run_gmx",
     start_date=timezone.utcnow(),
     catchup=False,
     params={"output_dir": "outputs"},

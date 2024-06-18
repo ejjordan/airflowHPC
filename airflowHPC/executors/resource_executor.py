@@ -16,6 +16,7 @@ from airflow.utils.state import TaskInstanceState
 from airflow.models.taskinstance import TaskInstance
 
 from airflowHPC.hooks.slurm import SlurmHook, Slot
+from airflowHPC.operators import is_resource_operator
 
 if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
@@ -195,11 +196,16 @@ class ResourceExecutor(BaseExecutor):
         """Queues command to task."""
         if task_instance.key not in self.queued_tasks:
             self.log.info("Adding to queue: %s", command)
-            if task_instance.executor_config:
+            if is_resource_operator(task_instance.operator_name):
+                assert task_instance.executor_config
+                assert "mpi_ranks" in task_instance.executor_config
                 self.slurm_hook.set_task_resources(
                     task_instance_key=task_instance.key,
                     num_cores=task_instance.executor_config["mpi_ranks"],
-                    num_gpus=task_instance.executor_config["gpus"],
+                    num_gpus=task_instance.executor_config.get("gpus", 0),
+                )
+                self.log.info(
+                    f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key]} for task {task_instance.key}"
                 )
             else:
                 self.log.info(
