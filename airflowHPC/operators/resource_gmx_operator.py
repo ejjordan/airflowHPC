@@ -8,6 +8,10 @@ from airflow.exceptions import AirflowException, AirflowSkipException
 
 from airflowHPC.operators.resource_bash_operator import ResourceBashOperator
 
+import radical.utils as ru
+import radical.pilot as rp
+
+
 if TYPE_CHECKING:
     from airflow.utils.context import Context
 
@@ -54,6 +58,7 @@ class ResourceGmxOperator(ResourceBashOperator):
                     )
 
     def execute(self, context: Context):
+
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
         out_dir_full_path = os.path.abspath(self.output_dir)
@@ -70,43 +75,25 @@ class ResourceGmxOperator(ResourceBashOperator):
                 raise ImportError(
                     "The gmx_executable argument must be set if the gmxapi package is not installed."
                 )
-        bash_path = shutil.which("bash") or "bash"
-        env = self.get_env(context)
+        rp_endpoint = os.environ.get("RP_ENDPOINT")
 
-        self.log.info(f"mpi_executable: {self.mpi_executable}")
-        self.log.info(f"mpi_ranks: {self.mpi_ranks}")
-        self.log.info(f"gmx_executable: {self.gmx_executable}")
-        self.log.info(f"gmx_arguments: {self.gmx_arguments}")
-        self.log.info(f"input_files: {self.input_files}")
-        self.log.info(f"output_files: {output_files_paths}")
-        self.log.info(f"gpu_ids: {self.gpu_ids}")
-        self.log.info(f"hostname: {self.hostname}")
+        if not rp_endpoint:
+            raise ValueError("RP_ENDPOINT environment variable not set.")
 
-        self.bash_command = self.create_gmxapi_call(
-            gmx_executable=self.gmx_executable,
-            gmx_arguments=self.gmx_arguments,
-            mpi_executable=self.mpi_executable,
-            mpi_ranks=self.mpi_ranks,
-            input_files=self.input_files,
-            output_files=output_files_paths,
-        )
-        result = self.subprocess_hook.run_command(
-            command=[bash_path, "-c", self.bash_command],
-            stdin=self.stdin,
-            env=env,
-            output_encoding=self.output_encoding,
-            cwd=self.output_dir,
-        )
+        rp_client = ru.zmq.Client(url=rp_endpoint)
 
-        if result.exit_code in self.skip_on_exit_code:
-            raise AirflowSkipException(
-                f"Bash command returned exit code {result.exit_code}. Skipping."
-            )
-        elif result.exit_code != 0:
-            raise AirflowException(
-                f"Bash command failed. The command returned a non-zero exit code {result.exit_code}."
-            )
-        return result.output
+        td = rp.TaskDescription()
+        td.executable     = self.gmx_executable
+        td.ranks          = self.mpi_ranks
+        td.arguments      = self.gmx_arguments
+        td.input_staging  = self.input_files
+        td.output_staging = output_files_paths
+
+        uid = rp_client.request({'cmd': 'rp_execute',
+                                 'kwargs': {'task_description' : td.as_dict()}})
+
+        if not uid:
+            raise AirflowSkipException("Command failed")
 
     def flatten_dict(self, mapping: dict):
         for key, value in mapping.items():

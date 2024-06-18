@@ -21,6 +21,7 @@ from radical.pilot import (
     DONE,
     Session,
 )
+import radical.utils as ru
 import logging
 
 
@@ -103,6 +104,28 @@ class RadicalExecutor(BaseExecutor):
 
         self._rp_tmgr.register_callback(state_cb)
 
+        # start a service endpoint which listens for task execution requests
+        # sent from the main airflow command line process
+        self._zmq_server = ru.zmq.Server()
+        self._zmq_server.register_request("rp_execute", self._rp_execute)
+        self._zmq_server.start()
+
+        self._rp_endpoint = self._zmq_server.addr()
+
+
+    def _rp_execute(self, task_description: dict,
+                    key: TaskInstanceKey) -> None:
+
+        td   = TaskDescription(task_description)
+        task = self._rp_tmgr.submit_tasks(td)
+
+        self._rp_keys[task.uid] = key
+
+        self._rp_log.info(f"=== submitted task: {task}")
+
+        return task.uid
+
+
     def execute_async(
         self,
         key: TaskInstanceKey,
@@ -110,41 +133,16 @@ class RadicalExecutor(BaseExecutor):
         queue: str | None = None,
         executor_config: Any | None = None,
     ) -> None:
-        from airflow.utils.cli import get_dag
-        import os
 
         self._rp_log.info(f"=== execute_async {key}: {command}")
 
-        dag = get_dag(dag_id=key.dag_id, subdir=os.path.join("dags", key.dag_id))
-        task = dag.get_task(key.task_id)
-        # Raise if the task does not have output_files - TODO: handle this in the task decorator
-        if "output_files" not in task.op_kwargs:
-            raise AttributeError(f"Task {task} does not have output_files")
-        rp_out_paths = [
-            os.path.join(task.op_kwargs["output_dir"], v)
-            for k, v in task.op_kwargs["output_files"].items()
-        ]
-
         self.validate_airflow_tasks_run_command(command)
-        td = TaskDescription()
-        td.executable = command[0]
-        td.arguments = command[1:]
-        td.metadata = {"key": key}
-        td.named_env = self._rp_env_name
-        td.output_staging = [
-            {
-                "source": f"task:///{out_path}",
-                "target": f"client:///{out_path}",
-                "action": TRANSFER,
-            }
-            for out_path in rp_out_paths
-        ]
-        logging.info(f"=== output_staging: {td.output_staging}")
 
-        task = self._rp_tmgr.submit_tasks(td)
+        bash_cmd = 'RP_ENDPOINT=%s airflow tasks run %s %s' \
+                 % self._rp_endpoint, key.dag_id, key.task_id
+        ru.sh_callout_bg("bash -c '%s'" % bash_cmd)
 
-        self._rp_keys[task.uid] = key
-        self._rp_log.info(f"=== submitted task: {task}")
+
 
     def sync(self) -> None:
         """Sync will get called periodically by the heartbeat method."""
