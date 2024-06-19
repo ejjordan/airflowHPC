@@ -1,13 +1,52 @@
 import importlib.metadata
 
-__version__ = importlib.metadata.version("apache-airflow-provider-radical")
+__version__ = importlib.metadata.version("apache-airflow-providers-hpc")
 
 
 def get_provider_info():
     return {
-        "package-name": "apache-airflow-provider-radical",
-        "name": "AirflowHPC",
+        "package-name": "apache-airflow-providers-hpc",
+        "name": "airflowHPC",
         "description": "AirflowHPC is a provider package for Airflow",
+        "config": {
+            "hpc": {
+                "description": "Configure AirflowHPC provider",
+                "options": {
+                    "cores_per_node": {
+                        "description": "Number of cores per node",
+                        "type": "string",
+                        "default": "32",
+                        "example": "32",
+                        "version_added": "0.0.0",
+                        "sensitive": False,
+                    },
+                    "gpus_per_node": {
+                        "description": "Number of GPUs per node",
+                        "type": "string",
+                        "default": "0",
+                        "example": "0",
+                        "version_added": "0.0.0",
+                        "sensitive": False,
+                    },
+                    "mem_per_node": {
+                        "description": "Memory per node in GB",
+                        "type": "string",
+                        "default": "64",
+                        "example": "64",
+                        "version_added": "0.0.0",
+                        "sensitive": False,
+                    },
+                    "smt": {
+                        "description": "Number of threads per core",
+                        "type": "string",
+                        "default": "2",
+                        "example": "2",
+                        "version_added": "0.0.0",
+                        "sensitive": False,
+                    }
+                }
+            }
+        },
         "operators": [
             {
                 "module": "airflowHPC.operators.radical_operator.RadicalOperator",
