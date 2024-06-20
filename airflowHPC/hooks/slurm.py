@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import os
 import socket
-from radical.utils import Config, get_hostlist
+
+from functools import cached_property
+from radical.utils import get_hostlist
 from airflow.hooks.base import BaseHook
 from airflow.models.taskinstancekey import TaskInstanceKey
+from airflow.configuration import conf
+from airflow.utils.providers_configuration_loader import providers_configuration_loaded
 from typing import List
 
 from airflowHPC.hooks.resource import (
@@ -20,25 +24,13 @@ from airflowHPC.hooks.resource import (
 
 class SlurmHook(BaseHook):
     def __init__(self, **kwargs) -> None:
-        rcfgs = Config("radical.pilot.resource", name="*", expand=False)
-        site = os.environ.get("RADICAL_PILOT_SITE", "dardel")
-        platform = os.environ.get("RADICAL_PILOT_PLATFORM", "dardel_gpu")
-        resource_config = Config(cfg=rcfgs[site][platform])
         num_tasks = os.environ.get("SLURM_TASKS_PER_NODE")
         self.tasks_per_node = (
-            int(num_tasks.split("(")[0])
-            if num_tasks
-            else resource_config.cores_per_node
+            int(num_tasks.split("(")[0]) if num_tasks else self.cores_per_node
         )
         self.cpus_per_task = int(
-            os.environ.get(
-                "SLURM_CPUS_PER_TASK", resource_config.system_architecture.smt
-            )
+            os.environ.get("SLURM_CPUS_PER_TASK", self.threads_per_core)
         )
-        self.gpus_per_node = (
-            resource_config.gpus_per_node
-        )  # TODO: use XXX-smi to get the number of GPUs
-        self.mem_per_node = resource_config.mem_per_node
         self.num_nodes = int(os.environ.get("SLURM_NNODES", 1))
         nodelist = os.environ.get("SLURM_JOB_NODELIST")
         if nodelist:
@@ -73,6 +65,26 @@ class SlurmHook(BaseHook):
         self.slots_dict: dict[TaskInstanceKey, Slot] = {}
         self.gpu_env_var_name = "GPU_IDS"
         self.hostname_env_var_name = "HOSTNAME"
+
+    @cached_property
+    @providers_configuration_loaded
+    def cores_per_node(self) -> int:
+        return int(conf.get("hpc", "cores_per_node"))
+
+    @cached_property
+    @providers_configuration_loaded
+    def gpus_per_node(self) -> int:
+        return int(conf.get("hpc", "gpus_per_node"))
+
+    @cached_property
+    @providers_configuration_loaded
+    def mem_per_node(self) -> int:
+        return int(conf.get("hpc", "mem_per_node"))
+
+    @cached_property
+    @providers_configuration_loaded
+    def threads_per_core(self) -> int:
+        return int(conf.get("hpc", "threads_per_core"))
 
     def get_gpu_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
         if task_instance_key not in self.slots_dict:
