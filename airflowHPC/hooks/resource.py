@@ -38,9 +38,9 @@ DOWN = None
 
 @dataclass
 class RankRequirements:
-    n_cores: int = 1
+    num_cores: int = 1
+    num_gpus: int = 0
     core_occupation: float = 1.0
-    n_gpus: int = 0
     gpu_occupation: float = 1.0
     lfs: int = 0
     mem: int = 0
@@ -106,7 +106,7 @@ class NodeManager:
             # NOTE: the current mechanism will never use the same core or gpu
             #       multiple times for the created slot, even if the respective
             #       occupation would allow for it.
-            if rr.n_cores:
+            if rr.num_cores:
                 for ro in self.node.cores:
                     if ro.occupation is DOWN:
                         continue
@@ -116,13 +116,13 @@ class NodeManager:
                                 index=ro.index, occupation=rr.core_occupation
                             )
                         )
-                    if len(cores) == rr.n_cores:
+                    if len(cores) == rr.num_cores:
                         break
 
-                if len(cores) < rr.n_cores:
+                if len(cores) < rr.num_cores:
                     return None
 
-            if rr.n_gpus:
+            if rr.num_gpus:
                 for ro in self.node.gpus:
                     if ro.occupation is DOWN:
                         continue
@@ -132,10 +132,10 @@ class NodeManager:
                                 index=ro.index, occupation=rr.gpu_occupation
                             )
                         )
-                    if len(gpus) == rr.n_gpus:
+                    if len(gpus) == rr.num_gpus:
                         break
 
-                if len(gpus) < rr.n_gpus:
+                if len(gpus) < rr.num_gpus:
                     return None
 
             if rr.lfs and self.node.lfs < rr.lfs:
@@ -217,13 +217,13 @@ class NodeList:
         if not self.uniform:
             raise RuntimeError("verification unsupported for non-uniform nodes")
 
-        if not rr.n_cores:
+        if not rr.num_cores:
             raise ValueError("invalid rank requirements: %s" % rr)
 
-        ranks_per_node = self.cores_per_node / rr.n_cores
+        ranks_per_node = self.cores_per_node / rr.num_cores
 
-        if rr.n_gpus:
-            ranks_per_node = min(ranks_per_node, self.gpus_per_node / rr.n_gpus)
+        if rr.num_gpus:
+            ranks_per_node = min(ranks_per_node, self.gpus_per_node / rr.num_gpus)
 
         if rr.lfs:
             ranks_per_node = min(ranks_per_node, self.lfs_per_node / rr.lfs)

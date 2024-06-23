@@ -103,7 +103,7 @@ class SlurmHook(BaseHook):
     ):
         resource_request = RankRequirements(
             n_cores=num_cores,
-            n_gpus=num_gpus,
+            num_gpus=num_gpus,
         )
         self.task_resource_requests[task_instance_key] = resource_request
 

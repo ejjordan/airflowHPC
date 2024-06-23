@@ -204,9 +204,10 @@ class ResourceExecutor(BaseExecutor):
                     num_cores=task_instance.executor_config["mpi_ranks"],
                     num_gpus=task_instance.executor_config.get("gpus", 0),
                 )
-                self.log.info(
-                    f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key]} for task {task_instance.key}"
-                )
+                msg = f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key].n_cores} "
+                msg += f"core(s) and {self.slurm_hook.task_resource_requests[task_instance.key].num_gpus} GPU(s) "
+                msg += f"for task {task_instance.key}"
+                self.log.info(msg)
             else:
                 self.log.info(
                     f"Setting task resources to 1 core and 0 gpus for task {task_instance.key}"
@@ -288,6 +289,7 @@ class ResourceExecutor(BaseExecutor):
                 try:
                     found_slots = self.slurm_hook.assign_task_resources(key)
                     if not found_slots:
+                        self.log.debug(f"No available resources for task: {key}.")
                         sorted_queue.append(
                             (key, (command, priority, queue, ti.executor_config))
                         )
