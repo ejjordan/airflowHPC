@@ -36,7 +36,7 @@ def get_provider_info():
                         "version_added": "0.0.0",
                         "sensitive": False,
                     },
-                    "smt": {
+                    "threads_per_core": {
                         "description": "Number of threads per core",
                         "type": "string",
                         "default": "2",
