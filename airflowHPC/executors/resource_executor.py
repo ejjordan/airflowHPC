@@ -204,7 +204,7 @@ class ResourceExecutor(BaseExecutor):
                     num_cores=task_instance.executor_config["mpi_ranks"],
                     num_gpus=task_instance.executor_config.get("gpus", 0),
                 )
-                msg = f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key].n_cores} "
+                msg = f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key].num_cores} "
                 msg += f"core(s) and {self.slurm_hook.task_resource_requests[task_instance.key].num_gpus} GPU(s) "
                 msg += f"for task {task_instance.key}"
                 self.log.info(msg)

@@ -102,7 +102,7 @@ class SlurmHook(BaseHook):
         self, task_instance_key: TaskInstanceKey, num_cores: int, num_gpus: int
     ):
         resource_request = RankRequirements(
-            n_cores=num_cores,
+            num_cores=num_cores,
             num_gpus=num_gpus,
         )
         self.task_resource_requests[task_instance_key] = resource_request
@@ -113,7 +113,7 @@ class SlurmHook(BaseHook):
                 f"Resource request not found fo task {task_instance_key}"
             )
         resource_request = self.task_resource_requests[task_instance_key]
-        slots = self.nodes_list.find_slots(resource_request, n_slots=1)
+        slots = self.nodes_list.find_slots(resource_request, num_slots=1)
         if not slots:
             return False
         assert len(slots) == 1

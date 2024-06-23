@@ -210,7 +210,7 @@ class NodeList:
 
         self.__verified__ = True
 
-    def _assert_rr(self, rr: RankRequirements, n_slots: int) -> None:
+    def _assert_rr(self, rr: RankRequirements, num_slots: int) -> None:
         if not self.__verified__:
             self.verify()
 
@@ -234,14 +234,14 @@ class NodeList:
         if ranks_per_node < 1:
             raise ValueError("invalid rank requirements: %s" % rr)
 
-        if n_slots > len(self.nodes) * ranks_per_node:
+        if num_slots > len(self.nodes) * ranks_per_node:
             raise ValueError("invalid rank requirements: %s" % rr)
 
-    def find_slots(self, rr: RankRequirements, n_slots: int = 1) -> List[Slot] | None:
-        self._assert_rr(rr, n_slots)
+    def find_slots(self, rr: RankRequirements, num_slots: int = 1) -> List[Slot] | None:
+        self._assert_rr(rr, num_slots)
 
         if self.__last_failed_rr__:
-            if self.__last_failed_rr__ >= rr and self.__last_failed_n__ >= n_slots:
+            if self.__last_failed_rr__ >= rr and self.__last_failed_n__ >= num_slots:
                 return None
 
         slots = list()
@@ -260,20 +260,20 @@ class NodeList:
                     break
 
                 slots.append(slot)
-                if len(slots) == n_slots:
+                if len(slots) == num_slots:
                     stop = idx
                     break
 
-            if len(slots) == n_slots:
+            if len(slots) == num_slots:
                 break
 
-        if len(slots) != n_slots:
+        if len(slots) != num_slots:
             # free whatever we got
             for slot in slots:
                 node = self.nodes[slot.node_index]
                 node.deallocate_slot(slot)
             self.__last_failed_rr__ = rr
-            self.__last_failed_n__ = n_slots
+            self.__last_failed_n__ = num_slots
 
             return None
 
