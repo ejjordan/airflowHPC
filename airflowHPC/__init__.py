@@ -28,6 +28,14 @@ def get_provider_info():
                         "version_added": "0.0.0",
                         "sensitive": False,
                     },
+                    "gpu_type": {
+                        "description": "Type of GPU. Can be set to 'rocm', 'hip', 'nvidia' or 'None'",
+                        "type": "string",
+                        "default": "None",
+                        "example": "nvidia",
+                        "version_added": "0.0.0",
+                        "sensitive": False,
+                    },
                     "mem_per_node": {
                         "description": "Memory per node in GB",
                         "type": "string",
@@ -43,9 +51,9 @@ def get_provider_info():
                         "example": "2",
                         "version_added": "0.0.0",
                         "sensitive": False,
-                    }
-                }
-            }
+                    },
+                },
+            },
         },
         "operators": [
             {
