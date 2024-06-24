@@ -14,7 +14,7 @@ from airflowHPC.dags.tasks import (
 SHIFT_RANGE = 1
 NUM_ITERATIONS = 2
 NUM_SIMULATIONS = 4
-NUM_STATES = 8
+NUM_STATES = 9
 NUM_STEPS = 2000
 STATE_RANGES = [
     [0, 1, 2, 3, 4, 5],
@@ -22,7 +22,7 @@ STATE_RANGES = [
     [2, 3, 4, 5, 6, 7],
     [3, 4, 5, 6, 7, 8],
 ]
-T = 300
+T = 298
 
 
 @task.branch
@@ -63,8 +63,8 @@ def initialize_MDP(template, expand_args):
     from ensemble_md.utils import gmx_parser
 
     # idx_output = (idx, output_dir), i.e., a tuple
-    idx = expand_args['simulation_id']
-    output_dir = expand_args['output_dir']
+    idx = expand_args["simulation_id"]
+    output_dir = expand_args["output_dir"]
 
     MDP = gmx_parser.MDP(template)
     MDP["nsteps"] = NUM_STEPS
@@ -106,28 +106,25 @@ def initialize_MDP(template, expand_args):
 
 @task
 def prepare_args_for_mdp_functions(counter, mode):
-    if mode == 'initialize':
+    if mode == "initialize":
         # For initializing MDP files for the first iteration
         expand_args = [
-            {
-                'simulation_id': i,
-                'output_dir': f"outputs/sim_{i}/iteration_1"
-            }
+            {"simulation_id": i, "output_dir": f"outputs/sim_{i}/iteration_1"}
             for i in range(NUM_SIMULATIONS)
         ]
-    elif mode == 'update':
+    elif mode == "update":
         # For updating MDP files for the next iteration
         expand_args = [
             {
-                'simulation_id': i,
-                'template': f"outputs/sim_{i}/iteration_{counter}/expanded.mdp",
-                'output_dir': f"outputs/sim_{i}/iteration_{counter+1}"
+                "simulation_id": i,
+                "template": f"outputs/sim_{i}/iteration_{counter}/expanded.mdp",
+                "output_dir": f"outputs/sim_{i}/iteration_{counter+1}",
             }
             for i in range(NUM_SIMULATIONS)
         ]
     else:
         raise ValueError('Invalid value for the parameter "mode".')
-        
+
     return expand_args
 
 
@@ -138,20 +135,20 @@ def update_MDP(iter_idx, dhdl_store, expand_args):
     import json
     from ensemble_md.utils import gmx_parser
 
-    sim_idx = expand_args['simulation_id']
-    template = expand_args['template']
-    output_dir = expand_args['output_dir']
+    sim_idx = expand_args["simulation_id"]
+    template = expand_args["template"]
+    output_dir = expand_args["output_dir"]
 
     with open(dhdl_store.uri, "r") as f:
         data = json.load(f)
     states = [
         data["iteration"][str(iter_idx)][i]["state"] for i in range(NUM_SIMULATIONS)
     ]
-    
+
     MDP = gmx_parser.MDP(template)
     MDP["tinit"] = NUM_STEPS * MDP["dt"] * iter_idx
     MDP["nsteps"] = NUM_STEPS
-    MDP["init_lambda_state"] = (states[sim_idx] - sim_idx * SHIFT_RANGE)
+    MDP["init_lambda_state"] = states[sim_idx] - sim_idx * SHIFT_RANGE
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -233,14 +230,14 @@ def propose_swap(swappables):
     return swap
 
 
-def calc_prob_acc(swap, dhdl_files, states):
+def calc_prob_acc(swap, dhdl_files, states, shifts):
     import logging
     import numpy as np
     from alchemlyb.parsing.gmx import _get_headers as get_headers
     from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
 
-    logging.info(dhdl_files)
-    shifts = [SHIFT_RANGE for i in range(NUM_SIMULATIONS)]
+    logging.info(f"dhdl_files: {dhdl_files}")
+
     f0, f1 = dhdl_files[swap[0]], dhdl_files[swap[1]]
     h0, h1 = get_headers(f0), get_headers(f1)
     data_0, data_1 = (
@@ -259,8 +256,8 @@ def calc_prob_acc(swap, dhdl_files, states):
     new_state_1 = states[swap[0]] - shifts[swap[1]]
 
     kT = 1.380649e-23 * 6.0221408e23 * T / 1000
-    dU_0 = (dhdl_0[new_state_0] - dhdl_0[old_state_0]) / kT
-    dU_1 = (dhdl_1[new_state_1] - dhdl_1[old_state_1]) / kT
+    dU_0 = (dhdl_0.iloc[new_state_0] - dhdl_0.iloc[old_state_0]) / kT
+    dU_1 = (dhdl_1.iloc[new_state_1] - dhdl_1.iloc[old_state_1]) / kT
     dU = dU_0 + dU_1
 
     logging.info(
@@ -298,7 +295,6 @@ def get_swaps(iteration, dhdl_store):
     from itertools import combinations
     import numpy as np
     import logging
-    import random
     import json
     import copy
 
@@ -337,7 +333,7 @@ def get_swaps(iteration, dhdl_store):
 
     # Note that here we only implement the exhaustive exchange proposal scheme
     n_ex = int(np.floor(NUM_SIMULATIONS / 2))
-    shifts = [SHIFT_RANGE for i in range(NUM_SIMULATIONS)]
+    shifts = list(SHIFT_RANGE * np.arange(NUM_SIMULATIONS))
     for i in range(n_ex):
         if i >= 1:
             swappables = [
@@ -353,7 +349,8 @@ def get_swaps(iteration, dhdl_store):
             break
         else:
             # Figure out dhdl_files
-            prob_acc = calc_prob_acc(swap, dhdl_files, states)
+            prob_acc = calc_prob_acc(swap, dhdl_files, states, shifts)
+            logging.info(f"get_swaps: Acceptance rate: {prob_acc:.3f}")
             swap_bool = accept_or_reject(prob_acc)
 
         if swap_bool is True:
@@ -495,9 +492,11 @@ with DAG(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
 
-    expand_args = prepare_args_for_mdp_functions(counter, mode='initialize')
-    mdp_results = initialize_MDP.override(task_id="intialize_mdp").partial(template=input_mdp).expand(
-        expand_args=expand_args
+    expand_args = prepare_args_for_mdp_functions(counter, mode="initialize")
+    mdp_results = (
+        initialize_MDP.override(task_id="intialize_mdp")
+        .partial(template=input_mdp)
+        .expand(expand_args=expand_args)
     )
     mdp_list = mdp_results.map(lambda x: x)
     mdp_list = forward_values(mdp_list)
@@ -520,9 +519,11 @@ with DAG(
     swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
 
     # update MDP files for the next iteration
-    expand_args = prepare_args_for_mdp_functions(counter, mode='update')
-    mdp_results = update_MDP.override(task_id="update_mdp").partial(iter_idx=counter, dhdl_store=dhdl_store).expand(
-        expand_args=expand_args
+    expand_args = prepare_args_for_mdp_functions(counter, mode="update")
+    mdp_results = (
+        update_MDP.override(task_id="update_mdp")
+        .partial(iter_idx=counter, dhdl_store=dhdl_store)
+        .expand(expand_args=expand_args)
     )
     mdp_list = mdp_results.map(lambda x: x)
     mdp_list = forward_values(mdp_list)
