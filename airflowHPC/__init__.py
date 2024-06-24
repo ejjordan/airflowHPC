@@ -3,7 +3,7 @@ try:
 except ImportError:
     from importlib_metadata import version as importlib_metadata_version
 
-__version__ = importlib_metadata_version("airflow-provider-radical")
+__version__ = importlib_metadata_version("apache-airflow-providers-hpc")
 
 
 def get_provider_info():
