@@ -1,10 +1,44 @@
 import os
 import pytest
 
-from airflowHPC.dags.replex import NUM_STATES, SHIFT_RANGE, NUM_SIMULATIONS
-from airflowHPC.dags.replex import calc_prob_acc
+from airflow.operators.python import PythonOperator
+
+from tests.conftest import BasePythonTest, DEFAULT_DATE
+from airflowHPC.dags.replex import calc_prob_acc, store_dhdl_results
 
 data_path = os.path.join(os.path.dirname(__file__), "data")
+
+
+class TestReplex(BasePythonTest):
+    default_date = DEFAULT_DATE
+    opcls = PythonOperator
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    def test_store_dhdl_results(self):
+        from airflowHPC.dags.replex import store_dhdl_results
+        import tempfile
+        import json
+
+        data_path = os.path.join(os.path.dirname(__file__), "data")
+        dhdl_files = [os.path.join(data_path, f"dhdl/dhdl_{i}.xvg") for i in range(4)]
+        temp_out_dir = tempfile.mkdtemp()
+        iteration_idx = 1
+        dhdl_dict = {str(iteration_idx): dhdl_files}
+
+        with self.dag:
+            dhdl_store = store_dhdl_results(
+                dhdl_dict=dhdl_dict, output_dir=temp_out_dir, iteration=iteration_idx
+            )
+
+        dr = self.create_dag_run()
+        dhdl_store.operator.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE)
+
+        ti_dhdl_store = dr.get_task_instances()[0]
+
+        with open(ti_dhdl_store.xcom_pull().uri, "r") as f:
+            data = json.load(f)
+
+        assert data["iteration"][str(iteration_idx)] == dhdl_files
 
 
 def test_calc_prob_acc(capfd):
