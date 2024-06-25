@@ -8,6 +8,7 @@ __all__ = (
     "update_gmxapi_input",
     "prepare_gmxapi_input",
     "branch_task",
+    "list_from_xcom",
 )
 
 

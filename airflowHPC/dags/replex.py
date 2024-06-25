@@ -1,7 +1,7 @@
-import os
 from typing import Dict
 from airflow import DAG
 from airflow.decorators import task, task_group
+from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflow import Dataset
@@ -9,6 +9,7 @@ from airflow import Dataset
 from airflowHPC.dags.tasks import (
     get_file,
     prepare_gmxapi_input,
+    list_from_xcom,
 )
 
 SHIFT_RANGE = 1
@@ -22,7 +23,7 @@ STATE_RANGES = [
     [2, 3, 4, 5, 6, 7],
     [3, 4, 5, 6, 7, 8],
 ]
-T = 298
+TEMPERATURE = 298
 
 
 @task.branch
@@ -36,25 +37,12 @@ def check_condition(counter, num_iterations):
         return "run_complete"
 
 
-@task
-def run_complete():
-    import logging
-
-    logging.info("run_complete: done")
-    return "done"
-
-
 def get_dhdl(result):
     return {
         "simulation_id": result["inputs"]["simulation_id"],
         "dhdl": result["outputs"]["-dhdl"],
         "gro_path": result["outputs"]["-c"],
     }
-
-
-@task
-def forward_values(values):
-    return list(values)
 
 
 @task
@@ -255,7 +243,7 @@ def calc_prob_acc(swap, dhdl_files, states, shifts):
     new_state_0 = states[swap[1]] - shifts[swap[0]]
     new_state_1 = states[swap[0]] - shifts[swap[1]]
 
-    kT = 1.380649e-23 * 6.0221408e23 * T / 1000
+    kT = 1.380649e-23 * 6.0221408e23 * TEMPERATURE / 1000
     dU_0 = (dhdl_0.iloc[new_state_0] - dhdl_0.iloc[old_state_0]) / kT
     dU_1 = (dhdl_1.iloc[new_state_1] - dhdl_1.iloc[old_state_1]) / kT
     dU = dU_0 + dU_1
@@ -492,18 +480,19 @@ with DAG(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
 
-    expand_args = prepare_args_for_mdp_functions(counter, mode="initialize")
-    mdp_results = (
+    expand_args = prepare_args_for_mdp_functions.override(
+        task_id="initialize_mdp_args"
+    )(counter, mode="initialize")
+    mdp_inputs = (
         initialize_MDP.override(task_id="intialize_mdp")
         .partial(template=input_mdp)
         .expand(expand_args=expand_args)
     )
-    mdp_list = mdp_results.map(lambda x: x)
-    mdp_list = forward_values(mdp_list)
+    mdp_inputs_list = list_from_xcom.override(task_id="get_mdp_input_list")(mdp_inputs)
 
     grompp_input_list = prepare_gmxapi_input(
         args=["grompp"],
-        input_files={"-f": mdp_list, "-c": input_gro, "-p": input_top},
+        input_files={"-f": mdp_inputs_list, "-c": input_gro, "-p": input_top},
         output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
         output_dir="outputs",
         counter=counter,
@@ -519,24 +508,26 @@ with DAG(
     swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
 
     # update MDP files for the next iteration
-    expand_args = prepare_args_for_mdp_functions(counter, mode="update")
-    mdp_results = (
+    expand_args = prepare_args_for_mdp_functions.override(task_id="update_mdp_args")(
+        counter, mode="update"
+    )
+    mdp_updates = (
         update_MDP.override(task_id="update_mdp")
         .partial(iter_idx=counter, dhdl_store=dhdl_store)
         .expand(expand_args=expand_args)
     )
-    mdp_list = mdp_results.map(lambda x: x)
-    mdp_list = forward_values(mdp_list)
+    mdp_updates_list = list_from_xcom.override(task_id="get_mdp_update_list")(
+        mdp_updates
+    )
 
     next_step_input = prepare_next_step(
-        input_top, mdp_list, swap_pattern, dhdl_dict, counter
+        input_top, mdp_updates_list, swap_pattern, dhdl_dict, counter
     )
 
     trigger = TriggerDagRunOperator(
         task_id="trigger_self", trigger_dag_id="REXEE_example"
     )
     condition = check_condition(counter, NUM_ITERATIONS)
-    done = run_complete()
-    condition.set_upstream(next_step_input)
-    trigger.set_upstream(condition)
-    done.set_upstream(condition)
+    run_complete = EmptyOperator(task_id="run_complete", trigger_rule="none_failed")
+
+    next_step_input >> condition >> [trigger, run_complete]
