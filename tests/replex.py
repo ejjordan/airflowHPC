@@ -66,6 +66,20 @@ def test_extract_final_dhdl_info(dag_maker, session):
         assert data["state"] == result_states[data["simulation_id"]]
 
 
+def test_accept_or_reject():
+    from airflowHPC.dags.replex import accept_or_reject
+    import random
+
+    random.seed(0)
+    swap_bool_1 = accept_or_reject(0)
+    swap_bool_2 = accept_or_reject(0.8)  # rand = 0.844
+    swap_bool_3 = accept_or_reject(0.8)  # rand = 0.758
+
+    assert swap_bool_1 is False
+    assert swap_bool_2 is False
+    assert swap_bool_3 is True
+
+
 def test_calc_prob_acc(capfd):
     from airflowHPC.dags.replex import calc_prob_acc
 
