@@ -3,8 +3,7 @@ import pytest
 
 from airflow.operators.python import PythonOperator
 
-from tests.conftest import BasePythonTest, DEFAULT_DATE
-from airflowHPC.dags.replex import calc_prob_acc, store_dhdl_results
+from tests.conftest import BasePythonTest, DEFAULT_DATE, session
 
 data_path = os.path.join(os.path.dirname(__file__), "data")
 
@@ -41,7 +40,35 @@ class TestReplex(BasePythonTest):
         assert data["iteration"][str(iteration_idx)] == dhdl_files
 
 
+def test_extract_final_dhdl_info(dag_maker, session):
+    from airflowHPC.dags.replex import extract_final_dhdl_info
+
+    data_path = os.path.join(os.path.dirname(__file__), "data")
+    dhdl_files = [os.path.join(data_path, f"dhdl/dhdl_{i}.xvg") for i in range(4)]
+    results = [
+        {"simulation_id": 0, "gro_path": "result_0.gro", "dhdl": dhdl_files[0]},
+        {"simulation_id": 1, "gro_path": "result_1.gro", "dhdl": dhdl_files[1]},
+        {"simulation_id": 2, "gro_path": "result_2.gro", "dhdl": dhdl_files[2]},
+        {"simulation_id": 3, "gro_path": "result_3.gro", "dhdl": dhdl_files[3]},
+    ]
+    result_states = {0: 5, 1: 2, 2: 2, 3: 8}
+
+    with dag_maker("test-dag", session=session, start_date=DEFAULT_DATE) as dag:
+        dhdl_result = extract_final_dhdl_info.expand(result=results)
+
+    dr = dag_maker.create_dagrun()
+    tis = dr.get_task_instances()
+    for ti in tis:
+        ti.run()
+
+    outputs = [ti.xcom_pull()[i] for i, ti in enumerate(tis)]
+    for data in outputs:
+        assert data["state"] == result_states[data["simulation_id"]]
+
+
 def test_calc_prob_acc(capfd):
+    from airflowHPC.dags.replex import calc_prob_acc
+
     # k = 1.380649e-23; NA = 6.0221408e23; T = 298; kT = k * NA * T / 1000 = 2.4777098766670016
     # state_ranges = [[0, 1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6], ..., [3, 4, 5, 6, 7, 8]]
     states = [5, 2, 2, 8]

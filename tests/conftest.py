@@ -25,6 +25,14 @@ def clear_db_runs():
         session.query(DagRun).delete()
         session.query(TaskInstance).delete()
 
+@pytest.fixture
+def session():
+    from airflow.utils.session import create_session
+
+    with create_session() as session:
+        yield session
+        session.rollback()
+
 
 @pytest.fixture
 def dag_maker(request):
