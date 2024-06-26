@@ -80,6 +80,17 @@ def test_accept_or_reject():
     assert swap_bool_3 is True
 
 
+def test_propose_swap():
+    from airflowHPC.dags.replex import propose_swap
+    import random
+
+    random.seed(0)
+    swap_1 = propose_swap([])
+    swap_2 = propose_swap([(0, 1), (0, 2), (1, 2)])
+    assert swap_1 == []
+    assert swap_2 == (1, 2)
+
+
 def test_calc_prob_acc(capfd):
     from airflowHPC.dags.replex import calc_prob_acc
 
