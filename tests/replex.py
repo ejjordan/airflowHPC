@@ -44,7 +44,8 @@ class TestReplex(BasePythonTest):
     "proposal, result_states, expected_result",
     [
         ("exhaustive", {0: 0, 1: 6, 2: 7, 3: 8}, [0, 1, 2, 3]),  # no swap
-        ("single", {0: 5, 1: 2, 2: 2, 3: 8}, [0, 2, 1, 3]),  # swap (0, 1)
+        ("single", {0: 5, 1: 2, 2: 2, 3: 8}, [0, 2, 1, 3]),  # swap (1, 2)
+        ("neighboring", {0: 5, 1: 2, 2: 2, 3: 8}, [0, 2, 1, 3]),  # swap (1, 2)
         ("exhaustive", {0: 5, 1: 2, 2: 2, 3: 8}, [0, 2, 1, 3]),  # swap (1, 2)
         ("exhaustive", {0: 4, 1: 2, 2: 4, 3: 3}, [1, 0, 3, 2]),  # swap (2, 3), (0, 1)
     ],

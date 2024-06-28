@@ -324,9 +324,9 @@ def get_swaps(iteration, dhdl_store, proposal="exhaustive"):
     elif proposal == "single":
         n_ex = 1
     elif proposal == "neighboring":
-        raise NotImplementedError(
-            "Neighboring exchange proposal scheme is not implemented."
-        )
+        n_ex = 1
+        swappables = [i for i in swappables if np.abs(i[0] - i[1]) == 1]
+        logging.info(f"get_swaps: Neighboring swappable pairs: {swappables}")
     else:
         raise ValueError(
             f"get_swaps: Invalid value for the parameter 'proposal': {proposal}"
