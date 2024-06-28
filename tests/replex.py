@@ -39,11 +39,19 @@ class TestReplex(BasePythonTest):
         assert data["iteration"][str(iteration_idx)] == dhdl_files
 
 
-@pytest.mark.skip(reason="Need to mock prob_acc")
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
-def test_get_swaps_dhdl_states(dag_maker, session):
+@pytest.mark.parametrize(
+    "proposal, result_states, expected_result",
+    [
+        ("exhaustive", {0: 0, 1: 6, 2: 7, 3: 8}, [0, 1, 2, 3]),  # no swap
+        ("single", {0: 5, 1: 2, 2: 2, 3: 8}, [0, 2, 1, 3]),  # swap (0, 1)
+        ("exhaustive", {0: 5, 1: 2, 2: 2, 3: 8}, [0, 2, 1, 3]),  # swap (1, 2)
+        ("exhaustive", {0: 4, 1: 2, 2: 4, 3: 3}, [1, 0, 3, 2]),  # swap (2, 3), (0, 1)
+    ],
+)
+def test_get_swaps(dag_maker, session, proposal, result_states, expected_result):
     import tempfile
-    import copy
+    import random
     from airflowHPC.dags.replex import (
         get_swaps,
         store_dhdl_results,
@@ -51,8 +59,6 @@ def test_get_swaps_dhdl_states(dag_maker, session):
         reduce_dhdl,
     )
 
-    # weights are obtained from the log files in data/log, where the last states are 5, 2, 2, 8 (global indices)
-    # state_ranges are: 0-5, 1-6, ..., 3-8
     dhdl_files = [os.path.join(data_path, f"dhdl/dhdl_{i}.xvg") for i in range(4)]
     temp_out_dir = tempfile.mkdtemp()
     iteration_idx = 0
@@ -76,82 +82,22 @@ def test_get_swaps_dhdl_states(dag_maker, session):
 
     ti_reduce_dhdl = dr.get_task_instance(task_id="reduce_dhdl")
     dhdl_dict = ti_reduce_dhdl.xcom_pull()
-
-    # test default state values as extracted from the log files
-    input_dhdl_dict = copy.deepcopy(dhdl_dict)
-    result_states = {0: 5, 1: 2, 2: 2, 3: 8}
-    for info in input_dhdl_dict[str(iteration_idx)]:
-        assert info["state"] == result_states[info["simulation_id"]]
-
-    dhdl_store = store_dhdl_results.override(dag=dag)(
-        dhdl_dict=input_dhdl_dict, output_dir=temp_out_dir, iteration=iteration_idx
-    )
-    dhdl_store.operator.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE)
-
-    swap_pattern = get_swaps.override(dag=dag)(
-        iteration=iteration_idx, dhdl_store=dhdl_store, proposal="single"
-    )
-    swap_pattern.operator.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE)
-    ti_get_swaps = dr.get_task_instance(task_id="get_swaps")
-
-    assert ti_get_swaps.xcom_pull() == [0, 2, 1, 3]
-
-
-@pytest.mark.filterwarnings("ignore::DeprecationWarning")
-def test_get_swaps_non_overlapping_states(dag_maker, session):
-    import tempfile
-    import copy
-    from airflowHPC.dags.replex import (
-        get_swaps,
-        store_dhdl_results,
-        extract_final_dhdl_info,
-        reduce_dhdl,
-    )
-
-    # weights are obtained from the log files in data/log, where the last states are 5, 2, 2, 8 (global indices)
-    # state_ranges are: 0-5, 1-6, ..., 3-8
-    dhdl_files = [os.path.join(data_path, f"dhdl/dhdl_{i}.xvg") for i in range(4)]
-    temp_out_dir = tempfile.mkdtemp()
-    iteration_idx = 0
-    results = [
-        {"simulation_id": 0, "gro_path": "result_0.gro", "dhdl": dhdl_files[0]},
-        {"simulation_id": 1, "gro_path": "result_1.gro", "dhdl": dhdl_files[1]},
-        {"simulation_id": 2, "gro_path": "result_2.gro", "dhdl": dhdl_files[2]},
-        {"simulation_id": 3, "gro_path": "result_3.gro", "dhdl": dhdl_files[3]},
-    ]
-
-    with dag_maker(
-        "test_get_swaps-dag2", session=session, start_date=DEFAULT_DATE
-    ) as dag:
-        dhdl_results = extract_final_dhdl_info.expand(result=results)
-        reduce_dhdl(dhdl_results, iteration_idx)
-
-    dr = dag_maker.create_dagrun()
-    tis = dr.get_task_instances()
-    for ti in tis:
-        ti.run()
-
-    ti_reduce_dhdl = dr.get_task_instance(task_id="reduce_dhdl")
-    dhdl_dict = ti_reduce_dhdl.xcom_pull()
-
-    # test default state values as extracted from the log files
-    input_dhdl_dict = copy.deepcopy(dhdl_dict)
-    result_states = {0: 0, 1: 6, 2: 7, 3: 8}  # No swappable pairs
-    for info in input_dhdl_dict[str(iteration_idx)]:
+    for info in dhdl_dict[str(iteration_idx)]:
         info["state"] = result_states[info["simulation_id"]]
 
     dhdl_store = store_dhdl_results.override(dag=dag)(
-        dhdl_dict=input_dhdl_dict, output_dir=temp_out_dir, iteration=iteration_idx
+        dhdl_dict=dhdl_dict, output_dir=temp_out_dir, iteration=iteration_idx
     )
     dhdl_store.operator.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE)
 
+    random.seed(0)  # to ensure reproducibility
     swap_pattern = get_swaps.override(dag=dag)(
-        iteration=iteration_idx, dhdl_store=dhdl_store, proposal="exhaustive"
+        iteration=iteration_idx, dhdl_store=dhdl_store, proposal=proposal
     )
     swap_pattern.operator.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE)
     ti_get_swaps = dr.get_task_instance(task_id="get_swaps")
 
-    assert ti_get_swaps.xcom_pull() == [0, 1, 2, 3]
+    assert ti_get_swaps.xcom_pull() == expected_result
 
 
 def test_extract_final_dhdl_info(dag_maker, session):
