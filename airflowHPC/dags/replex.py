@@ -279,7 +279,7 @@ def accept_or_reject(prob_acc):
 
 
 @task
-def get_swaps(iteration, dhdl_store):
+def get_swaps(iteration, dhdl_store, proposal="exhaustive"):
     from itertools import combinations
     import numpy as np
     import logging
@@ -319,8 +319,18 @@ def get_swaps(iteration, dhdl_store):
 
     logging.info(f"get_swaps: iteration {iteration} swappables {swappables}")
 
-    # Note that here we only implement the exhaustive exchange proposal scheme
-    n_ex = int(np.floor(NUM_SIMULATIONS / 2))
+    if proposal == "exhaustive":
+        n_ex = int(np.floor(NUM_SIMULATIONS / 2))
+    elif proposal == "single":
+        n_ex = 1
+    elif proposal == "neighboring":
+        raise NotImplementedError(
+            "Neighboring exchange proposal scheme is not implemented."
+        )
+    else:
+        raise ValueError(
+            f"get_swaps: Invalid value for the parameter 'proposal': {proposal}"
+        )
     shifts = list(SHIFT_RANGE * np.arange(NUM_SIMULATIONS))
     for i in range(n_ex):
         if i >= 1:
@@ -359,6 +369,7 @@ def get_swaps(iteration, dhdl_store):
         else:
             pass
 
+    logging.info(f"get_swaps: The proposed swap list: {swap_list}")
     logging.info(f"get_swaps: The finally adopted swap pattern: {swap_pattern}")
 
     return swap_pattern
