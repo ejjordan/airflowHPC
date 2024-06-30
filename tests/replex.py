@@ -39,6 +39,72 @@ class TestReplex(BasePythonTest):
         assert data["iteration"][str(iteration_idx)] == dhdl_files
 
 
+def test_initialize_MDP(dag_maker, session):
+    import tempfile
+    from airflowHPC.dags.replex import initialize_MDP
+    from airflowHPC.data import data_dir as data
+    from airflowHPC.utils.mdp2json import mdp2json
+
+    input_mdp = os.path.abspath(os.path.join(data, "ensemble_md", "expanded.mdp"))
+    temp_out_dir = tempfile.mkdtemp()
+    expand_args = [
+        {"simulation_id": i, "output_dir": f"{temp_out_dir}/sim_{i}/iteration_1"}
+        for i in range(4)
+    ]
+    with dag_maker(
+        "test_initialize_MDP-dag", session=session, start_date=DEFAULT_DATE
+    ) as dag:
+        output_mdp = (
+            initialize_MDP.override(task_id="output_mdp")
+            .partial(template=input_mdp)
+            .expand(expand_args=expand_args)
+        )
+
+    dr = dag_maker.create_dagrun()
+    tis = dr.get_task_instances()
+    for ti in tis:
+        ti.run()
+
+    expected = [
+        {
+            "vdw_lambdas": [0.0, 0.0, 0.0, 0.0, 0.0, 0.25],
+            "coul_lambdas": [0.0, 0.25, 0.5, 0.75, 1.0, 1.0],
+            "init_lambda_weights": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
+        {
+            "vdw_lambdas": [0.0, 0.0, 0.0, 0.0, 0.25, 0.5],
+            "coul_lambdas": [0.25, 0.5, 0.75, 1.0, 1.0, 1.0],
+            "init_lambda_weights": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
+        {
+            "vdw_lambdas": [0.0, 0.0, 0.0, 0.25, 0.5, 0.75],
+            "coul_lambdas": [0.5, 0.75, 1.0, 1.0, 1.0, 1.0],
+            "init_lambda_weights": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
+        {
+            "vdw_lambdas": [0.0, 0.0, 0.25, 0.5, 0.75, 1.0],
+            "coul_lambdas": [0.75, 1.0, 1.0, 1.0, 1.0, 1.0],
+            "init_lambda_weights": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
+    ]
+
+    output_mdp_paths = [ti.xcom_pull()[i] for i, ti in enumerate(tis)]
+
+    for i, mdp_path in enumerate(output_mdp_paths):
+        assert os.path.exists(mdp_path)
+        mdp_data = mdp2json(mdp_path)
+        assert mdp_data["nsteps"] == 2000
+        assert [float(j) for j in mdp_data["vdw_lambdas"].split(" ")] == expected[i][
+            "vdw_lambdas"
+        ]
+        assert [float(j) for j in mdp_data["coul_lambdas"].split(" ")] == expected[i][
+            "coul_lambdas"
+        ]
+        assert [
+            float(j) for j in mdp_data["init_lambda_weights"].split(" ")
+        ] == expected[i]["init_lambda_weights"]
+
+
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
 @pytest.mark.parametrize(
     "proposal, result_states, expected_result",
@@ -71,7 +137,7 @@ def test_get_swaps(dag_maker, session, proposal, result_states, expected_result)
     ]
 
     with dag_maker(
-        "test_get_swaps-dag1", session=session, start_date=DEFAULT_DATE
+        "test_get_swaps-dag", session=session, start_date=DEFAULT_DATE
     ) as dag:
         dhdl_results = extract_final_dhdl_info.expand(result=results)
         reduce_dhdl(dhdl_results, iteration_idx)
