@@ -1,7 +1,6 @@
 import pytest
 import os
 
-from airflow.utils.state import DagRunState
 from airflow.utils.types import DagRunType
 from slugify import slugify
 from datetime import datetime
@@ -24,6 +23,7 @@ def clear_db_runs():
         session.query(Trigger).delete()
         session.query(DagRun).delete()
         session.query(TaskInstance).delete()
+
 
 @pytest.fixture
 def session():
@@ -222,49 +222,3 @@ def dag_maker(request):
         factory.cleanup()
         with suppress(AttributeError):
             del factory.session
-
-
-@pytest.fixture()
-def create_task_instance_of_operator(dag_maker):
-    def _create_task_instance(
-        operator_class,
-        *,
-        dag_id,
-        session=None,
-        **operator_kwargs,
-    ) -> TaskInstance:
-        with dag_maker(dag_id=dag_id, session=session):
-            operator_class(**operator_kwargs)
-        (ti,) = dag_maker.create_dagrun({}).task_instances
-        return ti
-
-    return _create_task_instance
-
-
-class BasePythonTest:
-    opcls: type[BaseOperator]
-    dag_id: str
-    task_id: str
-    run_id: str
-    dag: DAG
-    ds_templated: str
-    default_date: datetime = DEFAULT_DATE
-
-    @pytest.fixture(autouse=True)
-    def base_tests_setup(self, request, dag_maker):
-        self.dag_id = f"dag_{slugify(request.cls.__name__)}"
-        self.dag_maker = dag_maker
-        self.dag = self.dag_maker(self.dag_id).dag
-        clear_db_runs()
-        yield
-        clear_db_runs()
-
-    def create_dag_run(self) -> DagRun:
-        return self.dag.create_dagrun(
-            state=DagRunState.RUNNING,
-            start_date=self.dag_maker.start_date,
-            session=self.dag_maker.session,
-            execution_date=self.default_date,
-            run_type=DagRunType.MANUAL,
-            data_interval=(DEFAULT_DATE, DEFAULT_DATE),
-        )
