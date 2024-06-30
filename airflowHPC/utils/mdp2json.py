@@ -6,6 +6,7 @@ __all__ = [
     "update_write_mdp_json_from_file",
     "update_write_mdp_json_as_mdp",
     "update_write_mdp_json_as_mdp_from_file",
+    "write_mdp_json_as_mdp",
 ]
 
 
@@ -108,10 +109,18 @@ def update_write_mdp_json_as_mdp_from_file(
     mdp_json_file_path, update_dict: dict = {}, output_file: str = None
 ):
     import json
+    import logging
 
+    logging.info(f"update: {update_dict}")
     with open(mdp_json_file_path, "r") as mdp_file:
         mdp_data = json.load(mdp_file)
     return update_write_mdp_json_as_mdp(mdp_data, update_dict, output_file)
+
+
+@task
+def write_mdp_json_as_mdp(mdp_data, output_file: str = None):
+    validate_json_mdp(mdp_data)
+    return json2mdp(mdp_data, output_file)
 
 
 def validate_convert_mdp(mdp_file_path):

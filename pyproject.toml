@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "versioningit~=2.0"]
+requires = ["setuptools>=61.0", "wheel", "versioningit~=2.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,8 +11,15 @@ classifiers = [
 ]
 
 dependencies = [
-    "apache-airflow",
-    "gmxapi",
+    "apache-airflow>=2.6",
+    "radical.pilot",
+]
+[project.optional-dependencies]
+mysql = [
+    "apache-airflow[mysql]"
+]
+postgres = [
+    "apache-airflow[postgres]"
 ]
 
 [project.urls]
@@ -22,14 +29,10 @@ dependencies = [
 file = "README.md"
 content-type = "text/markdown"
 
-[project.optional-dependencies]
-test = [
-    "build",
-    "packaging",
-]
-
 target-version = ['py39', 'py310', 'py311']
 
 [project.entry-points.apache_airflow_provider]
 provider_info = "airflowHPC.__init__:get_provider_info"
 
+[project.entry-points.'airflow.policy']
+_ = 'airflowHPC.policies'

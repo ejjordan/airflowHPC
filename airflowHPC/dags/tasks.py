@@ -1,5 +1,7 @@
-from airflow.decorators import task
-from dataclasses import dataclass, asdict
+from airflow.decorators import task, task_group
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.operators.empty import EmptyOperator
+from dataclasses import dataclass
 
 __all__ = (
     "get_file",
@@ -9,6 +11,9 @@ __all__ = (
     "prepare_gmxapi_input",
     "branch_task",
     "list_from_xcom",
+    "branch_task_template",
+    "run_if_needed",
+    "run_if_false",
 )
 
 
@@ -44,11 +49,14 @@ def get_file(
             return True
         else:
             return False
-    assert os.path.exists(file_to_get)
+    if not os.path.exists(file_to_get):
+        raise FileNotFoundError(f"File {file_to_get} does not exist")
     return file_to_get
 
 
-def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: str):
+def _run_gmxapi(
+    args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None
+):
     import os
     import shutil
     import gmxapi
@@ -63,7 +71,11 @@ def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: s
     cwd = os.getcwd()
     os.chdir(out_path)
     gmx = gmxapi.commandline_operation(
-        gmxapi.commandline.cli_executable(), args, input_files, output_files_paths
+        gmxapi.commandline.cli_executable(),
+        args,
+        input_files,
+        output_files_paths,
+        stdin,
     )
     gmx.run()
     logging.info(gmx.output.stderr.result())
@@ -77,14 +89,16 @@ def _run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: s
     return gmx
 
 
-@task(multiple_outputs=True)
-def run_gmxapi(args: list, input_files: dict, output_files: dict, output_dir: str):
-    gmx = _run_gmxapi(args, input_files, output_files, output_dir)
+@task(multiple_outputs=True, queue="radical")
+def run_gmxapi(
+    args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None
+):
+    gmx = _run_gmxapi(args, input_files, output_files, output_dir, stdin)
     return {f"{key}": f"{gmx.output.file[key].result()}" for key in output_files.keys()}
 
 
-@task(multiple_outputs=True, max_active_tis_per_dagrun=1)
-def run_gmxapi_dataclass(input_data):
+@task(multiple_outputs=True, max_active_tis_per_dagrun=1, queue="radical")
+def run_gmxapi_dataclass(input_data: GmxapiInputHolder):
     """Ideally this could be an overload with multipledispatch but that does not play well with airflow"""
     from dataclasses import asdict
 
@@ -182,6 +196,82 @@ def branch_task(
         return task_if_false
 
 
+@task.branch
+def branch_task_template(statement: str, task_if_true: str, task_if_false: str) -> str:
+    """
+    Handle branching based on a jinja templated statement.
+    This is potentially dangerous as it can execute arbitrary python code,
+    so we check that there are no python identifiers in the statement.
+    This is not foolproof, but it should catch most cases.
+    """
+    if any([word.isidentifier() for word in statement.split()]):
+        raise ValueError("Template statement potentially contains python code")
+    if len(statement.split()) > 3:
+        raise ValueError("Template statement should be a simple comparison")
+    truth_value = eval(statement)
+
+    if truth_value:
+        return task_if_true
+    else:
+        return task_if_false
+
+
 @task
 def list_from_xcom(values):
     return list(values)
+
+
+@task
+def unpack_ref_t(**context):
+    """
+    It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
+    Thus, this task handles dynamic sizing of the ref_t_list.
+    """
+    temps_list = context["task"].render_template(
+        "{{ params.ref_t_list | list}}", context
+    )
+    return list([{"ref_t": ref_t} for ref_t in temps_list])
+
+
+@task_group
+def run_if_needed(dag_id, dag_params):
+    is_dag_done = get_file.override(task_id=f"is_{dag_id}_done")(
+        input_dir=dag_params["output_dir"],
+        file_name=dag_params["expected_output"],
+        use_ref_data=False,
+        check_exists=True,
+    )
+    trigger_dag = TriggerDagRunOperator(
+        task_id=f"trigger_{dag_id}",
+        trigger_dag_id=dag_id,
+        wait_for_completion=True,
+        poke_interval=10,
+        trigger_rule="none_failed",
+        conf=dag_params,
+    )
+    dag_done = EmptyOperator(task_id=f"{dag_id}_done", trigger_rule="none_failed")
+    dag_done_branch = branch_task.override(task_id=f"{dag_id}_done_branch")(
+        truth_value=is_dag_done,
+        task_if_true=dag_done.task_id,
+        task_if_false=trigger_dag.task_id,
+    )
+    is_dag_done >> dag_done_branch >> [trigger_dag, dag_done]
+
+
+@task_group
+def run_if_false(dag_id, dag_params, truth_value: bool):
+    trigger_dag = TriggerDagRunOperator(
+        task_id=f"trigger_{dag_id}",
+        trigger_dag_id=dag_id,
+        wait_for_completion=True,
+        poke_interval=10,
+        trigger_rule="none_failed",
+        conf=dag_params,
+    )
+    dag_done = EmptyOperator(task_id=f"{dag_id}_done", trigger_rule="none_failed")
+    dag_done_branch = branch_task.override(task_id=f"{dag_id}_done_branch")(
+        truth_value=truth_value,
+        task_if_true=dag_done.task_id,
+        task_if_false=trigger_dag.task_id,
+    )
+    dag_done_branch >> [trigger_dag, dag_done]
