@@ -2,6 +2,7 @@ import os
 import pytest
 
 from airflow.operators.python import PythonOperator
+from unittest.mock import patch, MagicMock
 
 from tests.conftest import BasePythonTest, DEFAULT_DATE, session, dag_maker
 
@@ -103,6 +104,59 @@ def test_initialize_MDP(dag_maker, session):
         assert [
             float(j) for j in mdp_data["init_lambda_weights"].split(" ")
         ] == expected[i]["init_lambda_weights"]
+
+
+def test_update_MDP(dag_maker, session):
+    import tempfile, shutil
+    from airflowHPC.dags.replex import update_MDP
+    from airflowHPC.data import data_dir as data
+    from airflowHPC.utils.mdp2json import mdp2json
+
+    input_mdp = os.path.abspath(os.path.join(data, "ensemble_md", "expanded.mdp"))
+    iteration_idx = 3
+    temp_out_dir = tempfile.mkdtemp()
+    expand_args = [
+        {"simulation_id": i, "output_dir": f"{temp_out_dir}/sim_{i}/iteration_1"}
+        for i in range(4)
+    ]
+    for arg in expand_args:
+        os.makedirs(arg["output_dir"], exist_ok=True)
+        shutil.copy(input_mdp, arg["output_dir"])
+        arg["template"] = os.path.join(arg["output_dir"], "expanded.mdp")
+
+    mock_dhdl_store = MagicMock()
+    mock_dhdl_store.uri = os.path.join(data_path, "mock_dhdl_store.json")
+    with patch(
+        "airflowHPC.dags.replex.store_dhdl_results", return_value=mock_dhdl_store
+    ):
+        with dag_maker(
+            "test_update_mdp-dag", session=session, start_date=DEFAULT_DATE
+        ) as dag:
+            output_mdp = (
+                update_MDP.override(task_id="output_mdp")
+                .partial(iter_idx=iteration_idx, dhdl_store=mock_dhdl_store)
+                .expand(expand_args=expand_args)
+            )
+
+    dr = dag_maker.create_dagrun()
+    tis = dr.get_task_instances()
+    for ti in tis:
+        ti.run()
+
+    expected = [
+        {"init_lambda_state": 2},
+        {"init_lambda_state": 4},
+        {"init_lambda_state": 5},
+        {"init_lambda_state": 1},
+    ]
+
+    output_mdp_paths = [ti.xcom_pull()[i] for i, ti in enumerate(tis)]
+    for i, mdp_path in enumerate(output_mdp_paths):
+        assert os.path.exists(mdp_path)
+        mdp_data = mdp2json(mdp_path)
+        assert mdp_data["nsteps"] == 2000
+        assert mdp_data["tinit"] == 12
+        assert mdp_data["init_lambda_state"] == expected[i]["init_lambda_state"]
 
 
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
