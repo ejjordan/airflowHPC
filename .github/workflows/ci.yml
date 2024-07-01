@@ -19,13 +19,7 @@ jobs:
       with:
         mpi: openmpi
 
-    - name: Setup Ninja
-      uses: seanmiddleditch/gha-setup-ninja@v4
-
-    - name: Setup CMake
-      uses: threeal/cmake-action@main
-      with:
-        generator: Ninja
+    - uses: lukka/get-cmake@latest
 
     - name: Install GROMACS
       run: |
