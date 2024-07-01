@@ -26,7 +26,7 @@ jobs:
       with:
         mpi: openmpi
 
-    #- uses: lukka/get-cmake@latest
+    - uses: lukka/get-cmake@latest
 
     #- name: Set up Python
     #  uses: actions/setup-python@v5
