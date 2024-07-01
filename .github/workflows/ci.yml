@@ -24,11 +24,10 @@ jobs:
 
     - name: Setup MySQL
       run: |
-        sudo -S mysql -u root -pRootPassword
         sudo systemctl start mysql
         sudo mysql -e "CREATE DATABASE airflow_db;"
-        sudo mysql -e "CREATE USER 'airflow_user'@'localhost' IDENTIFIED BY 'airflow_pass';"
-        sudo mysql -e "GRANT ALL PRIVILEGES ON airflow_db.* TO 'airflow_user'@'localhost';"
+        sudo mysql -e "CREATE USER 'airflow_user' IDENTIFIED BY 'airflow_pass';"
+        sudo mysql -e "GRANT ALL PRIVILEGES ON airflow_db.* TO 'airflow_user'"
         sudo mysql -e "FLUSH PRIVILEGES;"
 
     - name: Cache MPI
