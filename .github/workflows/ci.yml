@@ -14,18 +14,25 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Cache MPI
+      id: cache-mpi
+      uses: actions/cache@v3
+      with:
+        path: ~/.openmpi
+        key: ${{ runner.os }}-openmpi-${{ hashFiles('**/ci.yml') }}
+
     - name: Setup MPI
       uses: mpi4py/setup-mpi@v1
       with:
         mpi: openmpi
 
-    - uses: lukka/get-cmake@latest
+    #- uses: lukka/get-cmake@latest
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
+    #- name: Set up Python
+    #  uses: actions/setup-python@v5
+    #  with:
+    #    python-version: '3.11'
+    #    cache: 'pip'
 
     #- name: Install GROMACS depencies
     #  run: |
