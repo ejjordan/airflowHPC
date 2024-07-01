@@ -28,7 +28,9 @@ jobs:
           wget https://ftp.gromacs.org/gromacs/gromacs-2023.3.tar.gz
           tar xfz gromacs-2023.3.tar.gz
           cd gromacs-2023.3
-          cmake -S . -B build -DGMX_BUILD_OWN_FFTW=ON -DGMX_MPI=ON -DBUILD_TESTING=OFF
+          mkdir build
+          cd build
+          cmake .. -DGMX_BUILD_OWN_FFTW=ON -DGMX_MPI=ON -DBUILD_TESTING=OFF
           make -j $(nproc)
           sudo make -j $(nproc) install
           export gmxapi_ROOT=/usr/local/gromacs/
