@@ -68,12 +68,12 @@ jobs:
     #      cmake .. -DGMX_BUILD_OWN_FFTW=OFF -DGMX_FFT_LIBRARY=fftw3 -DGMX_MPI=ON -DBUILD_TESTING=OFF -DGMX_SIMD=AVX2_256 -DGMX_INSTALL_NBLIB_API=OFF
     #      make -j $(nproc)
     #      sudo make -j $(nproc) install
+    #      export gmxapi_ROOT=/usr/local/gromacs/
 
     - name: Install Package
       run: |
         python -m pip install --upgrade pip
         pip install -e .[mysql]
-    #    export gmxapi_ROOT=/usr/local/gromacs/
         pip install -r requirements.txt
         airflow db init
 
