@@ -1,6 +1,6 @@
 alchemlyb
 dill
-gmxapi
+#gmxapi
 h5py
 mdanalysis
 zmq
