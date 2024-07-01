@@ -55,7 +55,7 @@ jobs:
     - name: Install Package
       run: |
         python -m pip install --upgrade pip
-        pip install -e .
+        pip install -e .[mysql]
         pip install -r requirements.txt
 
     #- name: Install GROMACS depencies
