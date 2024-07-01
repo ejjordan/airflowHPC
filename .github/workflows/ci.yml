@@ -26,21 +26,6 @@ jobs:
         sudo mysql --user=root --password=root -e "GRANT ALL PRIVILEGES ON airflow_db.* TO 'airflow_user'"
         sudo mysql --user=root --password=root -e "FLUSH PRIVILEGES;"
 
-    - name: Cache MPI
-      id: cache-mpi
-      uses: actions/cache@v3
-      with:
-        path: ~/.openmpi
-        key: ${{ runner.os }}-openmpi-${{ hashFiles('**/ci.yml') }}
-
-    - name: Setup MPI
-      if: steps.cache-mpi.outputs.cache-hit != 'true'
-      uses: mpi4py/setup-mpi@v1
-      with:
-        mpi: openmpi
-
-    - uses: lukka/get-cmake@latest
-
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -52,12 +37,21 @@ jobs:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
 
-    - name: Install Package
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .[mysql]
-        pip install -r requirements.txt
-        airflow db init
+    # No tests use gmxapi for now
+    #- name: Cache MPI
+    #  id: cache-mpi
+    #  uses: actions/cache@v3
+    #  with:
+    #    path: ~/.openmpi
+    #    key: ${{ runner.os }}-openmpi-${{ hashFiles('**/ci.yml') }}
+
+    #- name: Setup MPI
+    #  if: steps.cache-mpi.outputs.cache-hit != 'true'
+    #  uses: mpi4py/setup-mpi@v1
+    #  with:
+    #    mpi: openmpi
+
+    #- uses: lukka/get-cmake@latest
 
     #- name: Install GROMACS depencies
     #  run: |
@@ -75,11 +69,13 @@ jobs:
     #      make -j $(nproc)
     #      sudo make -j $(nproc) install
 
-    #- name: Install dependencies
-    #  run: |
+    - name: Install Package
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[mysql]
     #    export gmxapi_ROOT=/usr/local/gromacs/
-    #    python -m pip install --upgrade pip
-    #    pip install -r requirements.txt
+        pip install -r requirements.txt
+        airflow db init
 
     - name: Run tests
       run: |
