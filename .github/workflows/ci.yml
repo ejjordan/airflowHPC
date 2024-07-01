@@ -24,18 +24,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Setup MySQL
-      uses: marketplacer/setup-mysql@v1.1
-      with:
-        version: '5.7'
-        root_password: 'airflow_password'
-        databases: |
-          airflow_db
-        users: |
-          airflow_user:airflow_pass
-        env: |
-          AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
-
     - name: Run tests
       run: |
         pytest tests/replex.py
