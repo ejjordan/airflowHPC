@@ -22,6 +22,7 @@ jobs:
         key: ${{ runner.os }}-openmpi-${{ hashFiles('**/ci.yml') }}
 
     - name: Setup MPI
+      if: steps.cache-mpi.outputs.cache-hit != 'true'
       uses: mpi4py/setup-mpi@v1
       with:
         mpi: openmpi
