@@ -10,6 +10,18 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: airflow_db
+          MYSQL_USER: airflow_user
+          MYSQL_PASSWORD: airflow_pass
+
+    env:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://airflow_user:airflow_pass@localhost:3306/airflow_db
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
