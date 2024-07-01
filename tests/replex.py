@@ -17,6 +17,7 @@ def test_store_dhdl_results(dag_maker, session):
 
     dhdl_files = [os.path.join(data_path, f"dhdl/dhdl_{i}.xvg") for i in range(4)]
     temp_out_dir = tempfile.mkdtemp()
+    output_fn = "dhdl_store.json"
     iteration_idx = 1
     dhdl_dict = {str(iteration_idx): dhdl_files}
 
@@ -24,7 +25,10 @@ def test_store_dhdl_results(dag_maker, session):
         "test_store_dhdl_results-dag", session=session, start_date=DEFAULT_DATE
     ) as dag:
         dhdl_store = store_dhdl_results(
-            dhdl_dict=dhdl_dict, output_dir=temp_out_dir, iteration=iteration_idx
+            dhdl_dict=dhdl_dict,
+            output_dir=temp_out_dir,
+            output_fn=output_fn,
+            iteration=iteration_idx,
         )
 
     dr = dag_maker.create_dagrun()
@@ -55,7 +59,7 @@ def test_initialize_MDP(dag_maker, session):
     ) as dag:
         output_mdp = (
             initialize_MDP.override(task_id="output_mdp")
-            .partial(template=input_mdp)
+            .partial(template_mdp=input_mdp)
             .expand(expand_args=expand_args)
         )
 
@@ -179,7 +183,6 @@ def test_get_swaps(dag_maker, session, proposal, result_states, expected_result)
     )
 
     dhdl_files = [os.path.join(data_path, f"dhdl/dhdl_{i}.xvg") for i in range(4)]
-    temp_out_dir = tempfile.mkdtemp()
     iteration_idx = 0
     results = [
         {"simulation_id": 0, "gro_path": "result_0.gro", "dhdl": dhdl_files[0]},
@@ -204,8 +207,13 @@ def test_get_swaps(dag_maker, session, proposal, result_states, expected_result)
     for info in dhdl_dict[str(iteration_idx)]:
         info["state"] = result_states[info["simulation_id"]]
 
+    temp_out_dir = tempfile.mkdtemp()
+    output_fn = "dhdl_store.json"
     dhdl_store = store_dhdl_results.override(dag=dag)(
-        dhdl_dict=dhdl_dict, output_dir=temp_out_dir, iteration=iteration_idx
+        dhdl_dict=dhdl_dict,
+        output_dir=temp_out_dir,
+        output_fn=output_fn,
+        iteration=iteration_idx,
     )
     dhdl_store.operator.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE)
 
