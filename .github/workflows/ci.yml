@@ -17,17 +17,19 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Install MySQL
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y mysql-server
+
     - name: Setup MySQL
-      uses: marketplacer/setup-mysql@v1.1
-      with:
-        version: '5.7'
-        root_password: 'rootpassword'
-        databases: |
-          airflow_db
-        users: |
-          airflow_user:airflow_pass
-        env: |
-          AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
+      run: |
+        sudo -S mysql -u root -pRootPassword
+        sudo systemctl start mysql
+        sudo mysql -e "CREATE DATABASE airflow_db;"
+        sudo mysql -e "CREATE USER 'airflow_user'@'localhost' IDENTIFIED BY 'airflow_pass';"
+        sudo mysql -e "GRANT ALL PRIVILEGES ON airflow_db.* TO 'airflow_user'@'localhost';"
+        sudo mysql -e "FLUSH PRIVILEGES;"
 
     - name: Cache MPI
       id: cache-mpi
