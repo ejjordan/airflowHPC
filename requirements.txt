@@ -4,3 +4,4 @@ gmxapi
 h5py
 mdanalysis
 zmq
+pytest
