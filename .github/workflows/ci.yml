@@ -57,6 +57,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e .[mysql]
         pip install -r requirements.txt
+        airflow db init
 
     #- name: Install GROMACS depencies
     #  run: |
