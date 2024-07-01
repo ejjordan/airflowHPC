@@ -19,6 +19,18 @@ jobs:
       with:
         mpi: openmpi
 
+    - name: Install GROMACS
+      run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget https://ftp.gromacs.org/gromacs/gromacs-2023.3.tar.gz
+          tar xfz gromacs-2023.3.tar.gz
+          cd gromacs-2023.3
+          cmake -S . -B build -DGMX_BUILD_OWN_FFTW=ON
+          make -j $(nproc)
+          sudo make -j $(nproc) install
+          export gmxapi_ROOT=/usr/local/gromacs/
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
