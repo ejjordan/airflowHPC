@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-import shutil
 from typing import TYPE_CHECKING, Sequence, Union, Iterable
 
-from airflow.exceptions import AirflowException, AirflowSkipException
+from airflow.exceptions import AirflowSkipException
+from airflow.utils import timezone
 
 from airflowHPC.operators.resource_bash_operator import ResourceBashOperator
 import radical.utils as ru
@@ -75,17 +75,17 @@ class RadicalGmxOperator(ResourceBashOperator):
                 raise ImportError(
                     "The gmx_executable argument must be set if the gmxapi package is not installed."
                 )
-        #bash_path = shutil.which("bash") or "bash"
-        #env = self.get_env(context)
+        # bash_path = shutil.which("bash") or "bash"
+        # env = self.get_env(context)
 
-        self.log.info(f"mpi_executable: {self.mpi_executable}")
+        # self.log.info(f"mpi_executable: {self.mpi_executable}")
         self.log.info(f"mpi_ranks: {self.mpi_ranks}")
         self.log.info(f"gmx_executable: {self.gmx_executable}")
         self.log.info(f"gmx_arguments: {self.gmx_arguments}")
         self.log.info(f"input_files: {self.input_files}")
         self.log.info(f"output_files: {output_files_paths}")
-        #self.log.info(f"gpu_ids: {self.gpu_ids}")
-        #self.log.info(f"hostname: {self.hostname}")
+        # self.log.info(f"gpu_ids: {self.gpu_ids}")
+        # self.log.info(f"hostname: {self.hostname}")
 
         rp_endpoint = os.environ.get("RP_ENDPOINT")
 
@@ -98,11 +98,17 @@ class RadicalGmxOperator(ResourceBashOperator):
         td.executable = self.gmx_executable
         td.ranks = self.mpi_ranks
         td.arguments = self.gmx_arguments
-        td.input_staging = self.input_files
-        td.output_staging = output_files_paths
+        # td.input_staging = self.input_files
+        # td.output_staging = output_files_paths
+        self.log.info(f"TaskDescription: {td.as_dict()}")
+        self.log.info(f"RP_ENDPOINT: {rp_endpoint}")
+        self.log.info(f"RP_CLIENT: {rp_client}")
 
-        uid = rp_client.request({'cmd': 'rp_execute',
-                                 'kwargs': {'task_description': td.as_dict()}})
+        uid = rp_client.request(
+            cmd="rp_execute",
+            task_description=td.as_dict(),
+            key=timezone.utcnow().isoformat(),
+        )
 
         if not uid:
             raise AirflowSkipException("Command failed")

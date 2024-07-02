@@ -103,9 +103,7 @@ class RadicalExecutor(BaseExecutor):
 
         self._rp_endpoint = self._zmq_server.addr
 
-    def _rp_execute(self, task_description: dict,
-                    key: TaskInstanceKey) -> None:
-
+    def _rp_execute(self, task_description: dict, key: TaskInstanceKey) -> None:
         td = rp.TaskDescription(task_description)
         task = self._rp_tmgr.submit_tasks(td)
 
@@ -126,7 +124,7 @@ class RadicalExecutor(BaseExecutor):
 
         self.validate_airflow_tasks_run_command(command)
 
-        bash_cmd = f'RP_ENDPOINT={self._rp_endpoint} airflow tasks run {key.dag_id} {key.task_id}'
+        bash_cmd = f'RP_ENDPOINT={self._rp_endpoint} {" ".join(command)}'
         ru.sh_callout_bg("bash -c '%s'" % bash_cmd)
 
     def sync(self) -> None:

@@ -2,6 +2,7 @@ from airflow import DAG
 from airflow.decorators import task
 from airflow.utils import timezone
 from airflowHPC.dags.tasks import get_file, run_gmxapi
+from airflowHPC.operators.radical_gmx_operator import RadicalGmxOperator
 from airflowHPC.operators.resource_gmx_operator import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
@@ -50,7 +51,7 @@ with DAG(
         output_dir="{{ params.output_dir }}",
     )
     outputs_dirs = outputs_list.override(task_id="get_output_dirs")()
-    mdrun_result = ResourceGmxOperator.partial(
+    mdrun_result = RadicalGmxOperator.partial(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 4,
