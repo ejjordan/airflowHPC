@@ -64,6 +64,21 @@ with DAG(
         output_files={"-c": "result.gro", "-x": "result.xtc"},
     ).expand(output_dir=outputs_dirs)
     """
+    mdrun_result = ResourceGmxOperator.partial(
+        task_id="mdrun",
+        executor_config={
+            "mpi_ranks": 4,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+        gmx_arguments=["mdrun", "-ntomp", "2"],
+        input_files={"-s": grompp_result["-o"]},
+        output_files={"-c": "result.gro", "-x": "result.xtc"},
+    ).expand(output_dir=outputs_dirs)
+    """
+    """
     from airflowHPC.operators.mpi_bash_operator import MPIBashOperator
     mdrun_result = MPIBashOperator.partial(
         task_id="mdrun",
