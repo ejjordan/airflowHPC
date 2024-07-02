@@ -52,10 +52,13 @@ class ResourceGmxOperator(ResourceBashOperator):
         self.output_dir = output_dir
         for i, arg in enumerate(self.gmx_arguments):
             if arg in ["-ntomp", "-ntmpi", "-nt"]:
-                if self.gmx_arguments[i + 1] != str(self.cpus_per_task):
-                    raise ValueError(
-                        f"Argument {arg} must be the same as cpus_per_task: {self.cpus_per_task}"
-                    )
+                if int(self.gmx_arguments[i + 1]) != int(
+                    kwargs["executor_config"]["cpus_per_task"]
+                ):
+                    msg = f"Argument {arg} is '{self.gmx_arguments[i + 1]}', "
+                    msg += "but must be the same as executor_config['cpus_per_task']: "
+                    msg += f"'{kwargs['executor_config']['cpus_per_task']}'"
+                    raise ValueError(msg)
 
     def execute(self, context: Context):
 

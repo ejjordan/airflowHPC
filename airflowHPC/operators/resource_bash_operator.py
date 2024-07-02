@@ -86,7 +86,7 @@ class ResourceBashOperator(BaseOperator):
             if "cpus_per_task" in executor_config
             else 1
         )
-        self.gpus = int(executor_config["gpus"]) if "gpus" in executor_config else None
+        self.gpus = int(executor_config["gpus"]) if "gpus" in executor_config else 0
         self.gpu_type = (
             executor_config["gpu_type"] if "gpu_type" in executor_config else None
         )

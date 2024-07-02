@@ -16,6 +16,7 @@ from airflow.utils.state import TaskInstanceState
 from airflow.models.taskinstance import TaskInstance
 
 from airflowHPC.hooks.slurm import SlurmHook, Slot
+from airflowHPC.operators import is_resource_operator
 
 if TYPE_CHECKING:
     from multiprocessing.managers import SyncManager
@@ -195,12 +196,18 @@ class ResourceExecutor(BaseExecutor):
         """Queues command to task."""
         if task_instance.key not in self.queued_tasks:
             self.log.info("Adding to queue: %s", command)
-            if task_instance.executor_config:
+            if is_resource_operator(task_instance.operator_name):
+                assert task_instance.executor_config
+                assert "mpi_ranks" in task_instance.executor_config
                 self.slurm_hook.set_task_resources(
                     task_instance_key=task_instance.key,
                     num_cores=task_instance.executor_config["mpi_ranks"],
-                    num_gpus=task_instance.executor_config["gpus"],
+                    num_gpus=task_instance.executor_config.get("gpus", 0),
                 )
+                msg = f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key].num_cores} "
+                msg += f"core(s) and {self.slurm_hook.task_resource_requests[task_instance.key].num_gpus} GPU(s) "
+                msg += f"for task {task_instance.key}"
+                self.log.info(msg)
             else:
                 self.log.info(
                     f"Setting task resources to 1 core and 0 gpus for task {task_instance.key}"
@@ -282,6 +289,7 @@ class ResourceExecutor(BaseExecutor):
                 try:
                     found_slots = self.slurm_hook.assign_task_resources(key)
                     if not found_slots:
+                        self.log.debug(f"No available resources for task: {key}.")
                         sorted_queue.append(
                             (key, (command, priority, queue, ti.executor_config))
                         )

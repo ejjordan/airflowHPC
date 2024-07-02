@@ -38,9 +38,9 @@ DOWN = None
 
 @dataclass
 class RankRequirements:
-    n_cores: int = 1
+    num_cores: int = 1
+    num_gpus: int = 0
     core_occupation: float = 1.0
-    n_gpus: int = 0
     gpu_occupation: float = 1.0
     lfs: int = 0
     mem: int = 0
@@ -106,7 +106,7 @@ class NodeManager:
             # NOTE: the current mechanism will never use the same core or gpu
             #       multiple times for the created slot, even if the respective
             #       occupation would allow for it.
-            if rr.n_cores:
+            if rr.num_cores:
                 for ro in self.node.cores:
                     if ro.occupation is DOWN:
                         continue
@@ -116,13 +116,13 @@ class NodeManager:
                                 index=ro.index, occupation=rr.core_occupation
                             )
                         )
-                    if len(cores) == rr.n_cores:
+                    if len(cores) == rr.num_cores:
                         break
 
-                if len(cores) < rr.n_cores:
+                if len(cores) < rr.num_cores:
                     return None
 
-            if rr.n_gpus:
+            if rr.num_gpus:
                 for ro in self.node.gpus:
                     if ro.occupation is DOWN:
                         continue
@@ -132,10 +132,10 @@ class NodeManager:
                                 index=ro.index, occupation=rr.gpu_occupation
                             )
                         )
-                    if len(gpus) == rr.n_gpus:
+                    if len(gpus) == rr.num_gpus:
                         break
 
-                if len(gpus) < rr.n_gpus:
+                if len(gpus) < rr.num_gpus:
                     return None
 
             if rr.lfs and self.node.lfs < rr.lfs:
@@ -210,20 +210,20 @@ class NodeList:
 
         self.__verified__ = True
 
-    def _assert_rr(self, rr: RankRequirements, n_slots: int) -> None:
+    def _assert_rr(self, rr: RankRequirements, num_slots: int) -> None:
         if not self.__verified__:
             self.verify()
 
         if not self.uniform:
             raise RuntimeError("verification unsupported for non-uniform nodes")
 
-        if not rr.n_cores:
+        if not rr.num_cores:
             raise ValueError("invalid rank requirements: %s" % rr)
 
-        ranks_per_node = self.cores_per_node / rr.n_cores
+        ranks_per_node = self.cores_per_node / rr.num_cores
 
-        if rr.n_gpus:
-            ranks_per_node = min(ranks_per_node, self.gpus_per_node / rr.n_gpus)
+        if rr.num_gpus:
+            ranks_per_node = min(ranks_per_node, self.gpus_per_node / rr.num_gpus)
 
         if rr.lfs:
             ranks_per_node = min(ranks_per_node, self.lfs_per_node / rr.lfs)
@@ -234,14 +234,14 @@ class NodeList:
         if ranks_per_node < 1:
             raise ValueError("invalid rank requirements: %s" % rr)
 
-        if n_slots > len(self.nodes) * ranks_per_node:
+        if num_slots > len(self.nodes) * ranks_per_node:
             raise ValueError("invalid rank requirements: %s" % rr)
 
-    def find_slots(self, rr: RankRequirements, n_slots: int = 1) -> List[Slot] | None:
-        self._assert_rr(rr, n_slots)
+    def find_slots(self, rr: RankRequirements, num_slots: int = 1) -> List[Slot] | None:
+        self._assert_rr(rr, num_slots)
 
         if self.__last_failed_rr__:
-            if self.__last_failed_rr__ >= rr and self.__last_failed_n__ >= n_slots:
+            if self.__last_failed_rr__ >= rr and self.__last_failed_n__ >= num_slots:
                 return None
 
         slots = list()
@@ -260,20 +260,20 @@ class NodeList:
                     break
 
                 slots.append(slot)
-                if len(slots) == n_slots:
+                if len(slots) == num_slots:
                     stop = idx
                     break
 
-            if len(slots) == n_slots:
+            if len(slots) == num_slots:
                 break
 
-        if len(slots) != n_slots:
+        if len(slots) != num_slots:
             # free whatever we got
             for slot in slots:
                 node = self.nodes[slot.node_index]
                 node.deallocate_slot(slot)
             self.__last_failed_rr__ = rr
-            self.__last_failed_n__ = n_slots
+            self.__last_failed_n__ = num_slots
 
             return None
 

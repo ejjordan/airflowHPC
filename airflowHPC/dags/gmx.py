@@ -4,7 +4,7 @@ from airflowHPC.dags.tasks import get_file, run_gmxapi
 from airflowHPC.operators.mpi_gmx_bash_operator import MPIGmxBashOperator
 
 with DAG(
-    "run_gmxapi",
+    "run_gmx",
     start_date=timezone.utcnow(),
     catchup=False,
     params={"output_dir": "outputs"},
@@ -33,3 +33,20 @@ with DAG(
         output_files={"-c": "result.gro", "-x": "result.xtc"},
         output_dir="{{ params.output_dir }}",
     )
+    """
+    from airflowHPC.operators import ResourceGmxOperator
+    mdrun_result = ResourceGmxOperator(
+        task_id="mdrun",
+        executor_config={
+            "mpi_ranks": 4,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+        gmx_arguments=["mdrun", "-ntomp", "2"],
+        input_files={"-s": grompp_result["-o"]},
+        output_files={"-c": "result.gro", "-x": "result.xtc"},
+        output_dir="{{ params.output_dir }}",
+    )
+    """

@@ -1,6 +1,8 @@
 alchemlyb
 dill
-gmxapi
+ensemble_md
+#gmxapi
 h5py
 mdanalysis
+pytest
 zmq
