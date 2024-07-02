@@ -69,22 +69,22 @@ class SlurmHook(BaseHook):
     @cached_property
     @providers_configuration_loaded
     def cores_per_node(self) -> int:
-        return int(conf.get("hpc", "cores_per_node"))
+        return int(conf.get("hpc", "cores_per_node", fallback=8))
 
     @cached_property
     @providers_configuration_loaded
     def gpus_per_node(self) -> int:
-        return int(conf.get("hpc", "gpus_per_node"))
+        return int(conf.get("hpc", "gpus_per_node", fallback=0))
 
     @cached_property
     @providers_configuration_loaded
     def mem_per_node(self) -> int:
-        return int(conf.get("hpc", "mem_per_node"))
+        return int(conf.get("hpc", "mem_per_node", fallback=16))
 
     @cached_property
     @providers_configuration_loaded
     def threads_per_core(self) -> int:
-        return int(conf.get("hpc", "threads_per_core"))
+        return int(conf.get("hpc", "threads_per_core", fallback=2))
 
     def get_gpu_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
         if task_instance_key not in self.slots_dict:

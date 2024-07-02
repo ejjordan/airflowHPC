@@ -13,7 +13,7 @@ from airflowHPC.dags.tasks import (
 )
 
 SHIFT_RANGE = 1
-NUM_ITERATIONS = 2
+NUM_ITERATIONS = 3
 NUM_SIMULATIONS = 4
 NUM_STATES = 9
 NUM_STEPS = 2000
@@ -46,15 +46,14 @@ def get_dhdl(result):
 
 
 @task
-def initialize_MDP(template, expand_args):
+def initialize_MDP(template_mdp, expand_args):
     import os
     from ensemble_md.utils import gmx_parser
 
-    # idx_output = (idx, output_dir), i.e., a tuple
     idx = expand_args["simulation_id"]
     output_dir = expand_args["output_dir"]
 
-    MDP = gmx_parser.MDP(template)
+    MDP = gmx_parser.MDP(template_mdp)
     MDP["nsteps"] = NUM_STEPS
 
     start_idx = idx * SHIFT_RANGE
@@ -171,7 +170,7 @@ def reduce_dhdl(dhdl, iteration):
 
 
 @task
-def store_dhdl_results(dhdl_dict, output_dir, iteration) -> Dataset:
+def store_dhdl_results(dhdl_dict, output_dir, output_fn, iteration) -> Dataset:
     import os
     import json
     import logging
@@ -179,7 +178,7 @@ def store_dhdl_results(dhdl_dict, output_dir, iteration) -> Dataset:
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     out_path = os.path.abspath(output_dir)
-    output_file = os.path.join(out_path, "dhdl.json")
+    output_file = os.path.join(out_path, output_fn)
     if os.path.exists(output_file):
         with open(output_file, "r") as f:
             data = json.load(f)
@@ -243,6 +242,10 @@ def calc_prob_acc(swap, dhdl_files, states, shifts):
     new_state_0 = states[swap[1]] - shifts[swap[0]]
     new_state_1 = states[swap[0]] - shifts[swap[1]]
 
+    logging.info(
+        f"old_state_0: {old_state_0}, old_state_1: {old_state_1}, new_state_0: {new_state_0}, new_state_1: {new_state_1}"
+    )
+
     kT = 1.380649e-23 * 6.0221408e23 * TEMPERATURE / 1000
     dU_0 = (dhdl_0.iloc[new_state_0] - dhdl_0.iloc[old_state_0]) / kT
     dU_1 = (dhdl_1.iloc[new_state_1] - dhdl_1.iloc[old_state_1]) / kT
@@ -286,6 +289,7 @@ def get_swaps(iteration, dhdl_store, proposal="exhaustive"):
     import json
     import copy
 
+    logging.info(f"get_swaps: iteration {iteration} store: {dhdl_store}")
     with open(dhdl_store.uri, "r") as f:
         data = json.load(f)
 
@@ -376,15 +380,20 @@ def get_swaps(iteration, dhdl_store, proposal="exhaustive"):
 
 
 @task
-def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_dict, iteration):
+def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_store, iteration):
+    import json
+    import logging
     from dataclasses import asdict
     from airflowHPC.dags.tasks import GmxapiInputHolder
 
-    if str(iteration) not in dhdl_dict.keys():
+    with open(dhdl_store.uri, "r") as f:
+        dhdl_dict = json.load(f)
+    logging.info(f"prepare_next_step: iteration {iteration} dhdl_dict {dhdl_dict}")
+    if str(iteration) not in dhdl_dict["iteration"].keys():
         raise ValueError(
             f"prepare_next_step: iteration {iteration} not found in dhdl_dict"
         )
-    dhdl_info = dhdl_dict[str(iteration)]
+    dhdl_info = dhdl_dict["iteration"][str(iteration)]
 
     # Swap the gro files but keep the order for top and mdp files
     gro_list = [
@@ -458,87 +467,29 @@ def increment_counter(output_dir):
     out_path = os.path.abspath(output_dir)
     counter_file = os.path.join(out_path, "counter.txt")
     # start at index 1 so that requesting n iterations will run n iterations
-    counter = 1
     if os.path.exists(counter_file):
         with open(counter_file, "r") as f:
             counter = int(f.read())
+        counter += 1
         with open(counter_file, "w") as f:
-            f.write(str(counter + 1))
+            f.write(str(counter))
     else:
+        counter = 1
         with open(counter_file, "w") as f:
-            f.write(str(counter + 1))
+            f.write(str(counter))
     return counter
 
 
-with DAG(
-    "REXEE_example",
-    start_date=timezone.utcnow(),
-    catchup=False,
-    render_template_as_native_obj=True,
-    max_active_runs=1,
-) as dag:
-    dag.doc = """Demonstration of a REXEE workflow.
-    Since it is scheduled '@once', it has to be deleted from the database before it can be run again."""
+@task(max_active_tis_per_dag=1)
+def read_counter(input_dir):
+    import os
 
-    counter = increment_counter("outputs")
-    input_gro = get_file.override(task_id="get_gro")(
-        input_dir="ensemble_md", file_name="sys.gro"
-    )
-    input_top = get_file.override(task_id="get_top")(
-        input_dir="ensemble_md", file_name="sys.top"
-    )
-    input_mdp = get_file.override(task_id="get_mdp")(
-        input_dir="ensemble_md", file_name="expanded.mdp"
-    )
+    out_path = os.path.abspath(input_dir)
+    counter_file = os.path.join(out_path, "counter.txt")
+    if os.path.exists(counter_file):
+        with open(counter_file, "r") as f:
+            counter = int(f.read())
+    else:
+        raise ValueError("No counter.txt found!")
 
-    expand_args = prepare_args_for_mdp_functions.override(
-        task_id="initialize_mdp_args"
-    )(counter, mode="initialize")
-    mdp_inputs = (
-        initialize_MDP.override(task_id="intialize_mdp")
-        .partial(template=input_mdp)
-        .expand(expand_args=expand_args)
-    )
-    mdp_inputs_list = list_from_xcom.override(task_id="get_mdp_input_list")(mdp_inputs)
-
-    grompp_input_list = prepare_gmxapi_input(
-        args=["grompp"],
-        input_files={"-f": mdp_inputs_list, "-c": input_gro, "-p": input_top},
-        output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
-        output_dir="outputs",
-        counter=counter,
-        num_simulations=NUM_SIMULATIONS,
-    )
-    dhdl_results = run_iteration(grompp_input_list)
-    dhdl_dict = reduce_dhdl(
-        dhdl_results, counter
-    )  # key: iteration number; value: a list of dictionaries with keys like simulation_id, state, and gro
-    dhdl_store = store_dhdl_results(
-        dhdl_dict=dhdl_dict, output_dir="outputs/dhdl", iteration=counter
-    )
-    swap_pattern = get_swaps(iteration=counter, dhdl_store=dhdl_store)
-
-    # update MDP files for the next iteration
-    expand_args = prepare_args_for_mdp_functions.override(task_id="update_mdp_args")(
-        counter, mode="update"
-    )
-    mdp_updates = (
-        update_MDP.override(task_id="update_mdp")
-        .partial(iter_idx=counter, dhdl_store=dhdl_store)
-        .expand(expand_args=expand_args)
-    )
-    mdp_updates_list = list_from_xcom.override(task_id="get_mdp_update_list")(
-        mdp_updates
-    )
-
-    next_step_input = prepare_next_step(
-        input_top, mdp_updates_list, swap_pattern, dhdl_dict, counter
-    )
-
-    trigger = TriggerDagRunOperator(
-        task_id="trigger_self", trigger_dag_id="REXEE_example"
-    )
-    condition = check_condition(counter, NUM_ITERATIONS)
-    run_complete = EmptyOperator(task_id="run_complete", trigger_rule="none_failed")
-
-    next_step_input >> condition >> [trigger, run_complete]
+    return counter
