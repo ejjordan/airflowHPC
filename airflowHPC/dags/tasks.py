@@ -11,6 +11,7 @@ __all__ = (
     "prepare_gmxapi_input",
     "branch_task",
     "list_from_xcom",
+    "list_from_xcom_dicts",
     "branch_task_template",
     "run_if_needed",
     "run_if_false",
@@ -58,7 +59,6 @@ def _run_gmxapi(
     args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None
 ):
     import os
-    import shutil
     import gmxapi
     import logging
 
@@ -84,8 +84,6 @@ def _run_gmxapi(
     assert all(
         [os.path.exists(gmx.output.file[key].result()) for key in output_files.keys()]
     )
-    if not os.listdir(gmx.output.directory.result()):
-        shutil.rmtree(gmx.output.directory.result())  # delete if empty
     return gmx
 
 
@@ -219,6 +217,11 @@ def branch_task_template(statement: str, task_if_true: str, task_if_false: str) 
 @task
 def list_from_xcom(values):
     return list(values)
+
+
+@task
+def list_from_xcom_dicts(list_of_dicts, key):
+    return [d[key] for d in list_of_dicts]
 
 
 @task
