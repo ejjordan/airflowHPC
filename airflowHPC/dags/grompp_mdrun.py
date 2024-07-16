@@ -12,6 +12,7 @@ from airflowHPC.dags.tasks import (
     xcom_lookup,
     dataset_from_xcom_dicts,
 )
+from airflowHPC.operators.resource_gmx_operator import ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
@@ -71,28 +72,42 @@ with DAG(
         num_simulations="{{ params.num_simulations }}",
     )
 
-    grompp = run_gmxapi_dataclass.override(
-        task_id="grompp", max_active_tis_per_dagrun=8
+    grompp = ResourceGmxOperatorDataclass.partial(
+        task_id="grompp",
+        executor_config={
+            "mpi_ranks": 1,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
     ).expand(input_data=grompp_input_list)
     grompp_input_list >> grompp
 
     mdrun_input_list = (
         update_gmxapi_input.override(task_id="mdrun_input_list")
         .partial(
-            args=["mdrun", "-v", "-deffnm", "{{ params.output_name }}"],
+            args=["mdrun", "-v", "-deffnm", "{{ params.output_name }}", "-ntomp", "2"],
             input_files_keys={"-s": "-o"},
             output_files={"-c": "{{ params.output_name }}.gro"},
         )
-        .expand(gmxapi_output=grompp)
+        .expand(gmxapi_output=grompp.output)
     )
-    mdrun = run_gmxapi_dataclass.override(
-        task_id="mdrun", max_active_tis_per_dagrun=1
+    mdrun = ResourceGmxOperatorDataclass.partial(
+        task_id="mdrun",
+        executor_config={
+            "mpi_ranks": 1,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
     ).expand(input_data=mdrun_input_list)
 
     gro_dataset = dataset_from_xcom_dicts.override(task_id="gro_dataset")(
         output_dir="{{ params.output_dir }}",
         output_fn="{{ params.output_name }}.json",
-        list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun', key='outputs')}}",
+        list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun', key='return_value')}}",
         key="-c",
     )
     mdrun >> gro_dataset

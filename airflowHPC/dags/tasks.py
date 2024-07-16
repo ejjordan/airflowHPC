@@ -91,7 +91,7 @@ def _run_gmxapi(
     return gmx
 
 
-@task(multiple_outputs=True, queue="radical")
+@task(multiple_outputs=True)
 def run_gmxapi(
     args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None
 ):
@@ -99,7 +99,7 @@ def run_gmxapi(
     return {f"{key}": f"{gmx.output.file[key].result()}" for key in output_files.keys()}
 
 
-@task(multiple_outputs=True, max_active_tis_per_dagrun=1, queue="radical")
+@task(multiple_outputs=True, max_active_tis_per_dagrun=1)
 def run_gmxapi_dataclass(input_data: GmxapiInputHolder):
     """Ideally this could be an overload with multipledispatch but that does not play well with airflow"""
     from dataclasses import asdict
@@ -237,7 +237,12 @@ def dataset_from_xcom_dicts(output_dir: str, output_fn: str, list_of_dicts, key)
         os.makedirs(output_dir)
     out_path = os.path.abspath(output_dir)
     output_file = os.path.join(out_path, output_fn)
-    data = [d[key] for d in list_of_dicts]
+    data = list()
+    for data_dict in list_of_dicts:
+        if key in data_dict:
+            data.append(data_dict[key])
+        else:
+            data.append(data_dict["outputs"][key])
     with open(output_file, "w") as f:
         json.dump(data, f, indent=2, separators=(",", ": "))
     dataset = Dataset(uri=output_file)

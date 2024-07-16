@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Sequence, Union, Iterable
 
 from airflow.exceptions import AirflowException, AirflowSkipException
 
+from airflowHPC.dags.tasks import GmxapiInputHolder, GmxapiRunInfoHolder
 from airflowHPC.operators.resource_bash_operator import ResourceBashOperator
 
 if TYPE_CHECKING:
@@ -37,11 +38,27 @@ class ResourceGmxOperator(ResourceBashOperator):
         input_files: dict,
         output_files: dict,
         output_dir: str,
+        show_return_value_in_logs: bool = True,
         **kwargs,
     ) -> None:
         kwargs.update({"cwd": output_dir})
         super().__init__(**kwargs)
-        self.gmx_executable = gmx_executable
+        if gmx_executable is None:
+            try:
+                from gmxapi.commandline import cli_executable
+
+                self.gmx_executable = cli_executable()
+            except ImportError:
+                raise ImportError(
+                    "The gmx_executable argument must be set if the gmxapi package is not installed."
+                )
+        else:
+            if shutil.which(gmx_executable) is None:
+                raise ValueError(
+                    f"Could not find {gmx_executable} in PATH. Please check that it is loaded."
+                )
+            self.gmx_executable = gmx_executable
+
         self.gmx_arguments = gmx_arguments
         self.input_files = input_files
         self.output_files = output_files
@@ -55,6 +72,7 @@ class ResourceGmxOperator(ResourceBashOperator):
                     msg += "but must be the same as executor_config['cpus_per_task']: "
                     msg += f"'{kwargs['executor_config']['cpus_per_task']}'"
                     raise ValueError(msg)
+        self.show_return_value_in_logs = show_return_value_in_logs
 
     def execute(self, context: Context):
         if not os.path.exists(self.output_dir):
@@ -64,15 +82,7 @@ class ResourceGmxOperator(ResourceBashOperator):
             f"{k}": f"{os.path.join(out_dir_full_path, v)}"
             for k, v in self.output_files.items()
         }
-        if self.gmx_executable is None:
-            try:
-                from gmxapi.commandline import cli_executable
 
-                self.gmx_executable = cli_executable()
-            except ImportError:
-                raise ImportError(
-                    "The gmx_executable argument must be set if the gmxapi package is not installed."
-                )
         bash_path = shutil.which("bash") or "bash"
         env = self.get_env(context)
 
@@ -109,7 +119,9 @@ class ResourceGmxOperator(ResourceBashOperator):
             raise AirflowException(
                 f"Bash command failed. The command returned a non-zero exit code {result.exit_code}."
             )
-        return result.output
+        if self.show_return_value_in_logs:
+            self.log.info(f"Done. Returned value was: {output_files_paths}")
+        return output_files_paths
 
     def flatten_dict(self, mapping: dict):
         for key, value in mapping.items():
@@ -174,3 +186,25 @@ class ResourceGmxOperator(ResourceBashOperator):
         call.extend(self.flatten_dict(input_files))
         call.extend(self.flatten_dict(output_files))
         return " ".join(map(str, call))
+
+
+class ResourceGmxOperatorDataclass(ResourceGmxOperator):
+    def __init__(self, *, input_data: GmxapiInputHolder, **kwargs) -> None:
+        kwargs.update({"gmx_arguments": input_data["args"]})
+        kwargs.update({"input_files": input_data["input_files"]})
+        kwargs.update({"output_files": input_data["output_files"]})
+        kwargs.update({"output_dir": input_data["output_dir"]})
+        kwargs.update({"multiple_outputs": True})
+        kwargs.update({"show_return_value_in_logs": False})
+        super().__init__(
+            **kwargs,
+        )
+        self.input_data = input_data
+
+    def execute(self, context: Context):
+        from dataclasses import asdict
+
+        run_output = super().execute(context)
+        output = asdict(GmxapiRunInfoHolder(inputs=self.input_data, outputs=run_output))
+        self.log.info(f"Done. Returned value was: {output}")
+        return output

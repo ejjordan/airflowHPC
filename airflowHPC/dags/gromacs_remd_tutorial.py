@@ -122,7 +122,7 @@ with DAG(
         output_dir=prep_output_dir,
     )
     mdp_json_em = get_file.override(task_id="get_min_mdp_json")(
-        input_dir="ala_tripeptide_remd", file_name="min.json"
+        input_dir="mdp", file_name="min.json"
     )
     mdp_em = update_write_mdp_json_as_mdp_from_file(mdp_json_file_path=mdp_json_em)
     grompp_em = run_gmxapi.override(task_id="grompp_em")(
@@ -138,7 +138,7 @@ with DAG(
         output_dir=prep_output_dir,
     )
     mdp_json_nvt = get_file.override(task_id="get_nvt_mdp_json")(
-        input_dir="ala_tripeptide_remd", file_name="nvt.json"
+        input_dir="mdp", file_name="nvt.json"
     )
     mdp_nvt = update_write_mdp_json_as_mdp_from_file(mdp_json_file_path=mdp_json_nvt)
     grompp_nvt = run_gmxapi.override(task_id="grompp_nvt")(
@@ -177,7 +177,7 @@ with DAG(
         input_dir="prep", file_name="topol.top", use_ref_data=False
     )
     mdp_json_equil = get_file.override(task_id="get_equil_mdp_json")(
-        input_dir="ala_tripeptide_remd", file_name="equil.json"
+        input_dir="mdp", file_name="npt.json"
     )
     mdp_equil = update_write_mdp_json_as_mdp_from_file.partial(
         mdp_json_file_path=mdp_json_equil
@@ -247,7 +247,9 @@ with DAG(
     gro_sim = (
         get_file.override(task_id="get_sim_gro")
         .partial(file_name="result.gro", use_ref_data=False)
-        .expand(input_dir=[f"equil/step_0/sim_{i}" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            input_dir=[f"equil/sim_{i}/iteration_0" for i in range(NUM_SIMULATIONS)]
+        )
     )
     top_sim = get_file.override(task_id="get_sim_top")(
         input_dir="prep", file_name="topol.top", use_ref_data=False
@@ -255,10 +257,12 @@ with DAG(
     cpt_sim = (
         get_file.override(task_id="get_sim_cpt")
         .partial(file_name="result.cpt", use_ref_data=False)
-        .expand(input_dir=[f"equil/step_0/sim_{i}" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            input_dir=[f"equil/sim_{i}/iteration_0" for i in range(NUM_SIMULATIONS)]
+        )
     )
     mdp_json_sim = get_file.override(task_id="get_sim_mdp_json")(
-        input_dir="ala_tripeptide_remd", file_name="sim.json"
+        input_dir="mdp", file_name="sim.json"
     )
     mdp_sim = update_write_mdp_json_as_mdp_from_file.partial(
         mdp_json_file_path=mdp_json_sim
@@ -284,7 +288,7 @@ with DAG(
         input_data=grompp_input_list_sim
     )
     mdrun_sim = BashOperator(
-        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir sim/step_0/sim_[0123] -s sim.tpr",
+        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir sim/sim_[0123]/iteration_0 -s sim.tpr",
         task_id="mdrun_sim",
         cwd=os.path.curdir,
     )
@@ -292,7 +296,9 @@ with DAG(
         extract_edr_info.override(task_id="gmx_ener_sim")
         .partial(field="Potential")
         .expand(
-            edr_file=[f"sim/step_0/sim_{i}/ener.edr" for i in range(NUM_SIMULATIONS)]
+            edr_file=[
+                f"sim/sim_{i}/iteration_0/ener.edr" for i in range(NUM_SIMULATIONS)
+            ]
         )
     )
     hist_sim = plot_histograms.override(task_id="plot_histograms_sim")(
@@ -304,10 +310,10 @@ with DAG(
         title="Potential Energy Histogram",
     )
     get_final_tpr = get_file.override(task_id="get_final_tpr")(
-        input_dir="sim/step_0/sim_0", file_name="sim.tpr", use_ref_data=False
+        input_dir="sim/sim_0/iteration_0", file_name="sim.tpr", use_ref_data=False
     )
     get_final_xtc = get_file.override(task_id="get_final_xtc")(
-        input_dir="sim/step_0/sim_0", file_name="traj_comp.xtc", use_ref_data=False
+        input_dir="sim/sim_0/iteration_0", file_name="traj_comp.xtc", use_ref_data=False
     )
     plot_ramachandran = plot_ramachandran_residue.override(task_id="plot_ramachandran")(
         tpr_file=get_final_tpr,
@@ -357,7 +363,9 @@ with DAG(
             use_ref_data=False,
             check_exists=True,
         )
-        .expand(input_dir=[f"equil/step_0/sim_{i}" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            input_dir=[f"equil/sim_{i}/iteration_0" for i in range(NUM_SIMULATIONS)]
+        )
     )
     trigger_equil = TriggerDagRunOperator(
         task_id="trigger_equil",
@@ -374,7 +382,7 @@ with DAG(
     )
 
     is_sim_done = get_file.override(task_id="is_sim_done")(
-        input_dir="sim/step_0/sim_0",
+        input_dir="sim/sim_0/iteration_0",
         file_name="sim.tpr",
         use_ref_data=False,
         check_exists=True,

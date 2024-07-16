@@ -103,6 +103,10 @@ class ResourceBashOperator(BaseOperator):
                     self.mpi_executable = executable
                     self.num_ranks_flag = num_ranks_flag
                     break
+            if not hasattr(self, "mpi_executable"):
+                msg = "Could not find mpirun, mpiexec, or srun in PATH. "
+                msg += "Please check that one is loaded or specify a path to mpi_executable."
+                raise ValueError(msg)
         else:
             self.mpi_executable = mpi_executable
             if "srun" in mpi_executable:

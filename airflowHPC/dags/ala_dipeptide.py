@@ -131,7 +131,7 @@ with DAG(
     em_dag = TriggerDagRunOperator(
         task_id="em_dag",
         trigger_dag_id="grompp_mdrun",
-        trigger_run_id="em_run",
+        # trigger_run_id="em_run",
         conf=em_grompp_mdrun_params,
         wait_for_completion=True,
     )
@@ -154,7 +154,7 @@ with DAG(
     sim_dag = TriggerDagRunOperator(
         task_id="sim_dag",
         trigger_dag_id="grompp_mdrun",
-        trigger_run_id="sim_run",
+        # trigger_run_id="sim_run",
         conf=sim_grompp_mdrun_params,
         wait_for_completion=True,
     )
