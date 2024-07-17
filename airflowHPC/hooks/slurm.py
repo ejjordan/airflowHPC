@@ -110,19 +110,19 @@ class SlurmHook(BaseHook):
     def assign_task_resources(self, task_instance_key: TaskInstanceKey):
         if task_instance_key not in self.task_resource_requests:
             raise RuntimeError(
-                f"Resource request not found fo task {task_instance_key}"
+                f"Resource request not found for task {task_instance_key}"
             )
         resource_request = self.task_resource_requests[task_instance_key]
-        slots = self.nodes_list.find_slots(resource_request, num_slots=1)
-        if not slots:
+        slot = self.nodes_list.find_slots(resource_request)
+        if not slot:
             return False
-        assert len(slots) == 1
-        self.slots_dict[task_instance_key] = slots[0]
-        self.log.debug("Allocated slots %s", slots[0])
+
+        self.slots_dict[task_instance_key] = slot
+        self.log.debug(f"Allocated slots {slot}")
         return True
 
     def release_task_resources(self, task_instance_key: TaskInstanceKey):
         if task_instance_key not in self.slots_dict:
             raise RuntimeError(f"Resource not allocated for task {task_instance_key}")
-        self.nodes_list.release_slots([self.slots_dict[task_instance_key]])
+        self.nodes_list.release_slots(self.slots_dict[task_instance_key])
         del self.slots_dict[task_instance_key]
