@@ -297,7 +297,11 @@ class ResourceExecutor(BaseExecutor):
                 except:
                     self.log.error(f"No viable resource assignment for task: {key}.")
                     del self.queued_tasks[key]
-                    self.change_state(key=key, state=TaskInstanceState.FAILED)
+                    self.change_state(
+                        key=key,
+                        state=TaskInstanceState.FAILED,
+                        info=f"No viable resource assignment for executor_config {ti.executor_config}",
+                    )
                     break
 
                 if key in self.attempts:

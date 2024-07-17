@@ -58,7 +58,6 @@ def _run_gmxapi(
     args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None
 ):
     import os
-    import shutil
     import gmxapi
     import logging
 
@@ -84,12 +83,10 @@ def _run_gmxapi(
     assert all(
         [os.path.exists(gmx.output.file[key].result()) for key in output_files.keys()]
     )
-    if not os.listdir(gmx.output.directory.result()):
-        shutil.rmtree(gmx.output.directory.result())  # delete if empty
     return gmx
 
 
-@task(multiple_outputs=True, queue="radical")
+@task(multiple_outputs=True)
 def run_gmxapi(
     args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None
 ):
@@ -97,7 +94,7 @@ def run_gmxapi(
     return {f"{key}": f"{gmx.output.file[key].result()}" for key in output_files.keys()}
 
 
-@task(multiple_outputs=True, max_active_tis_per_dagrun=1, queue="radical")
+@task(multiple_outputs=True, max_active_tis_per_dagrun=1)
 def run_gmxapi_dataclass(input_data: GmxapiInputHolder):
     """Ideally this could be an overload with multipledispatch but that does not play well with airflow"""
     from dataclasses import asdict
