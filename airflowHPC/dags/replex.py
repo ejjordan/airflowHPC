@@ -1,29 +1,14 @@
-from typing import Dict
-from airflow import DAG
+from typing import Dict, List
 from airflow.decorators import task, task_group
-from airflow.operators.empty import EmptyOperator
-from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from airflow.utils import timezone
 from airflow import Dataset
 
-from airflowHPC.dags.tasks import (
-    get_file,
-    prepare_gmxapi_input,
-    list_from_xcom,
-)
 
-SHIFT_RANGE = 1
-NUM_ITERATIONS = 3
-NUM_SIMULATIONS = 4
-NUM_STATES = 9
-NUM_STEPS = 2000
 STATE_RANGES = [
     [0, 1, 2, 3, 4, 5],
     [1, 2, 3, 4, 5, 6],
     [2, 3, 4, 5, 6, 7],
     [3, 4, 5, 6, 7, 8],
 ]
-TEMPERATURE = 298
 
 
 @task.branch
@@ -46,7 +31,14 @@ def get_dhdl(result):
 
 
 @task
-def initialize_MDP(template_mdp, expand_args):
+def initialize_MDP(
+    template_mdp,
+    expand_args: dict,
+    num_steps: int,
+    shift_range: int,
+    num_states: int,
+    num_simulations: int,
+):
     import os
     from ensemble_md.utils import gmx_parser
 
@@ -54,9 +46,9 @@ def initialize_MDP(template_mdp, expand_args):
     output_dir = expand_args["output_dir"]
 
     MDP = gmx_parser.MDP(template_mdp)
-    MDP["nsteps"] = NUM_STEPS
+    MDP["nsteps"] = num_steps
 
-    start_idx = idx * SHIFT_RANGE
+    start_idx = idx * shift_range
 
     lambdas_types_all = [
         "fep_lambdas",
@@ -72,7 +64,7 @@ def initialize_MDP(template_mdp, expand_args):
         if i in MDP.keys():
             lambda_types.append(i)
 
-    n_sub = NUM_STATES - SHIFT_RANGE * (NUM_SIMULATIONS - 1)
+    n_sub = num_states - shift_range * (num_simulations - 1)
     for i in lambda_types:
         MDP[i] = MDP[i][start_idx : start_idx + n_sub]
 
@@ -92,12 +84,12 @@ def initialize_MDP(template_mdp, expand_args):
 
 
 @task
-def prepare_args_for_mdp_functions(counter, mode):
+def prepare_args_for_mdp_functions(counter: int, mode: str, num_simulations: int):
     if mode == "initialize":
         # For initializing MDP files for the first iteration
         expand_args = [
             {"simulation_id": i, "output_dir": f"outputs/sim_{i}/iteration_1"}
-            for i in range(NUM_SIMULATIONS)
+            for i in range(num_simulations)
         ]
     elif mode == "update":
         # For updating MDP files for the next iteration
@@ -107,7 +99,7 @@ def prepare_args_for_mdp_functions(counter, mode):
                 "template": f"outputs/sim_{i}/iteration_{counter}/expanded.mdp",
                 "output_dir": f"outputs/sim_{i}/iteration_{counter+1}",
             }
-            for i in range(NUM_SIMULATIONS)
+            for i in range(num_simulations)
         ]
     else:
         raise ValueError('Invalid value for the parameter "mode".')
@@ -116,7 +108,14 @@ def prepare_args_for_mdp_functions(counter, mode):
 
 
 @task
-def update_MDP(iter_idx, dhdl_store, expand_args):
+def update_MDP(
+    iter_idx,
+    dhdl_store,
+    expand_args: dict,
+    num_simulations: int,
+    num_steps: int,
+    shift_range: int,
+):
     # TODO: Parameters for weight-updating REXEE and distance restraints were ignored and should be added when necessary.
     import os
     import json
@@ -129,13 +128,13 @@ def update_MDP(iter_idx, dhdl_store, expand_args):
     with open(dhdl_store.uri, "r") as f:
         data = json.load(f)
     states = [
-        data["iteration"][str(iter_idx)][i]["state"] for i in range(NUM_SIMULATIONS)
+        data["iteration"][str(iter_idx)][i]["state"] for i in range(num_simulations)
     ]
 
     MDP = gmx_parser.MDP(template)
-    MDP["tinit"] = NUM_STEPS * MDP["dt"] * iter_idx
-    MDP["nsteps"] = NUM_STEPS
-    MDP["init_lambda_state"] = states[sim_idx] - sim_idx * SHIFT_RANGE
+    MDP["tinit"] = num_steps * MDP["dt"] * iter_idx
+    MDP["nsteps"] = num_steps
+    MDP["init_lambda_state"] = states[sim_idx] - sim_idx * shift_range
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -148,11 +147,10 @@ def update_MDP(iter_idx, dhdl_store, expand_args):
 
 
 @task
-def extract_final_dhdl_info(result) -> Dict[str, int]:
+def extract_final_dhdl_info(result, shift_range: int) -> Dict[str, int]:
     from alchemlyb.parsing.gmx import _get_headers as get_headers
     from alchemlyb.parsing.gmx import _extract_dataframe as extract_dataframe
 
-    shift_range = SHIFT_RANGE
     i: int = result["simulation_id"]
     dhdl = result["dhdl"]
     gro = result["gro_path"]
@@ -201,7 +199,7 @@ def store_dhdl_results(dhdl_dict, output_dir, output_fn, iteration) -> Dataset:
         with open(output_file, "w") as f:
             data = {"iteration": {str(iteration): dhdl_dict[str(iteration)]}}
             json.dump(data, f, indent=2, separators=(",", ": "))
-    dataset = Dataset(uri=output_file)
+    dataset = Dataset(uri=str(output_file))
     logging.info(f"store_dhdl_results: iteration {iteration} dataset {dataset}")
     return dataset
 
@@ -217,7 +215,16 @@ def propose_swap(swappables):
     return swap
 
 
-def calc_prob_acc(swap, dhdl_files, states, shifts):
+def calc_prob_acc(
+    swap,
+    dhdl_files,
+    states: List[int],
+    shifts: List[int],
+    num_states: int,
+    shift_range: int,
+    num_simulations: int,
+    temperature: float,
+):
     import logging
     import numpy as np
     from alchemlyb.parsing.gmx import _get_headers as get_headers
@@ -232,7 +239,7 @@ def calc_prob_acc(swap, dhdl_files, states, shifts):
         extract_dataframe(f1, headers=h1).iloc[-1],
     )
 
-    n_sub = NUM_STATES - SHIFT_RANGE * (NUM_SIMULATIONS - 1)
+    n_sub = num_states - shift_range * (num_simulations - 1)
     dhdl_0 = data_0[-n_sub:]
     dhdl_1 = data_1[-n_sub:]
 
@@ -246,7 +253,7 @@ def calc_prob_acc(swap, dhdl_files, states, shifts):
         f"old_state_0: {old_state_0}, old_state_1: {old_state_1}, new_state_0: {new_state_0}, new_state_1: {new_state_1}"
     )
 
-    kT = 1.380649e-23 * 6.0221408e23 * TEMPERATURE / 1000
+    kT = 1.380649e-23 * 6.0221408e23 * temperature / 1000
     dU_0 = (dhdl_0.iloc[new_state_0] - dhdl_0.iloc[old_state_0]) / kT
     dU_1 = (dhdl_1.iloc[new_state_1] - dhdl_1.iloc[old_state_1]) / kT
     dU = dU_0 + dU_1
@@ -282,7 +289,15 @@ def accept_or_reject(prob_acc):
 
 
 @task
-def get_swaps(iteration, dhdl_store, proposal="exhaustive"):
+def get_swaps(
+    iteration: int,
+    dhdl_store,
+    num_simulations: int,
+    shift_range: int,
+    num_states: int,
+    temperature: float,
+    proposal="exhaustive",
+):
     from itertools import combinations
     import numpy as np
     import logging
@@ -294,16 +309,16 @@ def get_swaps(iteration, dhdl_store, proposal="exhaustive"):
         data = json.load(f)
 
     swap_list = []
-    swap_pattern = list(range(NUM_SIMULATIONS))
+    swap_pattern = list(range(num_simulations))
     state_ranges = copy.deepcopy(STATE_RANGES)
 
     dhdl_files = [
-        data["iteration"][str(iteration)][i]["dhdl"] for i in range(NUM_SIMULATIONS)
+        data["iteration"][str(iteration)][i]["dhdl"] for i in range(num_simulations)
     ]
     states = [
-        data["iteration"][str(iteration)][i]["state"] for i in range(NUM_SIMULATIONS)
+        data["iteration"][str(iteration)][i]["state"] for i in range(num_simulations)
     ]
-    sim_idx = list(range(NUM_SIMULATIONS))
+    sim_idx = list(range(num_simulations))
 
     all_pairs = list(combinations(sim_idx, 2))
 
@@ -324,7 +339,7 @@ def get_swaps(iteration, dhdl_store, proposal="exhaustive"):
     logging.info(f"get_swaps: iteration {iteration} swappables {swappables}")
 
     if proposal == "exhaustive":
-        n_ex = int(np.floor(NUM_SIMULATIONS / 2))
+        n_ex = int(np.floor(num_simulations / 2))
     elif proposal == "single":
         n_ex = 1
     elif proposal == "neighboring":
@@ -335,7 +350,7 @@ def get_swaps(iteration, dhdl_store, proposal="exhaustive"):
         raise ValueError(
             f"get_swaps: Invalid value for the parameter 'proposal': {proposal}"
         )
-    shifts = list(SHIFT_RANGE * np.arange(NUM_SIMULATIONS))
+    shifts = list(shift_range * np.arange(num_simulations))
     for i in range(n_ex):
         if i >= 1:
             swappables = [
@@ -351,7 +366,16 @@ def get_swaps(iteration, dhdl_store, proposal="exhaustive"):
             break
         else:
             # Figure out dhdl_files
-            prob_acc = calc_prob_acc(swap, dhdl_files, states, shifts)
+            prob_acc = calc_prob_acc(
+                swap=swap,
+                dhdl_files=dhdl_files,
+                states=states,
+                shifts=shifts,
+                num_states=num_states,
+                shift_range=shift_range,
+                num_simulations=num_simulations,
+                temperature=temperature,
+            )
             logging.info(f"get_swaps: Acceptance rate: {prob_acc:.3f}")
             swap_bool = accept_or_reject(prob_acc)
 
@@ -427,12 +451,12 @@ def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_store, iteration):
 
 
 @task_group
-def run_iteration(grompp_input_list):
+def run_iteration(grompp_input_list, shift_range: int):
     from airflowHPC.dags.tasks import run_gmxapi_dataclass, update_gmxapi_input
 
-    grompp_result = run_gmxapi_dataclass.override(task_id="grompp").expand(
-        input_data=grompp_input_list
-    )
+    grompp_result = run_gmxapi_dataclass.override(
+        task_id="grompp", max_active_tis_per_dagrun=8
+    ).expand(input_data=grompp_input_list)
     mdrun_input = (
         update_gmxapi_input.override(task_id="mdrun_prepare")
         .partial(
@@ -454,7 +478,9 @@ def run_iteration(grompp_input_list):
         input_data=mdrun_input
     )
     dhdl = mdrun_result.map(get_dhdl)
-    dhdl_result = extract_final_dhdl_info.expand(result=dhdl)
+    dhdl_result = extract_final_dhdl_info.partial(shift_range=shift_range).expand(
+        result=dhdl
+    )
     return dhdl_result
 
 
