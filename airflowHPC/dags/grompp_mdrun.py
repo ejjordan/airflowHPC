@@ -1,14 +1,10 @@
 from airflow import DAG
-from airflow.decorators import task
 from airflow.utils import timezone
 from airflow.models.param import Param
 from airflowHPC.dags.tasks import (
     get_file,
     prepare_gmxapi_input,
-    run_gmxapi_dataclass,
     update_gmxapi_input,
-    list_from_xcom_dicts,
-    list_from_xcom,
     xcom_lookup,
     dataset_from_xcom_dicts,
 )

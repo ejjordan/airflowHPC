@@ -4,14 +4,11 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 from airflow.models.param import Param
 from airflowHPC.dags.tasks import (
-    get_file,
     prepare_gmxapi_input,
     run_gmxapi_dataclass,
     update_gmxapi_input,
-    list_from_xcom_dicts,
     json_from_dataset_path,
 )
-from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
 @task(multiple_outputs=True)
@@ -131,7 +128,7 @@ with DAG(
     em_dag = TriggerDagRunOperator(
         task_id="em_dag",
         trigger_dag_id="grompp_mdrun",
-        # trigger_run_id="em_run",
+        poke_interval=1,
         conf=em_grompp_mdrun_params,
         wait_for_completion=True,
     )
@@ -154,7 +151,7 @@ with DAG(
     sim_dag = TriggerDagRunOperator(
         task_id="sim_dag",
         trigger_dag_id="grompp_mdrun",
-        # trigger_run_id="sim_run",
+        poke_interval=1,
         conf=sim_grompp_mdrun_params,
         wait_for_completion=True,
     )
