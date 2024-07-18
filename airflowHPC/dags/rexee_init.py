@@ -22,8 +22,10 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
     params={
-        # "iteration": 1,
         "num_simulations": 4,
+        "num_steps": 2000,
+        "num_states": 9,
+        "shift_range": 1,
         "output_dir": "outputs",
         "dhdl_store_dir": "dhdl",
         "dhdl_store_fn": "dhdl.json",
@@ -32,7 +34,7 @@ with DAG(
     dag.doc = """Demonstration of a REXEE workflow.
     To rerun the DAG, outputs from any previous instance must be deleted first."""
 
-    counter = increment_counter("{{ params.output_dir }}")
+    counter = increment_counter(output_dir="{{ params.output_dir }}")
     input_gro = get_file.override(task_id="get_gro")(
         input_dir="ensemble_md", file_name="sys.gro"
     )
@@ -42,10 +44,20 @@ with DAG(
     input_mdp = get_file.override(task_id="get_mdp")(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
-    expand_args = prepare_args_for_mdp_functions(counter, mode="initialize")
+    expand_args = prepare_args_for_mdp_functions(
+        counter=counter,
+        mode="initialize",
+        num_simulations="{{ params.num_simulations }}",
+    )
     mdp_inputs = (
         initialize_MDP.override(task_id="intialize_mdp")
-        .partial(template_mdp=input_mdp)
+        .partial(
+            template_mdp=input_mdp,
+            num_simulations="{{ params.num_simulations }}",
+            num_steps="{{ params.num_steps }}",
+            num_states="{{ params.num_states }}",
+            shift_range="{{ params.shift_range }}",
+        )
         .expand(expand_args=expand_args)
     )
     mdp_inputs_list = list_from_xcom.override(task_id="get_mdp_input_list")(mdp_inputs)
@@ -57,9 +69,11 @@ with DAG(
         counter=counter,
         num_simulations="{{ params.num_simulations }}",
     )
-    dhdl_results = run_iteration(grompp_input_list)
+    dhdl_results = run_iteration(
+        grompp_input_list=grompp_input_list, shift_range="{{ params.shift_range }}"
+    )
     dhdl_dict = reduce_dhdl(
-        dhdl_results, counter
+        dhdl=dhdl_results, iteration=counter
     )  # key: iteration number; value: a list of dictionaries with keys like simulation_id, state, and gro
     dhdl_store = store_dhdl_results(
         dhdl_dict=dhdl_dict,
