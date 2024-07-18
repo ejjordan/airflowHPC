@@ -1,11 +1,6 @@
 import pytest
 import os
 
-from airflow.utils.types import DagRunType
-from slugify import slugify
-from datetime import datetime
-from airflow.models.baseoperator import BaseOperator
-from airflow.models.dag import DAG
 from airflow.utils.session import create_session
 from airflow.jobs.job import Job
 from airflow.models import DagRun, TaskInstance, Trigger

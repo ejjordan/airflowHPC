@@ -1,12 +1,21 @@
 import os
 import pytest
 
-from airflow.operators.python import PythonOperator
 from unittest.mock import patch, MagicMock
-
+from dataclasses import dataclass
 from tests.conftest import DEFAULT_DATE, session, dag_maker
 
 data_path = os.path.join(os.path.dirname(__file__), "data")
+
+
+@dataclass
+class RefData:
+    shift_range: int = 1
+    num_iterations: int = 3
+    num_simulations: int = 4
+    num_states: int = 9
+    num_steps: int = 2000
+    temperature: float = 298
 
 
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -17,6 +26,7 @@ def test_store_dhdl_results(dag_maker, session):
 
     dhdl_files = [os.path.join(data_path, f"dhdl/dhdl_{i}.xvg") for i in range(4)]
     temp_out_dir = tempfile.mkdtemp()
+    output_fn = "dhdl_store.json"
     iteration_idx = 1
     dhdl_dict = {str(iteration_idx): dhdl_files}
 
@@ -24,7 +34,10 @@ def test_store_dhdl_results(dag_maker, session):
         "test_store_dhdl_results-dag", session=session, start_date=DEFAULT_DATE
     ) as dag:
         dhdl_store = store_dhdl_results(
-            dhdl_dict=dhdl_dict, output_dir=temp_out_dir, iteration=iteration_idx
+            dhdl_dict=dhdl_dict,
+            output_dir=temp_out_dir,
+            output_fn=output_fn,
+            iteration=iteration_idx,
         )
 
     dr = dag_maker.create_dagrun()
@@ -38,7 +51,7 @@ def test_store_dhdl_results(dag_maker, session):
     assert data["iteration"][str(iteration_idx)] == dhdl_files
 
 
-def test_initialize_MDP(dag_maker, session):
+def test_initialize_MDP(dag_maker, session, ref_data=RefData()):
     import tempfile
     from airflowHPC.dags.replex import initialize_MDP
     from airflowHPC.data import data_dir as data
@@ -55,7 +68,13 @@ def test_initialize_MDP(dag_maker, session):
     ) as dag:
         output_mdp = (
             initialize_MDP.override(task_id="output_mdp")
-            .partial(template=input_mdp)
+            .partial(
+                template_mdp=input_mdp,
+                num_simulations=ref_data.num_simulations,
+                num_steps=ref_data.num_steps,
+                num_states=ref_data.num_states,
+                shift_range=ref_data.shift_range,
+            )
             .expand(expand_args=expand_args)
         )
 
@@ -92,7 +111,7 @@ def test_initialize_MDP(dag_maker, session):
     for i, mdp_path in enumerate(output_mdp_paths):
         assert os.path.exists(mdp_path)
         mdp_data = mdp2json(mdp_path)
-        assert mdp_data["nsteps"] == 2000
+        assert mdp_data["nsteps"] == ref_data.num_steps
         assert [float(j) for j in mdp_data["vdw_lambdas"].split(" ")] == expected[i][
             "vdw_lambdas"
         ]
@@ -104,7 +123,7 @@ def test_initialize_MDP(dag_maker, session):
         ] == expected[i]["init_lambda_weights"]
 
 
-def test_update_MDP(dag_maker, session):
+def test_update_MDP(dag_maker, session, ref_data=RefData()):
     import tempfile, shutil
     from airflowHPC.dags.replex import update_MDP
     from airflowHPC.data import data_dir as data
@@ -132,7 +151,13 @@ def test_update_MDP(dag_maker, session):
         ) as dag:
             output_mdp = (
                 update_MDP.override(task_id="output_mdp")
-                .partial(iter_idx=iteration_idx, dhdl_store=mock_dhdl_store)
+                .partial(
+                    iter_idx=iteration_idx,
+                    dhdl_store=mock_dhdl_store,
+                    num_simulations=ref_data.num_simulations,
+                    num_steps=ref_data.num_steps,
+                    shift_range=ref_data.shift_range,
+                )
                 .expand(expand_args=expand_args)
             )
 
@@ -152,7 +177,7 @@ def test_update_MDP(dag_maker, session):
     for i, mdp_path in enumerate(output_mdp_paths):
         assert os.path.exists(mdp_path)
         mdp_data = mdp2json(mdp_path)
-        assert mdp_data["nsteps"] == 2000
+        assert mdp_data["nsteps"] == ref_data.num_steps
         assert mdp_data["tinit"] == 12
         assert mdp_data["init_lambda_state"] == expected[i]["init_lambda_state"]
 
@@ -168,7 +193,9 @@ def test_update_MDP(dag_maker, session):
         ("exhaustive", {0: 4, 1: 2, 2: 4, 3: 3}, [1, 0, 3, 2]),  # swap (2, 3), (0, 1)
     ],
 )
-def test_get_swaps(dag_maker, session, proposal, result_states, expected_result):
+def test_get_swaps(
+    dag_maker, session, proposal, result_states, expected_result, ref_data=RefData()
+):
     import tempfile
     import random
     from airflowHPC.dags.replex import (
@@ -179,7 +206,6 @@ def test_get_swaps(dag_maker, session, proposal, result_states, expected_result)
     )
 
     dhdl_files = [os.path.join(data_path, f"dhdl/dhdl_{i}.xvg") for i in range(4)]
-    temp_out_dir = tempfile.mkdtemp()
     iteration_idx = 0
     results = [
         {"simulation_id": 0, "gro_path": "result_0.gro", "dhdl": dhdl_files[0]},
@@ -191,7 +217,9 @@ def test_get_swaps(dag_maker, session, proposal, result_states, expected_result)
     with dag_maker(
         "test_get_swaps-dag", session=session, start_date=DEFAULT_DATE
     ) as dag:
-        dhdl_results = extract_final_dhdl_info.expand(result=results)
+        dhdl_results = extract_final_dhdl_info.partial(shift_range=1).expand(
+            result=results
+        )
         reduce_dhdl(dhdl_results, iteration_idx)
 
     dr = dag_maker.create_dagrun()
@@ -204,14 +232,25 @@ def test_get_swaps(dag_maker, session, proposal, result_states, expected_result)
     for info in dhdl_dict[str(iteration_idx)]:
         info["state"] = result_states[info["simulation_id"]]
 
+    temp_out_dir = tempfile.mkdtemp()
+    output_fn = "dhdl_store.json"
     dhdl_store = store_dhdl_results.override(dag=dag)(
-        dhdl_dict=dhdl_dict, output_dir=temp_out_dir, iteration=iteration_idx
+        dhdl_dict=dhdl_dict,
+        output_dir=temp_out_dir,
+        output_fn=output_fn,
+        iteration=iteration_idx,
     )
     dhdl_store.operator.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE)
 
     random.seed(0)  # to ensure reproducibility
     swap_pattern = get_swaps.override(dag=dag)(
-        iteration=iteration_idx, dhdl_store=dhdl_store, proposal=proposal
+        iteration=iteration_idx,
+        dhdl_store=dhdl_store,
+        num_simulations=ref_data.num_simulations,
+        num_states=ref_data.num_states,
+        shift_range=ref_data.shift_range,
+        temperature=ref_data.temperature,
+        proposal=proposal,
     )
     swap_pattern.operator.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE)
     ti_get_swaps = dr.get_task_instance(task_id="get_swaps")
@@ -219,7 +258,7 @@ def test_get_swaps(dag_maker, session, proposal, result_states, expected_result)
     assert ti_get_swaps.xcom_pull() == expected_result
 
 
-def test_extract_final_dhdl_info(dag_maker, session):
+def test_extract_final_dhdl_info(dag_maker, session, ref_data=RefData()):
     from airflowHPC.dags.replex import extract_final_dhdl_info
 
     dhdl_files = [os.path.join(data_path, f"dhdl/dhdl_{i}.xvg") for i in range(4)]
@@ -234,7 +273,9 @@ def test_extract_final_dhdl_info(dag_maker, session):
     with dag_maker(
         "test_extract_final_dhdl_info-dag", session=session, start_date=DEFAULT_DATE
     ) as dag:
-        dhdl_result = extract_final_dhdl_info.expand(result=results)
+        dhdl_result = extract_final_dhdl_info.partial(
+            shift_range=ref_data.shift_range
+        ).expand(result=results)
 
     dr = dag_maker.create_dagrun()
     tis = dr.get_task_instances()
@@ -271,7 +312,24 @@ def test_propose_swap():
     assert swap_2 == (1, 2)
 
 
-def test_calc_prob_acc(capfd):
+@pytest.mark.parametrize(
+    "swap, prob_acc, info",
+    [
+        (
+            (0, 1),
+            0.45968522728859024,
+            "U^i_n - U^i_m = -3.69 kT, U^j_m - U^j_n = 4.46 kT, Total dU: 0.78 kT",
+            # dU = (-9.1366697  + 11.0623788)/2.4777098766670016 ~ 0.7772 kT, so p_acc = 0.45968522728859024
+        ),
+        (
+            (0, 2),
+            1,
+            "U^i_n - U^i_m = -3.69 kT, U^j_m - U^j_n = 2.02 kT, Total dU: -1.67 kT",
+            # dU = (-9.1366697 + 4.9963939)/2.4777098766670016 ~ -1.6710 kT, so p_acc = 1
+        ),
+    ],
+)
+def test_calc_prob_acc(capfd, swap, prob_acc, info, ref_data=RefData()):
     from airflowHPC.dags.replex import calc_prob_acc
 
     # k = 1.380649e-23; NA = 6.0221408e23; T = 298; kT = k * NA * T / 1000 = 2.4777098766670016
@@ -280,16 +338,16 @@ def test_calc_prob_acc(capfd):
     shifts = [0, 1, 2, 3]
     dhdl_files = [os.path.join(data_path, f"dhdl/dhdl_{i}.xvg") for i in range(4)]
 
-    # Test 1
-    swap = (0, 1)
-    prob_acc_1 = calc_prob_acc(swap, dhdl_files, states, shifts)
+    prob_acc_1 = calc_prob_acc(
+        swap=swap,
+        dhdl_files=dhdl_files,
+        states=states,
+        shifts=shifts,
+        num_states=ref_data.num_states,
+        shift_range=ref_data.shift_range,
+        num_simulations=ref_data.num_simulations,
+        temperature=ref_data.temperature,
+    )
     out, err = capfd.readouterr()
-    # dU = (-9.1366697  + 11.0623788)/2.4777098766670016 ~ 0.7772 kT, so p_acc = 0.45968522728859024
-    assert prob_acc_1 == pytest.approx(0.45968522728859024)
-    assert "U^i_n - U^i_m = -3.69 kT, U^j_m - U^j_n = 4.46 kT, Total dU: 0.78 kT" in out
-
-    # Test 2
-    swap = (0, 2)
-    prob_acc_2 = calc_prob_acc(swap, dhdl_files, states, shifts)
-    # dU = (-9.1366697 + 4.9963939)/2.4777098766670016 ~ -1.6710 kT, so p_acc = 1
-    assert prob_acc_2 == 1
+    assert prob_acc_1 == pytest.approx(prob_acc)
+    assert info in out
