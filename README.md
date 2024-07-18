@@ -51,7 +51,8 @@ The first command will prompt you to enter a password for the admin user.
 You will then use this username and password to log in to the webserver.
 
 On the webserver, navigate to the `DAGs` tab and click `run_gmx` DAG.
-If you press the play button in the upper right corner, the DAG will begin running.
+If you press the play button in the upper right corner, you can specify the
+output directory (or use the default value) and trigger the DAG.
 
 
 The output files are written by default to a directory called `outputs`, though this
