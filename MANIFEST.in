@@ -1,0 +1,8 @@
+include airflowHPC/data/mdp/*.json
+include airflowHPC/data/ensemble_md/expanded.mdp
+include airflowHPC/data/ensemble_md/sys.top
+include airflowHPC/data/ensemble_md/sys.gro
+include airflowHPC/data/ala_tripeptide_remd/ala_tripeptide.pdb
+include airflowHPC/data/ala_tripeptide_remd/Ramachandran_plot_original_outlines.png
+include airflowHPC/data/fs_peptide/fs.pdb
+include airflowHPC/data/mpi/hello_mpi_omp.c
