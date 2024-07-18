@@ -1,7 +1,7 @@
 from airflow import DAG
 from airflow.utils import timezone
 from airflowHPC.dags.tasks import get_file, run_gmxapi
-from airflowHPC.operators.mpi_gmx_bash_operator import MPIGmxBashOperator
+from airflowHPC.operators import ResourceGmxOperator
 
 with DAG(
     "run_gmx",
@@ -24,6 +24,8 @@ with DAG(
         output_files={"-o": "run.tpr"},
         output_dir="{{ params.output_dir }}",
     )
+    """
+    from airflowHPC.operators.mpi_gmx_bash_operator import MPIGmxBashOperator
     mdrun_result = MPIGmxBashOperator(
         task_id="mdrun",
         mpi_ranks=4,
@@ -34,7 +36,6 @@ with DAG(
         output_dir="{{ params.output_dir }}",
     )
     """
-    from airflowHPC.operators import ResourceGmxOperator
     mdrun_result = ResourceGmxOperator(
         task_id="mdrun",
         executor_config={
@@ -49,4 +50,3 @@ with DAG(
         output_files={"-c": "result.gro", "-x": "result.xtc"},
         output_dir="{{ params.output_dir }}",
     )
-    """
