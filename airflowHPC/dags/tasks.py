@@ -17,6 +17,7 @@ __all__ = (
     "xcom_lookup",
     "json_from_dataset_path",
     "branch_task_template",
+    "evaluate_template_truth",
     "run_if_needed",
     "run_if_false",
 )
@@ -219,6 +220,25 @@ def branch_task_template(statement: str, task_if_true: str, task_if_false: str) 
 
 
 @task
+def evaluate_template_truth(statement: str) -> str:
+    import logging
+
+    """
+    Handle branching based on a jinja templated statement.
+    This is potentially dangerous as it can execute arbitrary python code,
+    so we check that there are no python identifiers in the statement.
+    This is not foolproof, but it should catch most cases.
+    """
+    if any([word.isidentifier() for word in statement.split()]):
+        raise ValueError("Template statement potentially contains python code")
+    if len(statement.split()) > 3:
+        raise ValueError("Template statement should be a simple comparison")
+    logging.info(f"Evaluating statement: {statement}")
+    truth_value = eval(statement)
+    return truth_value
+
+
+@task
 def list_from_xcom(values):
     return list(values)
 
@@ -305,17 +325,21 @@ def run_if_needed(dag_id, dag_params):
 
 
 @task_group
-def run_if_false(dag_id, dag_params, truth_value: bool):
+def run_if_false(
+    dag_id, dag_params, truth_value: bool, wait_for_completion: bool = True
+):
     trigger_dag = TriggerDagRunOperator(
         task_id=f"trigger_{dag_id}",
         trigger_dag_id=dag_id,
-        wait_for_completion=True,
+        wait_for_completion=wait_for_completion,
         poke_interval=10,
         trigger_rule="none_failed",
         conf=dag_params,
     )
     dag_done = EmptyOperator(task_id=f"{dag_id}_done", trigger_rule="none_failed")
-    dag_done_branch = branch_task.override(task_id=f"{dag_id}_done_branch")(
+    dag_done_branch = branch_task.override(
+        task_id=f"{dag_id}_done_branch", trigger_rule="none_failed"
+    )(
         truth_value=truth_value,
         task_if_true=dag_done.task_id,
         task_if_false=trigger_dag.task_id,

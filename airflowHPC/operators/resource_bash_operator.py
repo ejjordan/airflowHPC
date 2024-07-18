@@ -104,9 +104,7 @@ class ResourceBashOperator(BaseOperator):
                     self.num_ranks_flag = num_ranks_flag
                     break
             if not hasattr(self, "mpi_executable"):
-                msg = "Could not find mpirun, mpiexec, or srun in PATH. "
-                msg += "Please check that one is loaded or specify a path to mpi_executable."
-                raise ValueError(msg)
+                self.mpi_executable = None
         else:
             self.mpi_executable = mpi_executable
             if "srun" in mpi_executable:
@@ -193,6 +191,10 @@ class ResourceBashOperator(BaseOperator):
         bash_path = shutil.which("bash") or "bash"
         env = self.get_env(context)
 
+        if self.mpi_executable is None or shutil.which(self.mpi_executable) is None:
+            msg = f"Could not find mpi_executable '{self.mpi_executable}' in PATH."
+            msg += "Please check that it is loaded or specify a path to mpi_executable."
+            raise ValueError(msg)
         self.log.info(f"mpi_executable: {self.mpi_executable}")
         self.log.info(f"mpi_ranks: {self.mpi_ranks}")
         self.log.info(f"cpus_per_task: {self.cpus_per_task}")

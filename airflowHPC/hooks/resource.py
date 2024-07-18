@@ -45,27 +45,27 @@ class RankRequirements:
     lfs: int = 0
     mem: int = 0
 
-    def __eq__(self, other: "RankRequirements") -> bool:
+    def __eq__(self, other: RankRequirements) -> bool:
         if not isinstance(other, RankRequirements):
             return NotImplemented
         return asdict(self) == asdict(other)
 
-    def __lt__(self, other: "RankRequirements") -> bool:
+    def __lt__(self, other: RankRequirements) -> bool:
         if not isinstance(other, RankRequirements):
             return NotImplemented
         return asdict(self) == asdict(other)
 
-    def __le__(self, other: "RankRequirements") -> bool:
+    def __le__(self, other: RankRequirements) -> bool:
         if not isinstance(other, RankRequirements):
             return NotImplemented
         return asdict(self) == asdict(other)
 
-    def __gt__(self, other: "RankRequirements") -> bool:
+    def __gt__(self, other: RankRequirements) -> bool:
         if not isinstance(other, RankRequirements):
             return NotImplemented
         return asdict(self) == asdict(other)
 
-    def __ge__(self, other: "RankRequirements") -> bool:
+    def __ge__(self, other: RankRequirements) -> bool:
         if not isinstance(other, RankRequirements):
             return NotImplemented
         return asdict(self) == asdict(other)
@@ -87,7 +87,7 @@ class NodeManager:
             self.node.lfs -= slot.lfs
             self.node.mem -= slot.mem
 
-    def deallocate_slot(self, slot: "Slot") -> None:
+    def deallocate_slot(self, slot: Slot) -> None:
         with self.__lock__:
             for ro in slot.cores:
                 self.node.cores[ro.index].occupation -= ro.occupation
@@ -173,10 +173,7 @@ class NodeList:
         self.lfs_per_node = lfs_per_node
         self.mem_per_node = mem_per_node
 
-        self.__index__ = 0
-        self.__last_failed_rr__ = None
-        self.__last_failed_n__ = None
-        self.__verified__ = False
+        self.verify()
 
     def verify(self) -> None:
         if not self.nodes:
@@ -206,87 +203,36 @@ class NodeList:
             self.lfs_per_node = None
             self.mem_per_node = None
 
-        self.__nodes_by_name__ = {node.node.name: node for node in self.nodes}
-
-        self.__verified__ = True
-
-    def _assert_rr(self, rr: RankRequirements, num_slots: int) -> None:
-        if not self.__verified__:
-            self.verify()
-
+    def _assert_rr(self, rr: RankRequirements) -> None:
         if not self.uniform:
             raise RuntimeError("verification unsupported for non-uniform nodes")
 
         if not rr.num_cores:
-            raise ValueError("invalid rank requirements: %s" % rr)
+            raise ValueError(f"invalid rank requirements: {rr}")
 
-        ranks_per_node = self.cores_per_node / rr.num_cores
+        requirement = self.cores_per_node / rr.num_cores
 
         if rr.num_gpus:
-            ranks_per_node = min(ranks_per_node, self.gpus_per_node / rr.num_gpus)
+            requirement = min(requirement, self.gpus_per_node / rr.num_gpus)
 
         if rr.lfs:
-            ranks_per_node = min(ranks_per_node, self.lfs_per_node / rr.lfs)
+            requirement = min(requirement, self.lfs_per_node / rr.lfs)
 
         if rr.mem:
-            ranks_per_node = min(ranks_per_node, self.mem_per_node / rr.mem)
+            requirement = min(requirement, self.mem_per_node / rr.mem)
 
-        if ranks_per_node < 1:
-            raise ValueError("invalid rank requirements: %s" % rr)
+        if requirement < 1:
+            raise ValueError(f"invalid rank requirements: {rr}")
 
-        if num_slots > len(self.nodes) * ranks_per_node:
-            raise ValueError("invalid rank requirements: %s" % rr)
+    def find_slots(self, rr: RankRequirements) -> Slot | None:
+        self._assert_rr(rr)
 
-    def find_slots(self, rr: RankRequirements, num_slots: int = 1) -> List[Slot] | None:
-        self._assert_rr(rr, num_slots)
+        for node in self.nodes:
+            slot = node.find_slot(rr)
+            if slot:
+                return slot
+        return None
 
-        if self.__last_failed_rr__:
-            if self.__last_failed_rr__ >= rr and self.__last_failed_n__ >= num_slots:
-                return None
-
-        slots = list()
-        count = 0
-        start = self.__index__
-        stop = start
-
-        for i in range(0, len(self.nodes)):
-            idx = (start + i) % len(self.nodes)
-            node = self.nodes[idx]
-
-            while True:
-                count += 1
-                slot = node.find_slot(rr)
-                if not slot:
-                    break
-
-                slots.append(slot)
-                if len(slots) == num_slots:
-                    stop = idx
-                    break
-
-            if len(slots) == num_slots:
-                break
-
-        if len(slots) != num_slots:
-            # free whatever we got
-            for slot in slots:
-                node = self.nodes[slot.node_index]
-                node.deallocate_slot(slot)
-            self.__last_failed_rr__ = rr
-            self.__last_failed_n__ = num_slots
-
-            return None
-
-        self.__index__ = stop
-        return slots
-
-    def release_slots(self, slots: List[Slot]) -> None:
-        for slot in slots:
-            node = self.nodes[slot.node_index]
-            node.deallocate_slot(slot)
-
-        if self.__last_failed_rr__:
-            self.__index__ = min([slot.node_index for slot in slots]) - 1
-
-        self.__last_failed_rr__ = None
-        self.__last_failed_n__ = None
+    def release_slots(self, slot: Slot) -> None:
+        node = self.nodes[slot.node_index]
+        node.deallocate_slot(slot)

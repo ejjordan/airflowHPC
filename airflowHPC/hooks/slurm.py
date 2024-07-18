@@ -69,22 +69,22 @@ class SlurmHook(BaseHook):
     @cached_property
     @providers_configuration_loaded
     def cores_per_node(self) -> int:
-        return int(conf.get("hpc", "cores_per_node"))
+        return int(conf.get("hpc", "cores_per_node", fallback=8))
 
     @cached_property
     @providers_configuration_loaded
     def gpus_per_node(self) -> int:
-        return int(conf.get("hpc", "gpus_per_node"))
+        return int(conf.get("hpc", "gpus_per_node", fallback=0))
 
     @cached_property
     @providers_configuration_loaded
     def mem_per_node(self) -> int:
-        return int(conf.get("hpc", "mem_per_node"))
+        return int(conf.get("hpc", "mem_per_node", fallback=16))
 
     @cached_property
     @providers_configuration_loaded
     def threads_per_core(self) -> int:
-        return int(conf.get("hpc", "threads_per_core"))
+        return int(conf.get("hpc", "threads_per_core", fallback=2))
 
     def get_gpu_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
         if task_instance_key not in self.slots_dict:
@@ -110,19 +110,19 @@ class SlurmHook(BaseHook):
     def assign_task_resources(self, task_instance_key: TaskInstanceKey):
         if task_instance_key not in self.task_resource_requests:
             raise RuntimeError(
-                f"Resource request not found fo task {task_instance_key}"
+                f"Resource request not found for task {task_instance_key}"
             )
         resource_request = self.task_resource_requests[task_instance_key]
-        slots = self.nodes_list.find_slots(resource_request, num_slots=1)
-        if not slots:
+        slot = self.nodes_list.find_slots(resource_request)
+        if not slot:
             return False
-        assert len(slots) == 1
-        self.slots_dict[task_instance_key] = slots[0]
-        self.log.debug("Allocated slots %s", slots[0])
+
+        self.slots_dict[task_instance_key] = slot
+        self.log.debug(f"Allocated slots {slot}")
         return True
 
     def release_task_resources(self, task_instance_key: TaskInstanceKey):
         if task_instance_key not in self.slots_dict:
             raise RuntimeError(f"Resource not allocated for task {task_instance_key}")
-        self.nodes_list.release_slots([self.slots_dict[task_instance_key]])
+        self.nodes_list.release_slots(self.slots_dict[task_instance_key])
         del self.slots_dict[task_instance_key]
