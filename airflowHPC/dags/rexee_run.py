@@ -44,7 +44,6 @@ with DAG(
         dag_params=initialize_rexee_params,
         truth_value=is_initialize_done,
     )
-    """
     # Here we can be sure that there is a counter file
     last_iteration_num = read_counter.override(
         task_id="read_counter", trigger_rule="none_failed"
@@ -72,4 +71,3 @@ with DAG(
         truth_value=is_continue_done,
     )
     initialize_rexee >> last_iteration_num >> is_continue_done >> continue_rexee
-    """

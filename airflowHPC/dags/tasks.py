@@ -284,11 +284,15 @@ def json_from_dataset_path(dataset_path: str):
 def xcom_lookup(dag_id, task_id, key, **context):
     import logging
 
-    logging.info(f"Looking up {key} from {task_id} in {dag_id}")
+    logging.info(f"Looking up '{key}' from '{task_id}' in '{dag_id}'")
     task_instance = context["task_instance"]
     logging.info(
         f"xcom values: {task_instance.xcom_pull(dag_id=dag_id, task_ids=task_id, include_prior_dates=True)}"
     )
+    if key:
+        logging.info(
+            f"xcom key value: {task_instance.xcom_pull(dag_id=dag_id, task_ids=task_id, key=key, include_prior_dates=True)}"
+        )
     xcom = task_instance.xcom_pull(
         dag_id=dag_id, task_ids=task_id, key=key, include_prior_dates=True
     )

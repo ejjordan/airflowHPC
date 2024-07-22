@@ -1,5 +1,6 @@
 from airflow import DAG, Dataset
 from airflow.decorators import task
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
@@ -7,17 +8,16 @@ from airflowHPC.dags.tasks import (
     list_from_xcom,
     evaluate_template_truth,
     run_if_false,
+    json_from_dataset_path,
 )
 from airflowHPC.dags.replex import (
     increment_counter,
     prepare_args_for_mdp_functions,
-    run_iteration,
     reduce_dhdl,
     store_dhdl_results,
     get_swaps,
     update_MDP,
     prepare_next_step,
-    get_dhdl,
     extract_final_dhdl_info,
 )
 
@@ -85,7 +85,7 @@ with DAG(
     input_top = get_file.override(task_id="get_top")(
         input_dir="ensemble_md", file_name="sys.top"
     )
-    next_step_input = prepare_next_step(
+    next_step_input = prepare_next_step.override(task_id="next_step_input")(
         top_path=input_top,
         mdp_path=mdp_updates_list,
         swap_pattern=swap_pattern,
@@ -94,12 +94,49 @@ with DAG(
     )
 
     this_iteration_num = increment_counter(output_dir="outputs")
-    mdrun_result = run_iteration(grompp_input_list=next_step_input)
-    dhdl = mdrun_result.map(get_dhdl)
+
+    rexee_continue_grompp_mdrun_params = {
+        "inputs": {
+            "gro": {
+                "task_id": "next_step_input",
+                "key": "gro",
+            },
+            "top": {
+                "task_id": "next_step_input",
+                "key": "top",
+            },
+            "mdp": {
+                "task_id": "next_step_input",
+                "key": "mdp",
+            },
+            "parent_dag_id": dag.dag_id,
+        },
+        "num_simulations": "{{ params.num_simulations }}",
+        "output_name": "rexee_init",
+        "output_dir": "{{ params.output_dir }}",
+        "output_dataset_structure": {
+            "simulation_id": "simulation_id",
+            "dhdl": "-dhdl",
+            "gro_path": "-c",
+        },
+    }
+    rexee_continue_dag = TriggerDagRunOperator(
+        task_id="rexee_init_dag",
+        trigger_dag_id="grompp_mdrun",
+        poke_interval=1,
+        conf=rexee_continue_grompp_mdrun_params,
+        wait_for_completion=True,
+    )
+    dhdl = json_from_dataset_path.override(task_id="dhdl_results")(
+        dataset_path="{{ params.output_dir }}/"
+        + f"{rexee_continue_grompp_mdrun_params['output_name']}.json",
+    )
     dhdl_results = extract_final_dhdl_info.partial(
         shift_range="{{ params.shift_range }}"
     ).expand(result=dhdl)
-    next_step_input >> this_iteration_num >> mdrun_result >> dhdl_results
+
+    next_step_input >> this_iteration_num >> rexee_continue_dag >> dhdl >> dhdl_results
+
     dhdl_dict = reduce_dhdl(dhdl=dhdl_results, iteration=this_iteration_num)
     dhdl_store = store_dhdl_results(
         dhdl_dict=dhdl_dict,

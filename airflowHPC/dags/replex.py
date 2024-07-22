@@ -403,12 +403,10 @@ def get_swaps(
     return swap_pattern
 
 
-@task
+@task(multiple_outputs=True)
 def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_store, iteration):
     import json
     import logging
-    from dataclasses import asdict
-    from airflowHPC.dags.tasks import GmxapiInputHolder
 
     with open(dhdl_store.uri, "r") as f:
         dhdl_dict = json.load(f)
@@ -423,30 +421,7 @@ def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_store, iteration):
     gro_list = [
         dhdl_info[i]["gro"] for i in swap_pattern if dhdl_info[i]["simulation_id"] == i
     ]
-
-    next_step_input = []
-
-    for i in range(len(swap_pattern)):
-        if isinstance(top_path, list):
-            top = top_path[i]
-        else:
-            top = top_path
-        if isinstance(mdp_path, list):
-            mdp = mdp_path[i]
-        else:
-            mdp = mdp_path
-
-        next_step_input.append(
-            asdict(
-                GmxapiInputHolder(
-                    args=["grompp"],
-                    input_files={"-f": mdp, "-c": gro_list[i], "-p": top},
-                    output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
-                    output_dir=f"outputs/sim_{i}/iteration_{iteration}",
-                    simulation_id=i,
-                )
-            )
-        )
+    next_step_input = {"gro": gro_list, "top": top_path, "mdp": mdp_path}
     return next_step_input
 
 
