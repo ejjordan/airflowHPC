@@ -2,14 +2,12 @@ from airflow import DAG
 from airflow.utils import timezone
 from airflow.models.param import Param
 from airflowHPC.dags.tasks import (
-    get_file,
     prepare_gmxapi_input,
     update_gmxapi_input,
     xcom_lookup,
     dataset_from_xcom_dicts,
 )
 from airflowHPC.operators.resource_gmx_operator import ResourceGmxOperatorDataclass
-from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
 with DAG(
@@ -21,10 +19,19 @@ with DAG(
     params={
         "inputs": Param(
             {
-                "mdp": {"directory": "mdp", "filename": "min.json"},
-                "gro_task_id": "solvate",
-                "top_task_id": "solvate",
-                "parent_dag_id": "alanine_dipeptide",
+                "mdp": {
+                    "task_id": "get_mdp",
+                    "key": None,
+                },
+                "gro": {
+                    "task_id": "get_gro",
+                    "key": None,
+                },
+                "top": {
+                    "task_id": "get_top",
+                    "key": None,
+                },
+                "parent_dag_id": "dag",
             },
             type=["object", "null"],
             title="Inputs list",
@@ -38,30 +45,28 @@ with DAG(
         "num_simulations": 4,
         "output_dir": "outputs",
         "output_name": "sim",
+        "output_dataset_structure": {},
     },
 ) as dag:
-    mdp_json = get_file.override(task_id="get_mdp_json")(
-        input_dir="{{ params.inputs.mdp.directory }}",
-        file_name="{{ params.inputs.mdp.filename }}",
-    )
-    mdp = update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_update")(
-        mdp_json_file_path=mdp_json
-    )
-
-    gros = xcom_lookup.override(task_id="gro_from_xcom")(
+    gro = xcom_lookup.override(task_id="gro_from_xcom")(
         dag_id="{{ params.inputs.parent_dag_id }}",
-        task_id="{{ params.inputs.gro_task_id }}",
-        key="-o",
+        task_id="{{ params.inputs.gro.task_id }}",
+        key="{{ params.inputs.gro.key }}",
     )
-    tops = xcom_lookup.override(task_id="top_from_xcom")(
+    top = xcom_lookup.override(task_id="top_from_xcom")(
         dag_id="{{ params.inputs.parent_dag_id }}",
-        task_id="{{ params.inputs.top_task_id }}",
-        key="-p",
+        task_id="{{ params.inputs.top.task_id }}",
+        key="{{ params.inputs.top.key }}",
+    )
+    mdp = xcom_lookup.override(task_id="mdp_from_xcom")(
+        dag_id="{{ params.inputs.parent_dag_id }}",
+        task_id="{{ params.inputs.mdp.task_id }}",
+        key="{{ params.inputs.mdp.key }}",
     )
 
     grompp_input_list = prepare_gmxapi_input.override(task_id="grompp_input_list")(
         args=["grompp"],
-        input_files={"-f": mdp, "-c": gros, "-p": tops},
+        input_files={"-f": mdp, "-c": gro, "-p": top},
         output_files={"-o": "{{ params.output_name }}.tpr"},
         output_dir="{{ params.output_dir }}",
         counter=0,
@@ -85,7 +90,7 @@ with DAG(
         .partial(
             args=["mdrun", "-v", "-deffnm", "{{ params.output_name }}", "-ntomp", "2"],
             input_files_keys={"-s": "-o"},
-            output_files={"-c": "{{ params.output_name }}.gro"},
+            output_files={"-c": "{{ params.output_name }}.gro", "-dhdl": "dhdl.xvg"},
         )
         .expand(gmxapi_output=grompp.output)
     )
@@ -99,11 +104,10 @@ with DAG(
         },
         gmx_executable="gmx_mpi",
     ).expand(input_data=mdrun_input_list)
-
-    gro_dataset = dataset_from_xcom_dicts.override(task_id="gro_dataset")(
+    dataset = dataset_from_xcom_dicts.override(task_id="make_dataset")(
         output_dir="{{ params.output_dir }}",
         output_fn="{{ params.output_name }}.json",
         list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun', key='return_value')}}",
-        key="-c",
+        dataset_structure="{{ params.output_dataset_structure }}",
     )
-    mdrun >> gro_dataset
+    mdrun >> dataset
