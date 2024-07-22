@@ -11,25 +11,6 @@ STATE_RANGES = [
 ]
 
 
-@task.branch
-def check_condition(counter, num_iterations):
-    import logging
-
-    logging.info(f"check_condition: counter {counter} iterations {num_iterations}")
-    if counter < num_iterations:
-        return "trigger_self"
-    else:
-        return "run_complete"
-
-
-def get_dhdl(result):
-    return {
-        "simulation_id": result["inputs"]["simulation_id"],
-        "dhdl": result["outputs"]["-dhdl"],
-        "gro_path": result["outputs"]["-c"],
-    }
-
-
 @task
 def initialize_MDP(
     template_mdp,
@@ -423,36 +404,6 @@ def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_store, iteration):
     ]
     next_step_input = {"gro": gro_list, "top": top_path, "mdp": mdp_path}
     return next_step_input
-
-
-@task_group
-def run_iteration(grompp_input_list):
-    from airflowHPC.dags.tasks import run_gmxapi_dataclass, update_gmxapi_input
-
-    grompp_result = run_gmxapi_dataclass.override(
-        task_id="grompp", max_active_tis_per_dagrun=8
-    ).expand(input_data=grompp_input_list)
-    mdrun_input = (
-        update_gmxapi_input.override(task_id="mdrun_prepare")
-        .partial(
-            args=["mdrun"],
-            input_files_keys={"-s": "-o"},
-            output_files={
-                "-dhdl": "dhdl.xvg",
-                "-c": "result.gro",
-                "-x": "result.xtc",
-                "-g": "md.log",
-                "-e": "ener.edr",
-                "-cpo": "state.cpt",
-            },
-        )
-        .expand(gmxapi_output=grompp_result)
-    )
-
-    mdrun_result = run_gmxapi_dataclass.override(task_id="mdrun").expand(
-        input_data=mdrun_input
-    )
-    return mdrun_result
 
 
 @task(max_active_tis_per_dag=1)
