@@ -94,9 +94,7 @@ with DAG(
     )
 
     this_iteration_num = increment_counter(output_dir="outputs")
-    mdrun_result = run_iteration(
-        grompp_input_list=next_step_input, shift_range="{{ params.shift_range }}"
-    )
+    mdrun_result = run_iteration(grompp_input_list=next_step_input)
     dhdl = mdrun_result.map(get_dhdl)
     dhdl_results = extract_final_dhdl_info.partial(
         shift_range="{{ params.shift_range }}"

@@ -451,7 +451,7 @@ def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_store, iteration):
 
 
 @task_group
-def run_iteration(grompp_input_list, shift_range: int):
+def run_iteration(grompp_input_list):
     from airflowHPC.dags.tasks import run_gmxapi_dataclass, update_gmxapi_input
 
     grompp_result = run_gmxapi_dataclass.override(

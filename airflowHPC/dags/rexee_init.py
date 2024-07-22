@@ -71,9 +71,7 @@ with DAG(
         counter=counter,
         num_simulations="{{ params.num_simulations }}",
     )
-    mdrun_result = run_iteration(
-        grompp_input_list=grompp_input_list, shift_range="{{ params.shift_range }}"
-    )
+    mdrun_result = run_iteration(grompp_input_list=grompp_input_list)
     dhdl = mdrun_result.map(get_dhdl)
     dhdl_results = extract_final_dhdl_info.partial(
         shift_range="{{ params.shift_range }}"
