@@ -17,6 +17,8 @@ from airflowHPC.dags.replex import (
     get_swaps,
     update_MDP,
     prepare_next_step,
+    get_dhdl,
+    extract_final_dhdl_info,
 )
 
 
@@ -92,10 +94,14 @@ with DAG(
     )
 
     this_iteration_num = increment_counter(output_dir="outputs")
-    dhdl_results = run_iteration(
+    mdrun_result = run_iteration(
         grompp_input_list=next_step_input, shift_range="{{ params.shift_range }}"
     )
-    next_step_input >> this_iteration_num >> dhdl_results
+    dhdl = mdrun_result.map(get_dhdl)
+    dhdl_results = extract_final_dhdl_info.partial(
+        shift_range="{{ params.shift_range }}"
+    ).expand(result=dhdl)
+    next_step_input >> this_iteration_num >> mdrun_result >> dhdl_results
     dhdl_dict = reduce_dhdl(dhdl=dhdl_results, iteration=this_iteration_num)
     dhdl_store = store_dhdl_results(
         dhdl_dict=dhdl_dict,

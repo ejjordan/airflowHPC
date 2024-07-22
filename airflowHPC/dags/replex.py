@@ -477,11 +477,7 @@ def run_iteration(grompp_input_list, shift_range: int):
     mdrun_result = run_gmxapi_dataclass.override(task_id="mdrun").expand(
         input_data=mdrun_input
     )
-    dhdl = mdrun_result.map(get_dhdl)
-    dhdl_result = extract_final_dhdl_info.partial(shift_range=shift_range).expand(
-        result=dhdl
-    )
-    return dhdl_result
+    return mdrun_result
 
 
 @task(max_active_tis_per_dag=1)

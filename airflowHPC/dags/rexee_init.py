@@ -13,6 +13,8 @@ from airflowHPC.dags.replex import (
     reduce_dhdl,
     store_dhdl_results,
     increment_counter,
+    get_dhdl,
+    extract_final_dhdl_info,
 )
 
 with DAG(
@@ -69,9 +71,13 @@ with DAG(
         counter=counter,
         num_simulations="{{ params.num_simulations }}",
     )
-    dhdl_results = run_iteration(
+    mdrun_result = run_iteration(
         grompp_input_list=grompp_input_list, shift_range="{{ params.shift_range }}"
     )
+    dhdl = mdrun_result.map(get_dhdl)
+    dhdl_results = extract_final_dhdl_info.partial(
+        shift_range="{{ params.shift_range }}"
+    ).expand(result=dhdl)
     dhdl_dict = reduce_dhdl(
         dhdl=dhdl_results, iteration=counter
     )  # key: iteration number; value: a list of dictionaries with keys like simulation_id, state, and gro
