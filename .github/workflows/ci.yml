@@ -57,6 +57,8 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
+      AIRFLOW__CORE__EXECUTOR: airflowHPC.executors.resource_executor.ResourceExecutor
+      AIRFLOW__CORE__DAGS_FOLDER: /home/runner/work/airflowHPC/airflowHPC/dags
     steps:
 
     - name: Checkout code
@@ -79,6 +81,10 @@ jobs:
     - name: Start MySQL
       run: |
         sudo systemctl start mysql
+        sudo mysql --user=root --password=root -e "CREATE DATABASE airflow_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+        sudo mysql --user=root --password=root -e "CREATE USER 'airflow_user' IDENTIFIED BY 'airflow_pass';"
+        sudo mysql --user=root --password=root -e "GRANT ALL PRIVILEGES ON airflow_db.* TO 'airflow_user'"
+        sudo mysql --user=root --password=root -e "FLUSH PRIVILEGES;"
 
     - name: Run gmx_multi DAG
       run: |
@@ -114,8 +120,6 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
-      AIRFLOW__CORE__EXECUTOR: airflowHPC.executors.resource_executor.ResourceExecutor
-      AIRFLOW__CORE__DAGS_FOLDER: /home/runner/work/airflowHPC/airflowHPC/dags
     steps:
 
     - uses: actions/checkout@v4
@@ -130,6 +134,10 @@ jobs:
     - name: Start MySQL
       run: |
         sudo systemctl start mysql
+        sudo mysql --user=root --password=root -e "CREATE DATABASE airflow_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+        sudo mysql --user=root --password=root -e "CREATE USER 'airflow_user' IDENTIFIED BY 'airflow_pass';"
+        sudo mysql --user=root --password=root -e "GRANT ALL PRIVILEGES ON airflow_db.* TO 'airflow_user'"
+        sudo mysql --user=root --password=root -e "FLUSH PRIVILEGES;"
 
     - name: Run tests
       run: |
