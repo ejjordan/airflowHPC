@@ -54,7 +54,7 @@ jobs:
     #  with:
     #    mpi: openmpi
 
-  build-gromacs:
+  gromacs-tests:
     needs: setup
     runs-on: ubuntu-24.04
     steps:
@@ -66,6 +66,20 @@ jobs:
       run: |
           sudo apt-get update
           sudo apt-get install -y gromacs
+
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    - run: |
+        pip install -e .[mysql]
+        pip install -r requirements.txt
+
+    - name: Run gmx_multi DAG
+      run: |
+        airflow db init
+        airflow dags backfill -s 2024-07-01 --reset-dagruns -y gmx_multi        
 
     #- uses: lukka/get-cmake@latest
 
