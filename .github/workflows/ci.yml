@@ -58,8 +58,9 @@ jobs:
     env:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
       AIRFLOW__CORE__EXECUTOR: airflowHPC.executors.resource_executor.ResourceExecutor
-      AIRFLOW__CORE__DAGS_FOLDER: /home/runner/work/airflowHPC/airflowHPC/dags
+      #AIRFLOW__CORE__DAGS_FOLDER: /home/runner/work/airflowHPC/airflowHPC/dags
       AIRFLOW__CORE__LOAD_EXAMPLES: False
+      RADICAL_UTILS_NO_ATFORK: 1
     steps:
 
     - name: Checkout code
@@ -89,8 +90,8 @@ jobs:
 
     - name: Run gmx_multi DAG
       run: |
+        export AIRFLOW__CORE__DAGS_FOLDER=aiflowHPC/dags
         airflow db init
-        airflow config list
         airflow dags backfill -s 2024-07-01 --reset-dagruns -y gmx_multi        
 
     #- uses: lukka/get-cmake@latest
@@ -123,6 +124,7 @@ jobs:
     env:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
       AIRFLOW__CORE__LOAD_EXAMPLES: False
+      RADICAL_UTILS_NO_ATFORK: 1
     steps:
 
     - uses: actions/checkout@v4
@@ -145,5 +147,4 @@ jobs:
     - name: Run tests
       run: |
         airflow db init
-        airflow config list
         pytest tests/replex.py
