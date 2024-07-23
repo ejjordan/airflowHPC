@@ -37,20 +37,21 @@ jobs:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
 
+
+    - name: Cache MPI
+      id: cache-mpi
+      uses: actions/cache@v3
+      with:
+        path: ~/.openmpi
+        key: ${{ runner.os }}-openmpi-${{ hashFiles('**/ci.yml') }}
+
+    - name: Setup MPI
+      if: steps.cache-mpi.outputs.cache-hit != 'true'
+      uses: mpi4py/setup-mpi@v1
+      with:
+        mpi: openmpi
+
     # No tests use gmxapi for now
-    #- name: Cache MPI
-    #  id: cache-mpi
-    #  uses: actions/cache@v3
-    #  with:
-    #    path: ~/.openmpi
-    #    key: ${{ runner.os }}-openmpi-${{ hashFiles('**/ci.yml') }}
-
-    #- name: Setup MPI
-    #  if: steps.cache-mpi.outputs.cache-hit != 'true'
-    #  uses: mpi4py/setup-mpi@v1
-    #  with:
-    #    mpi: openmpi
-
     #- uses: lukka/get-cmake@latest
 
     #- name: Install GROMACS depencies
