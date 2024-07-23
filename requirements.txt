@@ -5,4 +5,3 @@ ensemble_md
 h5py
 mdanalysis
 pytest
-zmq
