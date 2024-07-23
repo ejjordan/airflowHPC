@@ -46,19 +46,10 @@ jobs:
       RADICAL_UTILS_NO_ATFORK: 1
     steps:
 
-    - name: Checkout code
-      uses: actions/checkout@v4
-
     - name: Install GROMACS
       run: |
           sudo apt-get update
           sudo apt-get install -y gromacs
-
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
 
     - name: Start MySQL
       run: |
@@ -81,12 +72,6 @@ jobs:
       AIRFLOW__CORE__LOAD_EXAMPLES: False
       RADICAL_UTILS_NO_ATFORK: 1
     steps:
-
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
 
     - name: Start MySQL
       run: |
