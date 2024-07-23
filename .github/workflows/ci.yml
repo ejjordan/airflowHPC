@@ -7,10 +7,14 @@ on:
       - main
 
 jobs:
-  setup:
+  run_tests:
     runs-on: ubuntu-24.04
     env:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
+      AIRFLOW__CORE__EXECUTOR: airflowHPC.executors.resource_executor.ResourceExecutor
+      AIRFLOW__CORE__DAGS_FOLDER: /home/runner/work/airflowHPC/airflowHPC/airflowHPC/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: False
+      RADICAL_UTILS_NO_ATFORK: 1
     steps:
 
     # The gitlab runner comes with mysql installed by default
@@ -38,70 +42,18 @@ jobs:
         pip install -e .[mysql]
         pip install -r requirements.txt
 
-  gromacs-tests:
-    needs: setup
-    runs-on: ubuntu-24.04
-    env:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
-      AIRFLOW__CORE__EXECUTOR: airflowHPC.executors.resource_executor.ResourceExecutor
-      AIRFLOW__CORE__DAGS_FOLDER: /home/runner/work/airflowHPC/airflowHPC/airflowHPC/dags
-      AIRFLOW__CORE__LOAD_EXAMPLES: False
-      RADICAL_UTILS_NO_ATFORK: 1
-    steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
-        cache-dependency-path: |
-          '**/requirements.txt'
-          '**/pyproject.toml'
+    - name: Run tests
+      run: |
+        pip list
+        airflow db init
+        pytest tests/replex.py
 
     - name: Install GROMACS
       run: |
           sudo apt-get update
           sudo apt-get install -y gromacs
 
-    - name: Start MySQL
-      run: |
-        sudo systemctl start mysql
-        sudo mysql --user=root --password=root -e "CREATE DATABASE airflow_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-        sudo mysql --user=root --password=root -e "CREATE USER 'airflow_user' IDENTIFIED BY 'airflow_pass';"
-        sudo mysql --user=root --password=root -e "GRANT ALL PRIVILEGES ON airflow_db.* TO 'airflow_user'"
-        sudo mysql --user=root --password=root -e "FLUSH PRIVILEGES;"
-
     - name: Run gmx_multi DAG
       run: |
         airflow db init
         airflow dags backfill -s 2024-07-23 --reset-dagruns -y run_gmx
-
-  tests:
-    needs: setup
-    runs-on: ubuntu-24.04
-    env:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
-      AIRFLOW__CORE__LOAD_EXAMPLES: False
-      RADICAL_UTILS_NO_ATFORK: 1
-    steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
-        cache-dependency-path: |
-          '**/requirements.txt'
-          '**/pyproject.toml'
-
-    - name: Start MySQL
-      run: |
-        sudo systemctl start mysql
-        sudo mysql --user=root --password=root -e "CREATE DATABASE airflow_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-        sudo mysql --user=root --password=root -e "CREATE USER 'airflow_user' IDENTIFIED BY 'airflow_pass';"
-        sudo mysql --user=root --password=root -e "GRANT ALL PRIVILEGES ON airflow_db.* TO 'airflow_user'"
-        sudo mysql --user=root --password=root -e "FLUSH PRIVILEGES;"
-
-    - name: Run tests
-      run: |
-        pip list
-        airflow db init
-        pytest tests/replex.py
