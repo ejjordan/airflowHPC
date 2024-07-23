@@ -32,26 +32,6 @@ jobs:
         python-version: '3.11'
         cache: 'pip'
 
-    #- name: Cache pip
-    #  uses: actions/cache@v3
-    #  with:
-    #    path: ~/.cache/pip
-    #    key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-
-
-    #- name: Cache MPI
-    #  id: cache-mpi
-    #  uses: actions/cache@v3
-    #  with:
-    #    path: ~/.openmpi
-    #    key: ${{ runner.os }}-openmpi-${{ hashFiles('**/ci.yml') }}
-
-    #- name: Setup MPI
-    #  if: steps.cache-mpi.outputs.cache-hit != 'true'
-    #  uses: mpi4py/setup-mpi@v1
-    #  with:
-    #    mpi: openmpi
-
   gromacs-tests:
     needs: setup
     runs-on: ubuntu-24.04
@@ -91,31 +71,7 @@ jobs:
     - name: Run gmx_multi DAG
       run: |
         airflow db init
-        airflow dags backfill -s 2024-07-23 --reset-dagruns -y run_gmx        
-
-    #- uses: lukka/get-cmake@latest
-
-    #- name: Setup MPI
-    #  uses: mpi4py/setup-mpi@v1
-    #  with:
-    #    mpi: openmpi
-
-    #- name: Install GROMACS depencies
-    #  run: |
-    #      sudo apt-get update
-    #      sudo apt-get install -y wget libfftw3-dev
-
-    #- name: Install GROMACS
-    #  run: |
-    #      wget https://ftp.gromacs.org/gromacs/gromacs-2023.3.tar.gz
-    #      tar xfz gromacs-2023.3.tar.gz
-    #      cd gromacs-2023.3
-    #      mkdir build
-    #      cd build
-    #      cmake .. -DGMX_BUILD_OWN_FFTW=OFF -DGMX_FFT_LIBRARY=fftw3 -DGMX_MPI=ON -DBUILD_TESTING=OFF -DGMX_SIMD=AVX2_256 -DGMX_INSTALL_NBLIB_API=OFF
-    #      make -j $(nproc)
-    #      sudo make -j $(nproc) install
-    #      export gmxapi_ROOT=/usr/local/gromacs/
+        airflow dags backfill -s 2024-07-23 --reset-dagruns -y run_gmx
 
   tests:
     needs: setup
@@ -145,7 +101,5 @@ jobs:
 
     - name: Run tests
       run: |
-        ls airflowHPC
-        pwd
         airflow db init
         pytest tests/replex.py
