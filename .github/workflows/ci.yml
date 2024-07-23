@@ -89,7 +89,6 @@ jobs:
 
     - name: Run gmx_multi DAG
       run: |
-        airflow connections create-default-connections
         airflow config list
         airflow dags backfill -s 2024-07-01 --reset-dagruns -y gmx_multi        
 
@@ -143,6 +142,5 @@ jobs:
 
     - name: Run tests
       run: |
-        airflow connections create-default-connections
         airflow config list
         pytest tests/replex.py
