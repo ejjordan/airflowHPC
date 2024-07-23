@@ -146,6 +146,7 @@ jobs:
 
     - name: Run tests
       run: |
-        ls
+        ls airflowHPC
+        pwd
         airflow db init
         pytest tests/replex.py
