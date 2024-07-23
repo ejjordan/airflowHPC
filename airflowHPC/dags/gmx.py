@@ -18,8 +18,16 @@ with DAG(
     input_mdp = get_file.override(task_id="get_mdp")(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
-    grompp_result = run_gmxapi.override(task_id="grompp")(
-        args=["grompp"],
+    grompp_result = ResourceGmxOperator(
+        task_id="grompp",
+        executor_config={
+            "mpi_ranks": 1,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+        gmx_arguments=["grompp"],
         input_files={"-f": input_mdp, "-c": input_gro, "-p": input_top},
         output_files={"-o": "run.tpr"},
         output_dir="{{ params.output_dir }}",
@@ -39,14 +47,15 @@ with DAG(
     mdrun_result = ResourceGmxOperator(
         task_id="mdrun",
         executor_config={
-            "mpi_ranks": 4,
+            "mpi_ranks": 1,
             "cpus_per_task": 2,
             "gpus": 0,
             "gpu_type": None,
         },
         gmx_executable="gmx_mpi",
         gmx_arguments=["mdrun", "-ntomp", "2"],
-        input_files={"-s": grompp_result["-o"]},
+        input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
         output_dir="{{ params.output_dir }}",
     )
+    grompp_result >> mdrun_result
