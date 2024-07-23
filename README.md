@@ -152,7 +152,7 @@ that the CLI can find the DAGs and the database.
 `airflow standalone` or `airflow db init` command at least once.**
 
 ```bash
-airflow dags backfill -s YYYY-MM-DD --reset-dagruns -y run_gmxapi
+airflow dags backfill -s YYYY-MM-DD --reset-dagruns -y run_gmx
 ```
 
 ### Running on an HPC resources

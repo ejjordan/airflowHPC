@@ -91,7 +91,7 @@ jobs:
     - name: Run gmx_multi DAG
       run: |
         airflow db init
-        airflow dags backfill -s 2024-07-23 --reset-dagruns -y gmx_multi        
+        airflow dags backfill -s 2024-07-23 --reset-dagruns -y run_gmx        
 
     #- uses: lukka/get-cmake@latest
 
