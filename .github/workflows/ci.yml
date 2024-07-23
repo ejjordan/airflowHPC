@@ -35,13 +35,6 @@ jobs:
         pip install -e .[mysql]
         pip install -r requirements.txt
 
-    - name: Save installed package
-      run: tar -czf project-package.tar.gz .
-    - uses: actions/upload-artifact@v3
-      with:
-        name: project-package
-        path: project-package.tar.gz
-
   gromacs-tests:
     needs: setup
     runs-on: ubuntu-24.04
@@ -66,11 +59,6 @@ jobs:
       with:
         python-version: '3.11'
         cache: 'pip'
-    - uses: actions/download-artifact@v3
-      with:
-        name: project-package
-    - name: Extract project package
-      run: tar -xzf project-package.tar.gz
 
     - name: Start MySQL
       run: |
@@ -99,11 +87,6 @@ jobs:
       with:
         python-version: '3.11'
         cache: 'pip'
-    - uses: actions/download-artifact@v3
-      with:
-        name: project-package
-    - name: Extract project package
-      run: tar -xzf project-package.tar.gz
 
     - name: Start MySQL
       run: |
