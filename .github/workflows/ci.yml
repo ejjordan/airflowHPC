@@ -14,8 +14,6 @@ jobs:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
 
     # The gitlab runner comes with mysql installed by default
     - name: Setup MySQL
@@ -31,12 +29,12 @@ jobs:
       with:
         mpi: openmpi
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         cache: 'pip'
-      run: |
+    - run: |
         pip install -e .[mysql]
         pip install -r requirements.txt
 
