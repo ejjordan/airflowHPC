@@ -34,6 +34,12 @@ jobs:
     - run: |
         pip install -e .[mysql]
         pip install -r requirements.txt
+    - uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
 
   gromacs-tests:
     needs: setup
@@ -45,6 +51,13 @@ jobs:
       AIRFLOW__CORE__LOAD_EXAMPLES: False
       RADICAL_UTILS_NO_ATFORK: 1
     steps:
+    - uses: actions/checkout@v4
+    - uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
 
     - name: Install GROMACS
       run: |
@@ -72,6 +85,13 @@ jobs:
       AIRFLOW__CORE__LOAD_EXAMPLES: False
       RADICAL_UTILS_NO_ATFORK: 1
     steps:
+    - uses: actions/checkout@v4
+    - uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
 
     - name: Start MySQL
       run: |
