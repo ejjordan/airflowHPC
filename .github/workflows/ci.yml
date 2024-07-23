@@ -103,5 +103,6 @@ jobs:
 
     - name: Run tests
       run: |
+        pip list
         airflow db init
         pytest tests/replex.py
