@@ -37,12 +37,6 @@ jobs:
     - run: |
         pip install -e .[mysql]
         pip install -r requirements.txt
-    - uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
 
   gromacs-tests:
     needs: setup
@@ -55,12 +49,13 @@ jobs:
       RADICAL_UTILS_NO_ATFORK: 1
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/cache@v3
+    - uses: actions/setup-python@v5
       with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
+        python-version: '3.11'
+        cache: 'pip'
+        cache-dependency-path: |
+          '**/requirements.txt'
+          '**/pyproject.toml'
 
     - name: Install GROMACS
       run: |
@@ -89,12 +84,13 @@ jobs:
       RADICAL_UTILS_NO_ATFORK: 1
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/cache@v3
+    - uses: actions/setup-python@v5
       with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
+        python-version: '3.11'
+        cache: 'pip'
+        cache-dependency-path: |
+          '**/requirements.txt'
+          '**/pyproject.toml'
 
     - name: Start MySQL
       run: |
