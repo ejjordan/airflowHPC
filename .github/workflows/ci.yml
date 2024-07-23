@@ -92,7 +92,7 @@ jobs:
       run: |
         export AIRFLOW__CORE__DAGS_FOLDER=aiflowHPC/dags
         airflow db init
-        airflow dags backfill -s 2024-07-01 --reset-dagruns -y gmx_multi        
+        airflow dags backfill -s 2024-07-23 --reset-dagruns -y gmx_multi        
 
     #- uses: lukka/get-cmake@latest
 
@@ -146,5 +146,6 @@ jobs:
 
     - name: Run tests
       run: |
+        ls
         airflow db init
         pytest tests/replex.py
