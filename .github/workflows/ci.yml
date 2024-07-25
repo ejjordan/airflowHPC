@@ -1,0 +1,82 @@
+name: Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://airflow_user:airflow_pass@localhost/airflow_db
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # The gitlab runner comes with mysql installed by default
+    - name: Setup MySQL
+      run: |
+        sudo systemctl start mysql
+        sudo mysql --user=root --password=root -e "CREATE DATABASE airflow_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+        sudo mysql --user=root --password=root -e "CREATE USER 'airflow_user' IDENTIFIED BY 'airflow_pass';"
+        sudo mysql --user=root --password=root -e "GRANT ALL PRIVILEGES ON airflow_db.* TO 'airflow_user'"
+        sudo mysql --user=root --password=root -e "FLUSH PRIVILEGES;"
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+
+    # No tests use gmxapi for now
+    #- name: Cache MPI
+    #  id: cache-mpi
+    #  uses: actions/cache@v3
+    #  with:
+    #    path: ~/.openmpi
+    #    key: ${{ runner.os }}-openmpi-${{ hashFiles('**/ci.yml') }}
+
+    #- name: Setup MPI
+    #  if: steps.cache-mpi.outputs.cache-hit != 'true'
+    #  uses: mpi4py/setup-mpi@v1
+    #  with:
+    #    mpi: openmpi
+
+    #- uses: lukka/get-cmake@latest
+
+    #- name: Install GROMACS depencies
+    #  run: |
+    #      sudo apt-get update
+    #      sudo apt-get install -y wget libfftw3-dev
+
+    #- name: Install GROMACS
+    #  run: |
+    #      wget https://ftp.gromacs.org/gromacs/gromacs-2023.3.tar.gz
+    #      tar xfz gromacs-2023.3.tar.gz
+    #      cd gromacs-2023.3
+    #      mkdir build
+    #      cd build
+    #      cmake .. -DGMX_BUILD_OWN_FFTW=OFF -DGMX_FFT_LIBRARY=fftw3 -DGMX_MPI=ON -DBUILD_TESTING=OFF -DGMX_SIMD=AVX2_256 -DGMX_INSTALL_NBLIB_API=OFF
+    #      make -j $(nproc)
+    #      sudo make -j $(nproc) install
+    #      export gmxapi_ROOT=/usr/local/gromacs/
+
+    - name: Install Package
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[mysql]
+        pip install -r requirements.txt
+        airflow db init
+
+    - name: Run tests
+      run: |
+        pytest tests/replex.py

@@ -10,6 +10,7 @@ __all__ = (
     "update_gmxapi_input",
     "prepare_gmxapi_input",
     "branch_task",
+    "list_from_xcom",
     "branch_task_template",
     "run_if_needed",
     "run_if_false",
@@ -57,6 +58,7 @@ def _run_gmxapi(
     args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None
 ):
     import os
+    import shutil
     import gmxapi
     import logging
 
@@ -82,6 +84,8 @@ def _run_gmxapi(
     assert all(
         [os.path.exists(gmx.output.file[key].result()) for key in output_files.keys()]
     )
+    if not os.listdir(gmx.output.directory.result()):
+        shutil.rmtree(gmx.output.directory.result())  # delete if empty
     return gmx
 
 
@@ -168,7 +172,7 @@ def prepare_gmxapi_input(
                     args=args,
                     input_files=inputs,
                     output_files=output_files,
-                    output_dir=f"{output_dir}/step_{counter}/sim_{i}",
+                    output_dir=f"{output_dir}/sim_{i}/iteration_{counter}",
                     simulation_id=i,
                 )
             )

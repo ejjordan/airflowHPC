@@ -1,0 +1,23 @@
+{
+  "iteration": {
+    "3": [
+      {
+        "simulation_id": 0,
+        "state": 2
+      },
+      {
+        "simulation_id": 1,
+        "state": 5
+      },
+      {
+        "simulation_id": 2,
+        "state": 7
+      },
+      {
+        "simulation_id": 3,
+        "state": 4
+      }
+    ]
+  }
+}
+
