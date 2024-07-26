@@ -1,3 +1,4 @@
+from airflow import Dataset
 from airflow.decorators import task, task_group
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.operators.empty import EmptyOperator
@@ -11,6 +12,10 @@ __all__ = (
     "prepare_gmxapi_input",
     "branch_task",
     "list_from_xcom",
+    "list_from_xcom_dicts",
+    "dataset_from_xcom_dicts",
+    "xcom_lookup",
+    "json_from_dataset_path",
     "branch_task_template",
     "evaluate_template_truth",
     "run_if_needed",
@@ -236,6 +241,50 @@ def evaluate_template_truth(statement: str) -> str:
 @task
 def list_from_xcom(values):
     return list(values)
+
+
+@task
+def list_from_xcom_dicts(list_of_dicts, key):
+    return [d[key] for d in list_of_dicts]
+
+
+@task
+def dataset_from_xcom_dicts(output_dir: str, output_fn: str, list_of_dicts, key):
+    import os
+    import json
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    out_path = os.path.abspath(output_dir)
+    output_file = os.path.join(out_path, output_fn)
+    data = list()
+    for data_dict in list_of_dicts:
+        if key in data_dict:
+            data.append(data_dict[key])
+        else:
+            data.append(data_dict["outputs"][key])
+    with open(output_file, "w") as f:
+        json.dump(data, f, indent=2, separators=(",", ": "))
+    dataset = Dataset(uri=output_file)
+    return dataset
+
+
+@task
+def json_from_dataset_path(dataset_path: str):
+    import json
+
+    with open(dataset_path, "r") as f:
+        data = json.load(f)
+    return data
+
+
+@task
+def xcom_lookup(dag_id, task_id, key, **context):
+    task_instance = context["task_instance"]
+    xcom = task_instance.xcom_pull(
+        dag_id=dag_id, task_ids=task_id, key="outputs", include_prior_dates=True
+    )
+    return [d[key] for d in xcom]
 
 
 @task

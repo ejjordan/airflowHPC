@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Sequence, Union, Iterable
 
 from airflow.exceptions import AirflowException, AirflowSkipException
 
+from airflowHPC.dags.tasks import GmxapiInputHolder, GmxapiRunInfoHolder
 from airflowHPC.operators.resource_bash_operator import ResourceBashOperator
 
 if TYPE_CHECKING:
@@ -185,3 +186,25 @@ class ResourceGmxOperator(ResourceBashOperator):
         call.extend(self.flatten_dict(input_files))
         call.extend(self.flatten_dict(output_files))
         return " ".join(map(str, call))
+
+
+class ResourceGmxOperatorDataclass(ResourceGmxOperator):
+    def __init__(self, *, input_data: GmxapiInputHolder, **kwargs) -> None:
+        kwargs.update({"gmx_arguments": input_data["args"]})
+        kwargs.update({"input_files": input_data["input_files"]})
+        kwargs.update({"output_files": input_data["output_files"]})
+        kwargs.update({"output_dir": input_data["output_dir"]})
+        kwargs.update({"multiple_outputs": True})
+        kwargs.update({"show_return_value_in_logs": False})
+        super().__init__(
+            **kwargs,
+        )
+        self.input_data = input_data
+
+    def execute(self, context: Context):
+        from dataclasses import asdict
+
+        run_output = super().execute(context)
+        output = asdict(GmxapiRunInfoHolder(inputs=self.input_data, outputs=run_output))
+        self.log.info(f"Done. Returned value was: {output}")
+        return output

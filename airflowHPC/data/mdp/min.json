@@ -9,7 +9,5 @@
     "rvdw": 1.2,
     "vdw-modifier": "force-switch",
     "rvdw_switch": 1.0,
-    "dispcorr": "enerpres",
-    "coulombtype": "pme",
-    "fourierspacing": 0.15
+    "coulombtype": "pme"
 }
