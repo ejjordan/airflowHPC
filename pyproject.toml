@@ -19,7 +19,8 @@ mysql = [
     "apache-airflow[mysql]"
 ]
 postgres = [
-    "apache-airflow[postgres]"
+    "apache-airflow[postgres]",
+    "psycopg2"
 ]
 
 [project.urls]
