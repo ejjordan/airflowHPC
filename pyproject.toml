@@ -20,7 +20,7 @@ mysql = [
 ]
 postgres = [
     "apache-airflow[postgres]",
-    "psycopg2"
+    "psycopg2-binary"
 ]
 
 [project.urls]
