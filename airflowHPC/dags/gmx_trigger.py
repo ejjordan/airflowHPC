@@ -75,6 +75,7 @@ def run_iteration(
             "simulation_id": "simulation_id",
             "tpr": "-s",
             "xtc": "-x",
+            "gro": "-c",
         },
     )
     mdrun_input_list >> dataset_dict >> mdrun
@@ -112,7 +113,7 @@ with DAG(
     )
     mdp_sim = update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_sim_update")(
         mdp_json_file_path=input_mdp,
-        update_dict={"nsteps": 500},
+        update_dict={"nsteps": 10000},
     )
 
     run_iteration(
@@ -159,29 +160,31 @@ def gen_configurations(
     return configs
 
 
-@task(multiple_outputs=True)
-def next_iteration(params):
-    params["iteration_num"] += 1
-    return params
-
-
-def get_totaltime(tpr, xtc):
-    import MDAnalysis as mda
-
-    u = mda.Universe(tpr, xtc)
-    return u.trajectory.totaltime
-
-
 @task
 def simulation_time(files):
     import logging
+    import os
+    import MDAnalysis as mda
 
     sim_time: float = 0
     for out_file in files:
-        time = get_totaltime(out_file["tpr"], out_file["xtc"])
+        tpr, xtc = out_file["tpr"], out_file["xtc"]
+        if os.path.exists(tpr) and os.path.exists(xtc):
+            time = mda.Universe(tpr, xtc).trajectory.totaltime
+        else:
+            time = 0
         logging.info(f"Simulation time for {out_file['xtc']} is {time}")
         sim_time += time
     return sim_time
+
+
+@task
+def random_gro(files):
+    import random
+    import os
+
+    gro = os.path.abspath(random.choice(files)["gro"])
+    return {"directory": os.path.dirname(gro), "filename": os.path.basename(gro)}
 
 
 def get_execution_date(_, context):
@@ -210,6 +213,7 @@ with DAG(
         "num_sims": 2,
         "iteration_num": 1,
         "iterations_to_run": 2,
+        "branch_ps_wait_time": 81,
     },
 ) as caller_dag:
     num_lambdas = num_lambda_points()
@@ -250,14 +254,55 @@ with DAG(
     total_time = simulation_time.override(task_id="total_time")(
         files="{{ task_instance.xcom_pull(task_ids='wait_for_data', key='return_value') }}"
     )
-    run_steps >> wait_for_data >> total_time
+    do_separate_branch = evaluate_template_truth.override(
+        task_id="do_separate_branch", trigger_rule="none_failed"
+    )(
+        statement="{{ params.branch_ps_wait_time }} > {{ task_instance.xcom_pull(task_ids='total_time') }}"
+    )
+    separate_gro = random_gro.override(task_id="separate_gro")(
+        files="{{ task_instance.xcom_pull(task_ids='wait_for_data', key='return_value') }}"
+    )
+    separate_branch_params = {
+        "output_dir": "{{ params.output_dir }}/separate",
+        "output_name": "{{ params.output_name }}",
+        "inputs": {
+            "mdp": "{{ params.inputs.mdp }}",
+            "gro": separate_gro,
+            "top": "{{ params.inputs.top }}",
+        },
+        "num_sims": 2,
+        "iteration_num": 1,
+        "iterations_to_run": 2,
+        "branch_ps_wait_time": 500,
+    }
+    separate_branch = run_if_false.override(group_id="separate_branch")(
+        dag_id="gmx_triggerer",
+        dag_params=separate_branch_params,
+        truth_value=do_separate_branch,
+        wait_for_completion=False,
+    )
+    run_steps >> wait_for_data >> total_time >> separate_gro >> separate_branch
+    total_time >> do_separate_branch >> separate_branch
 
     do_next_iteration = evaluate_template_truth.override(
         task_id="do_next_iteration", trigger_rule="none_failed"
     )(statement="{{ params.iteration_num }} >= {{ params.iterations_to_run }}")
-    next_iteration_params = next_iteration.override(task_id="next_iteration_params")(
-        params="{{ params }}"
+    next_gro = random_gro.override(task_id="next_gro")(
+        files="{{ task_instance.xcom_pull(task_ids='wait_for_data', key='return_value') }}"
     )
+    next_iteration_params = {
+        "output_dir": "{{ params.output_dir }}",
+        "output_name": "{{ params.output_name }}",
+        "inputs": {
+            "mdp": "{{ params.inputs.mdp }}",
+            "gro": next_gro,
+            "top": "{{ params.inputs.top }}",
+        },
+        "num_sims": "{{ params.num_sims }}",
+        "iteration_num": "{{ params.iteration_num + 1 }}",
+        "iterations_to_run": "{{ params.iterations_to_run }}",
+        "branch_ps_wait_time": "{{ params.branch_ps_wait_time }}",
+    }
     next_iteration = run_if_false.override(group_id="next_iteration")(
         dag_id="gmx_triggerer",
         dag_params=next_iteration_params,
@@ -265,4 +310,5 @@ with DAG(
         wait_for_completion=False,
     )
 
-    run_steps >> wait_for_run >> do_next_iteration >> next_iteration
+    run_steps >> wait_for_run >> next_gro >> next_iteration
+    wait_for_run >> do_next_iteration >> next_iteration
