@@ -1,9 +1,18 @@
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.utils import timezone
-from airflowHPC.dags.tasks import get_file, run_if_false, evaluate_template_truth
+from airflowHPC.dags.tasks import (
+    get_file,
+    run_if_false,
+    evaluate_template_truth,
+    dict_from_xcom_dicts,
+)
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.sensors.external_task import ExternalTaskSensor
+from airflowHPC.operators.external_output_task import ExternalTaskOutputSensor
+from airflow.models import DagRun
+from airflow import settings
 
 
 @task_group
@@ -12,9 +21,6 @@ def run_iteration(
 ):
     from airflowHPC.operators.resource_gmx_operator import ResourceGmxOperatorDataclass
     from airflowHPC.dags.tasks import prepare_gmx_input_deep, update_gmxapi_input
-    import logging
-
-    logging.info(f"run_iteration: coul_lambda: {coul_lambda}")
 
     grompp_input_list = prepare_gmx_input_deep.override(task_id="grompp_input_list")(
         args=["grompp"],
@@ -43,7 +49,11 @@ def run_iteration(
         .partial(
             args=["mdrun", "-v", "-deffnm", output_name, "-ntomp", "2"],
             input_files_keys={"-s": "-o"},
-            output_files={"-c": f"{output_name}.gro", "-dhdl": "dhdl.xvg"},
+            output_files={
+                "-c": f"{output_name}.gro",
+                "-x": f"{output_name}.xtc",
+                "-dhdl": "dhdl.xvg",
+            },
         )
         .expand(gmxapi_output=grompp.output)
     )
@@ -58,7 +68,16 @@ def run_iteration(
         gmx_executable="gmx_mpi",
     ).expand(input_data=mdrun_input_list)
     grompp >> mdrun
-    return mdrun
+
+    dataset_dict = dict_from_xcom_dicts.override(task_id="make_dataset_dict")(
+        list_of_dicts="{{task_instance.xcom_pull(task_ids='run_iteration.mdrun_input_list')}}",
+        dict_structure={
+            "simulation_id": "simulation_id",
+            "tpr": "-s",
+            "xtc": "-x",
+        },
+    )
+    mdrun_input_list >> dataset_dict >> mdrun
 
 
 with DAG(
@@ -93,7 +112,7 @@ with DAG(
     )
     mdp_sim = update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_sim_update")(
         mdp_json_file_path=input_mdp,
-        update_dict={"nsteps": 10000},
+        update_dict={"nsteps": 500},
     )
 
     run_iteration(
@@ -112,7 +131,7 @@ with DAG(
 def num_lambda_points():
     import random
 
-    return random.randint(2, 4)
+    return random.randint(2, 3)
 
 
 @task
@@ -146,6 +165,36 @@ def next_iteration(params):
     return params
 
 
+def get_totaltime(tpr, xtc):
+    import MDAnalysis as mda
+
+    u = mda.Universe(tpr, xtc)
+    return u.trajectory.totaltime
+
+
+@task
+def simulation_time(files):
+    import logging
+
+    sim_time: float = 0
+    for out_file in files:
+        time = get_totaltime(out_file["tpr"], out_file["xtc"])
+        logging.info(f"Simulation time for {out_file['xtc']} is {time}")
+        sim_time += time
+    return sim_time
+
+
+def get_execution_date(_, context):
+    session = settings.Session()
+    dr = (
+        session.query(DagRun)
+        .filter(DagRun.dag_id == context["task"].external_dag_id)
+        .order_by(DagRun.execution_date.desc())
+        .first()
+    )
+    return dr.execution_date
+
+
 with DAG(
     "gmx_triggerer",
     start_date=timezone.utcnow(),
@@ -158,7 +207,7 @@ with DAG(
             "gro": {"directory": "ensemble_md", "filename": "sys.gro"},
             "top": {"directory": "ensemble_md", "filename": "sys.top"},
         },
-        "num_sims": 4,
+        "num_sims": 2,
         "iteration_num": 1,
         "iterations_to_run": 2,
     },
@@ -177,9 +226,31 @@ with DAG(
     run_steps = TriggerDagRunOperator.partial(
         task_id=f"triggering",
         trigger_dag_id="gmx_triggered",
-        wait_for_completion=True,
         poke_interval=2,
     ).expand(conf=configs_to_run)
+
+    wait_for_data = ExternalTaskOutputSensor(
+        task_id="wait_for_data",
+        external_dag_id="gmx_triggered",
+        external_task_id="run_iteration.make_dataset_dict",
+        execution_date_fn=get_execution_date,
+        mode="poke",
+        poke_interval=5,
+        check_existence=True,
+    )
+    wait_for_run = ExternalTaskSensor(
+        task_id="wait_for_mdrun",
+        external_dag_id="gmx_triggered",
+        external_task_group_id="run_iteration",
+        execution_date_fn=get_execution_date,
+        mode="poke",
+        poke_interval=5,
+        check_existence=True,
+    )
+    total_time = simulation_time.override(task_id="total_time")(
+        files="{{ task_instance.xcom_pull(task_ids='wait_for_data', key='return_value') }}"
+    )
+    run_steps >> wait_for_data >> total_time
 
     do_next_iteration = evaluate_template_truth.override(
         task_id="do_next_iteration", trigger_rule="none_failed"
@@ -194,4 +265,4 @@ with DAG(
         wait_for_completion=False,
     )
 
-    run_steps >> do_next_iteration >> next_iteration
+    run_steps >> wait_for_run >> do_next_iteration >> next_iteration
