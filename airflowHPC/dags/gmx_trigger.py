@@ -113,7 +113,7 @@ with DAG(
     )
     mdp_sim = update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_sim_update")(
         mdp_json_file_path=input_mdp,
-        update_dict={"nsteps": 10000},
+        update_dict={"nsteps": 12500},
     )
 
     run_iteration(
@@ -234,7 +234,7 @@ with DAG(
     ).expand(conf=configs_to_run)
 
     wait_for_data = ExternalTaskOutputSensor(
-        task_id="wait_for_data",
+        task_id="wait_for_data_paths",
         external_dag_id="gmx_triggered",
         external_task_id="run_iteration.make_dataset_dict",
         execution_date_fn=get_execution_date,
@@ -252,7 +252,7 @@ with DAG(
         check_existence=True,
     )
     total_time = simulation_time.override(task_id="total_time")(
-        files="{{ task_instance.xcom_pull(task_ids='wait_for_data', key='return_value') }}"
+        files="{{ task_instance.xcom_pull(task_ids='wait_for_data_paths', key='return_value') }}"
     )
     do_separate_branch = evaluate_template_truth.override(
         task_id="do_separate_branch", trigger_rule="none_failed"
@@ -260,7 +260,7 @@ with DAG(
         statement="{{ params.branch_ps_wait_time }} > {{ task_instance.xcom_pull(task_ids='total_time') }}"
     )
     separate_gro = random_gro.override(task_id="separate_gro")(
-        files="{{ task_instance.xcom_pull(task_ids='wait_for_data', key='return_value') }}"
+        files="{{ task_instance.xcom_pull(task_ids='wait_for_data_paths', key='return_value') }}"
     )
     separate_branch_params = {
         "output_dir": "{{ params.output_dir }}/separate",
@@ -272,7 +272,7 @@ with DAG(
         },
         "num_sims": 2,
         "iteration_num": 1,
-        "iterations_to_run": 2,
+        "iterations_to_run": 1,
         "branch_ps_wait_time": 500,
     }
     separate_branch = run_if_false.override(group_id="separate_branch")(
@@ -288,7 +288,7 @@ with DAG(
         task_id="do_next_iteration", trigger_rule="none_failed"
     )(statement="{{ params.iteration_num }} >= {{ params.iterations_to_run }}")
     next_gro = random_gro.override(task_id="next_gro")(
-        files="{{ task_instance.xcom_pull(task_ids='wait_for_data', key='return_value') }}"
+        files="{{ task_instance.xcom_pull(task_ids='wait_for_data_paths', key='return_value') }}"
     )
     next_iteration_params = {
         "output_dir": "{{ params.output_dir }}",
