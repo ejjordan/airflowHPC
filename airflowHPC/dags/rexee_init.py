@@ -46,7 +46,7 @@ with DAG(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
     expand_args = prepare_args_for_mdp_functions(
-        counter=counter,
+        counter=0,  # does not matter if mode=="initialize", as iteration_0 will be used anyway
         mode="initialize",
         num_simulations="{{ params.num_simulations }}",
     )
