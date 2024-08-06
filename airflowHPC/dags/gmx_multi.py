@@ -41,7 +41,7 @@ with DAG(
     )
     mdp_sim = update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_sim_update")(
         mdp_json_file_path=input_mdp,
-        update_dict={"nsteps": 500},
+        update_dict={"nsteps": 25000},
     )
     grompp_result = run_gmxapi.override(task_id="grompp")(
         args=["grompp"],
