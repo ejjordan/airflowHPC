@@ -46,6 +46,7 @@ with DAG(
         "output_dir": "outputs",
         "output_name": "sim",
         "output_dataset_structure": {},
+        "counter": 0,
     },
 ) as dag:
     gro = xcom_lookup.override(task_id="gro_from_xcom")(
@@ -69,7 +70,7 @@ with DAG(
         input_files={"-f": mdp, "-c": gro, "-p": top},
         output_files={"-o": "{{ params.output_name }}.tpr"},
         output_dir="{{ params.output_dir }}",
-        counter=0,
+        counter="{{ params.counter }}",
         num_simulations="{{ params.num_simulations }}",
     )
 

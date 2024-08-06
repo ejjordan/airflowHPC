@@ -87,6 +87,7 @@ with DAG(
             "dhdl": "-dhdl",
             "gro_path": "-c",
         },
+        "counter": 0,  # start from iteration_0
     }
     rexee_init_dag = TriggerDagRunOperator(
         task_id="rexee_init_dag",

@@ -62,7 +62,7 @@ with DAG(
 
     # Update MDP files for the next iteration (Note that here we update the counter first.)
     expand_args = prepare_args_for_mdp_functions(
-        counter="{{ params.last_iteration_num}}",
+        counter="{{ params.last_iteration_num }}",
         mode="update",
         num_simulations="{{ params.num_simulations }}",
     )
@@ -90,7 +90,7 @@ with DAG(
         mdp_path=mdp_updates_list,
         swap_pattern=swap_pattern,
         dhdl_store=dhdl_store,
-        iteration="{{ params.last_iteration_num}}",
+        iteration="{{ params.last_iteration_num }}",
     )
 
     this_iteration_num = increment_counter(output_dir="outputs")
@@ -119,6 +119,7 @@ with DAG(
             "dhdl": "-dhdl",
             "gro_path": "-c",
         },
+        "counter": "{{ params.last_iteration_num }}"
     }
     rexee_continue_dag = TriggerDagRunOperator(
         task_id="rexee_init_dag",
