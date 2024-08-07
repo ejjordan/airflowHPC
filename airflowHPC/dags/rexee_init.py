@@ -49,6 +49,7 @@ with DAG(
         counter=0,  # does not matter if mode=="initialize", as iteration_0 will be used anyway
         mode="initialize",
         num_simulations="{{ params.num_simulations }}",
+        output_dir="{{ params.output_dir }}",
     )
     mdp_inputs = (
         initialize_MDP.override(task_id="intialize_mdp")

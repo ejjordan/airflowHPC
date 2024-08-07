@@ -1,3 +1,4 @@
+import os
 from airflow import DAG
 from airflow.utils import timezone
 
@@ -24,17 +25,19 @@ with DAG(
 ) as dag:
     dag.doc = """This is a DAG for running iterations of a REXEE simulation."""
 
+    output_dir_abs = os.path.abspath("{{ params.output_dir }}")  # to ensure the trigger DAGs are run in the same folder
+
     initialize_rexee_params = {
         "num_simulations": "{{ params.num_simulations }}",
         "num_steps": "{{ params.num_steps }}",
         "num_states": "{{ params.num_states }}",
         "shift_range": "{{ params.shift_range }}",
-        "output_dir": "{{ params.output_dir }}",
+        "output_dir": output_dir_abs,
         "dhdl_store_dir": "{{ params.dhdl_store_dir }}",
         "dhdl_store_fn": "{{ params.dhdl_store_fn }}",
     }
     is_initialize_done = get_file.override(task_id="is_initialize_done")(
-        input_dir="{{ params.output_dir }}/{{ params.dhdl_store_dir }}",
+        input_dir=output_dir_abs+"/{{ params.dhdl_store_dir }}",
         file_name="{{ params.dhdl_store_fn }}",
         use_ref_data=False,
         check_exists=True,
@@ -47,7 +50,7 @@ with DAG(
     # Here we can be sure that there is a counter file
     last_iteration_num = read_counter.override(
         task_id="read_counter", trigger_rule="none_failed"
-    )("{{ params.output_dir }}")
+    )(output_dir_abs)
     continue_rexee_params = {
         "last_iteration_num": last_iteration_num,
         "num_iterations": "{{ params.num_iterations }}",
@@ -56,7 +59,7 @@ with DAG(
         "num_states": "{{ params.num_states }}",
         "shift_range": "{{ params.shift_range }}",
         "temperature": "{{ params.temperature }}",
-        "output_dir": "{{ params.output_dir }}",
+        "output_dir": output_dir_abs,
         "dhdl_store_dir": "{{ params.dhdl_store_dir }}",
         "dhdl_store_fn": "{{ params.dhdl_store_fn }}",
     }

@@ -65,6 +65,7 @@ with DAG(
         counter="{{ params.last_iteration_num }}",
         mode="update",
         num_simulations="{{ params.num_simulations }}",
+        output_dir="{{ params.output_dir }}"
     )
     mdp_updates = (
         update_MDP.override(task_id="update_mdp")
@@ -93,7 +94,7 @@ with DAG(
         iteration="{{ params.last_iteration_num }}",
     )
 
-    this_iteration_num = increment_counter(output_dir="outputs")
+    this_iteration_num = increment_counter(output_dir="{{ params.output_dir }}")
 
     rexee_continue_grompp_mdrun_params = {
         "inputs": {
