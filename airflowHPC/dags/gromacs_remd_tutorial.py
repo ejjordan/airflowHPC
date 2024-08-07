@@ -10,7 +10,7 @@ from airflowHPC.dags.tasks import (
     get_file,
     run_gmxapi,
     branch_task,
-    prepare_gmxapi_input,
+    prepare_gmx_input,
     run_gmxapi_dataclass,
     update_gmxapi_input,
 )
@@ -185,7 +185,7 @@ with DAG(
         update_dict=[{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}]
     )
     equil_output_dir = "equil"
-    grompp_input_list_equil = prepare_gmxapi_input(
+    grompp_input_list_equil = prepare_gmx_input(
         args=["grompp"],
         input_files={
             "-f": mdp_equil,
@@ -270,7 +270,7 @@ with DAG(
         update_dict=[{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}]
     )
     sim_output_dir = "sim"
-    grompp_input_list_sim = prepare_gmxapi_input(
+    grompp_input_list_sim = prepare_gmx_input(
         args=["grompp"],
         input_files={
             "-f": mdp_sim,

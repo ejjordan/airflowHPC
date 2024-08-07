@@ -6,7 +6,7 @@ from airflow.utils import timezone
 from airflowHPC.dags.tasks import (
     get_file,
     run_gmxapi_dataclass,
-    prepare_gmxapi_input,
+    prepare_gmx_input,
     unpack_ref_t,
 )
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -133,7 +133,7 @@ with DAG(
         .partial(mdp_json_file_path=mdp_json_sim)
         .expand(update_dict=ref_temps)
     )
-    grompp_input_list_sim = prepare_gmxapi_input(
+    grompp_input_list_sim = prepare_gmx_input(
         args=["grompp"],
         input_files={
             "-f": mdp_sim,
