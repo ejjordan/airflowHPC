@@ -11,25 +11,6 @@ STATE_RANGES = [
 ]
 
 
-@task.branch
-def check_condition(counter, num_iterations):
-    import logging
-
-    logging.info(f"check_condition: counter {counter} iterations {num_iterations}")
-    if counter < num_iterations:
-        return "trigger_self"
-    else:
-        return "run_complete"
-
-
-def get_dhdl(result):
-    return {
-        "simulation_id": result["inputs"]["simulation_id"],
-        "dhdl": result["outputs"]["-dhdl"],
-        "gro_path": result["outputs"]["-c"],
-    }
-
-
 @task
 def initialize_MDP(
     template_mdp,
@@ -84,11 +65,11 @@ def initialize_MDP(
 
 
 @task
-def prepare_args_for_mdp_functions(counter: int, mode: str, num_simulations: int):
+def prepare_args_for_mdp_functions(counter: int, mode: str, num_simulations: int, output_dir: str):    
     if mode == "initialize":
         # For initializing MDP files for the first iteration
         expand_args = [
-            {"simulation_id": i, "output_dir": f"outputs/sim_{i}/iteration_1"}
+            {"simulation_id": i, "output_dir": f"{output_dir}/sim_{i}/iteration_0"}
             for i in range(num_simulations)
         ]
     elif mode == "update":
@@ -96,8 +77,8 @@ def prepare_args_for_mdp_functions(counter: int, mode: str, num_simulations: int
         expand_args = [
             {
                 "simulation_id": i,
-                "template": f"outputs/sim_{i}/iteration_{counter}/expanded.mdp",
-                "output_dir": f"outputs/sim_{i}/iteration_{counter+1}",
+                "template": f"{output_dir}/sim_{i}/iteration_{counter-1}/expanded.mdp",
+                "output_dir": f"{output_dir}/sim_{i}/iteration_{counter}",
             }
             for i in range(num_simulations)
         ]
@@ -250,7 +231,7 @@ def calc_prob_acc(
     new_state_1 = states[swap[0]] - shifts[swap[1]]
 
     logging.info(
-        f"old_state_0: {old_state_0}, old_state_1: {old_state_1}, new_state_0: {new_state_0}, new_state_1: {new_state_1}"
+        f"(Local state indices) old_state_0: {old_state_0}, old_state_1: {old_state_1}, new_state_0: {new_state_0}, new_state_1: {new_state_1}"
     )
 
     kT = 1.380649e-23 * 6.0221408e23 * temperature / 1000
@@ -403,12 +384,10 @@ def get_swaps(
     return swap_pattern
 
 
-@task
+@task(multiple_outputs=True)
 def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_store, iteration):
     import json
     import logging
-    from dataclasses import asdict
-    from airflowHPC.dags.tasks import GmxapiInputHolder
 
     with open(dhdl_store.uri, "r") as f:
         dhdl_dict = json.load(f)
@@ -423,65 +402,8 @@ def prepare_next_step(top_path, mdp_path, swap_pattern, dhdl_store, iteration):
     gro_list = [
         dhdl_info[i]["gro"] for i in swap_pattern if dhdl_info[i]["simulation_id"] == i
     ]
-
-    next_step_input = []
-
-    for i in range(len(swap_pattern)):
-        if isinstance(top_path, list):
-            top = top_path[i]
-        else:
-            top = top_path
-        if isinstance(mdp_path, list):
-            mdp = mdp_path[i]
-        else:
-            mdp = mdp_path
-
-        next_step_input.append(
-            asdict(
-                GmxapiInputHolder(
-                    args=["grompp"],
-                    input_files={"-f": mdp, "-c": gro_list[i], "-p": top},
-                    output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
-                    output_dir=f"outputs/sim_{i}/iteration_{iteration}",
-                    simulation_id=i,
-                )
-            )
-        )
+    next_step_input = {"gro": gro_list, "top": top_path, "mdp": mdp_path}
     return next_step_input
-
-
-@task_group
-def run_iteration(grompp_input_list, shift_range: int):
-    from airflowHPC.dags.tasks import run_gmxapi_dataclass, update_gmxapi_input
-
-    grompp_result = run_gmxapi_dataclass.override(
-        task_id="grompp", max_active_tis_per_dagrun=8
-    ).expand(input_data=grompp_input_list)
-    mdrun_input = (
-        update_gmxapi_input.override(task_id="mdrun_prepare")
-        .partial(
-            args=["mdrun"],
-            input_files_keys={"-s": "-o"},
-            output_files={
-                "-dhdl": "dhdl.xvg",
-                "-c": "result.gro",
-                "-x": "result.xtc",
-                "-g": "md.log",
-                "-e": "ener.edr",
-                "-cpo": "state.cpt",
-            },
-        )
-        .expand(gmxapi_output=grompp_result)
-    )
-
-    mdrun_result = run_gmxapi_dataclass.override(task_id="mdrun").expand(
-        input_data=mdrun_input
-    )
-    dhdl = mdrun_result.map(get_dhdl)
-    dhdl_result = extract_final_dhdl_info.partial(shift_range=shift_range).expand(
-        result=dhdl
-    )
-    return dhdl_result
 
 
 @task(max_active_tis_per_dag=1)
@@ -516,6 +438,6 @@ def read_counter(input_dir):
         with open(counter_file, "r") as f:
             counter = int(f.read())
     else:
-        raise ValueError("No counter.txt found!")
+        raise ValueError(f"{counter_file} not found!")
 
     return counter
