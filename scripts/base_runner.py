@@ -7,7 +7,7 @@ from airflow.models import DagBag
 from airflow.configuration import conf
 from airflow import settings
 
-from airflowHPC.executors.radical_local_executor import RadicalLocalExecutor
+from airflowHPC.executors.radical_executor import RadicalExecutor
 
 
 conf.set(
