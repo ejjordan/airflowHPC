@@ -21,44 +21,38 @@ import radical.utils as ru
 
 class ResourceRCTOperator(BaseOperator):
     template_fields: Sequence[str] = (
-        "executable",
-        "arguments",
+        "gmx_executable",
+        "gmx_arguments",
         "input_files",
         "output_files",
         "output_dir",
-        "stdin",
-        "env",
     )
     template_fields_renderers = {
-        "executable": "bash",
-        "arguments": "py",
+        "gmx_executable": "bash",
+        "gmx_arguments": "py",
         "input_files": "py",
         "output_files": "py",
         "output_dir": "py",
-        "env": "json",
     }
     ui_color = "#f0ede4"
-
-  # partial: Callable[..., OperatorPartial] = PoolPartialDescriptor()  # type: ignore
 
     def __init__(
         self,
         *,
-        executable: str | None = None,
-        arguments: list,
+        gmx_executable: str | None = None,
+        gmx_arguments: list,
         input_files: dict,
         output_files: dict,
         output_dir: str,
-        stdin=None,
+        show_return_value_in_logs: bool = True,
         **kwargs,
     ) -> None:
         self.log.info(f"=== ResourceRCTOperator: __init__ {kwargs}")
-        self.stdin=stdin  # FIXME: ?
-        self.env=None  # FIXME: ?
+      # kwargs.update({"cwd": output_dir})
         super().__init__(**kwargs)
         self.config = kwargs.get("executor_config", {})
-        self.executable = executable
-        self.arguments = arguments
+        self.gmx_executable = gmx_executable
+        self.gmx_arguments = gmx_arguments
         self.input_files = input_files
         self.output_files = output_files
         self.output_dir = output_dir
@@ -88,12 +82,12 @@ class ResourceRCTOperator(BaseOperator):
             for k, v in self.output_files.items()
         }
         self.log.info(f"mpi_ranks   : {self.config['mpi_ranks']}")
-        self.log.info(f"executable  : {self.executable}")
-        self.log.info(f"arguments   : {self.arguments}")
+        self.log.info(f"gmx_executable  : {self.gmx_executable}")
+        self.log.info(f"gmx_arguments   : {self.gmx_arguments}")
         self.log.info(f"input_files : {self.input_files}")
         self.log.info(f"output_files: {output_files_paths}")
 
-        args = self.arguments
+        args = self.gmx_arguments
         for k,v in self.input_files.items():
             args += [k, v]
 
@@ -101,7 +95,7 @@ class ResourceRCTOperator(BaseOperator):
             args += [k, v]
 
         td = rp.TaskDescription({
-                'executable': self.executable,
+                'executable': self.gmx_executable,
                 'arguments': args,
                 'ranks': self.config['mpi_ranks'],
               # 'input_staging': self.input_files,
@@ -150,7 +144,7 @@ class ResourceRCTOperator(BaseOperator):
 
 class ResourceRCTOperatorDataclass(ResourceRCTOperator):
     def __init__(self, *, input_data: GmxapiInputHolder, **kwargs) -> None:
-        kwargs.update({"arguments": input_data["args"]})
+        kwargs.update({"gmx_arguments": input_data["args"]})
         kwargs.update({"input_files": input_data["input_files"]})
         kwargs.update({"output_files": input_data["output_files"]})
         kwargs.update({"output_dir": input_data["output_dir"]})

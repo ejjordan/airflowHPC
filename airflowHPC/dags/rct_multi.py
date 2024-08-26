@@ -50,7 +50,7 @@ with DAG(
         output_dir="{{ params.output_dir }}",
     )
     outputs_dirs = outputs_list.override(task_id="get_output_dirs")()
-    mdrun_result = ResourceRCTOperator(
+    mdrun_result = ResourceRCTOperator.partial(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 4,
@@ -58,31 +58,30 @@ with DAG(
             "gpus": 0,
             "gpu_type": None,
         },
-        executable="gmx_mpi",
-        arguments=["mdrun", "-ntomp", "2"],
-        output_dir="output",  # FIXME
+        gmx_executable="gmx_mpi",
+        gmx_arguments=["mdrun", "-ntomp", "2"],
         input_files={"-s": grompp_result["-o"]},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
-    )
-    # """
-    # from airflowHPC.operators.mpi_bash_operator import MPIBashOperator
-    # mdrun_result = MPIBashOperator.partial(
-    #     task_id="mdrun",
-    #     mpi_ranks=4,
-    #     cpus_per_task=2,
-    #     bash_command=f"gmx_mpi mdrun -ntomp 2 -s {grompp_result['-o']} -c result.gro -x result.xtc",
-    # ).expand(cwd=outputs_dirs)
-    # """
-    # """
-    # from airflowHPC.operators.mpi_gmx_bash_operator import MPIGmxBashOperator
-    # mdrun_result = MPIGmxBashOperator.partial(
-    #     task_id="mdrun",
-    #     mpi_ranks=4,
-    #     cpus_per_task=2,
-    #     gmx_executable="gmx_mpi",
-    #     gmx_arguments=["mdrun", "-ntomp", "2"],
-    #     input_files={"-s": grompp_result["-o"]},
-    #     output_files={"-c": "result.gro", "-x": "result.xtc"},
-    # ).expand(output_dir=outputs_dirs)
-    # """
+    ).expand(output_dir=outputs_dirs)
+    """
+    from airflowHPC.operators.mpi_bash_operator import MPIBashOperator
+    mdrun_result = MPIBashOperator.partial(
+        task_id="mdrun",
+        mpi_ranks=4,
+        cpus_per_task=2,
+        bash_command=f"gmx_mpi mdrun -ntomp 2 -s {grompp_result['-o']} -c result.gro -x result.xtc",
+    ).expand(cwd=outputs_dirs)
+    """
+    """
+    from airflowHPC.operators.mpi_gmx_bash_operator import MPIGmxBashOperator
+    mdrun_result = MPIGmxBashOperator.partial(
+        task_id="mdrun",
+        mpi_ranks=4,
+        cpus_per_task=2,
+        gmx_executable="gmx_mpi",
+        gmx_arguments=["mdrun", "-ntomp", "2"],
+        input_files={"-s": grompp_result["-o"]},
+        output_files={"-c": "result.gro", "-x": "result.xtc"},
+    ).expand(output_dir=outputs_dirs)
+    """
     grompp_result >> mdrun_result
