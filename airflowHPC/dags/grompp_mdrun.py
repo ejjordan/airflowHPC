@@ -7,7 +7,7 @@ from airflowHPC.dags.tasks import (
     xcom_lookup,
     dataset_from_xcom_dicts,
 )
-from airflowHPC.operators.resource_rct_operator import ResourceRCTOperatorDataclass
+from airflowHPC.operators.resource_gmx_operator import ResourceGmxOperatorDataclass
 
 
 with DAG(
@@ -74,7 +74,7 @@ with DAG(
         num_simulations="{{ params.num_simulations }}",
     )
 
-    grompp = ResourceRCTOperatorDataclass.partial(
+    grompp = ResourceGmxOperatorDataclass.partial(
         task_id="grompp",
         executor_config={
             "mpi_ranks": 1,
@@ -82,7 +82,7 @@ with DAG(
             "gpus": 0,
             "gpu_type": None,
         },
-        executable="gmx_mpi",
+        gmx_executable="gmx_mpi",
     ).expand(input_data=grompp_input_list)
     grompp_input_list >> grompp
 
@@ -95,7 +95,7 @@ with DAG(
         )
         .expand(gmxapi_output=grompp.output)
     )
-    mdrun = ResourceRCTOperatorDataclass.partial(
+    mdrun = ResourceGmxOperatorDataclass.partial(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 1,
@@ -103,7 +103,7 @@ with DAG(
             "gpus": 0,
             "gpu_type": None,
         },
-        executable="gmx_mpi",
+        gmx_executable="gmx_mpi",
     ).expand(input_data=mdrun_input_list)
     dataset = dataset_from_xcom_dicts.override(task_id="make_dataset")(
         output_dir="{{ params.output_dir }}",
