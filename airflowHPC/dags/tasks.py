@@ -1,3 +1,4 @@
+from airflow import Dataset
 from airflow.decorators import task, task_group
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.operators.empty import EmptyOperator
@@ -11,6 +12,8 @@ __all__ = (
     "prepare_gmxapi_input",
     "branch_task",
     "list_from_xcom",
+    "dataset_from_xcom_dicts",
+    "json_from_dataset_path",
     "branch_task_template",
     "evaluate_template_truth",
     "run_if_needed",
@@ -236,6 +239,64 @@ def evaluate_template_truth(statement: str) -> str:
 @task
 def list_from_xcom(values):
     return list(values)
+
+
+@task
+def dataset_from_xcom_dicts(
+    output_dir: str, output_fn: str, list_of_dicts, dataset_structure
+):
+    import os
+    import json
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    out_path = os.path.abspath(output_dir)
+    output_file = os.path.join(out_path, output_fn)
+    output_data = list()
+    for data_dict in list_of_dicts:
+        data = dict()
+        for title, key_name in dataset_structure.items():
+            if key_name in data_dict:
+                data[title] = data_dict[key_name]
+            elif "outputs" in data_dict and key_name in data_dict["outputs"]:
+                data[title] = data_dict["outputs"][key_name]
+            elif "inputs" in data_dict and key_name in data_dict["inputs"]:
+                data[title] = data_dict["inputs"][key_name]
+            else:
+                raise KeyError(f"Key {key_name} not found in {data_dict}")
+        output_data.append(data)
+    with open(output_file, "w") as f:
+        json.dump(output_data, f, indent=2, separators=(",", ": "))
+    dataset = Dataset(uri=output_file)
+    return dataset
+
+
+@task
+def json_from_dataset_path(dataset_path: str):
+    import json
+
+    with open(dataset_path, "r") as f:
+        data = json.load(f)
+    return data
+
+
+@task
+def xcom_lookup(dag_id, task_id, key, **context):
+    import logging
+
+    logging.info(f"Looking up '{key}' from '{task_id}' in '{dag_id}'")
+    task_instance = context["task_instance"]
+    logging.info(
+        f"xcom values: {task_instance.xcom_pull(dag_id=dag_id, task_ids=task_id, include_prior_dates=True)}"
+    )
+    if key:
+        logging.info(
+            f"xcom key value: {task_instance.xcom_pull(dag_id=dag_id, task_ids=task_id, key=key, include_prior_dates=True)}"
+        )
+    xcom = task_instance.xcom_pull(
+        dag_id=dag_id, task_ids=task_id, key=key, include_prior_dates=True
+    )
+    return xcom
 
 
 @task

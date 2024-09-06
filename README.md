@@ -143,7 +143,7 @@ to run the script.
 
 ### Running from the command line
 
-After conviguring a python virtual environment and database as described above,
+After configuring a python virtual environment and database as described above,
 you can run a DAG using the
 [Airflow CLI](https://airflow.apache.org/docs/apache-airflow/stable/howto/usage-cli.html).
 Note that you must configure the airflow environment variables as described above so

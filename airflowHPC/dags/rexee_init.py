@@ -1,18 +1,19 @@
 from airflow import DAG
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
     get_file,
-    prepare_gmxapi_input,
     list_from_xcom,
+    json_from_dataset_path,
 )
 from airflowHPC.dags.replex import (
     prepare_args_for_mdp_functions,
     initialize_MDP,
-    run_iteration,
     reduce_dhdl,
     store_dhdl_results,
     increment_counter,
+    extract_final_dhdl_info,
 )
 
 with DAG(
@@ -45,9 +46,10 @@ with DAG(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
     expand_args = prepare_args_for_mdp_functions(
-        counter=counter,
+        counter=0,  # does not matter if mode=="initialize", as iteration_0 will be used anyway
         mode="initialize",
         num_simulations="{{ params.num_simulations }}",
+        output_dir="{{ params.output_dir }}",
     )
     mdp_inputs = (
         initialize_MDP.override(task_id="intialize_mdp")
@@ -61,17 +63,52 @@ with DAG(
         .expand(expand_args=expand_args)
     )
     mdp_inputs_list = list_from_xcom.override(task_id="get_mdp_input_list")(mdp_inputs)
-    grompp_input_list = prepare_gmxapi_input(
-        args=["grompp"],
-        input_files={"-f": mdp_inputs_list, "-c": input_gro, "-p": input_top},
-        output_files={"-o": "run.tpr", "-po": "mdout.mdp"},
-        output_dir="{{ params.output_dir }}",
-        counter=counter,
-        num_simulations="{{ params.num_simulations }}",
+
+    rexee_init_grompp_mdrun_params = {
+        "inputs": {
+            "gro": {
+                "task_id": "get_gro",
+                "key": None,
+            },
+            "top": {
+                "task_id": "get_top",
+                "key": None,
+            },
+            "mdp": {
+                "task_id": "get_mdp_input_list",
+                "key": "return_value",
+            },
+            "parent_dag_id": dag.dag_id,
+        },
+        "num_simulations": "{{ params.num_simulations }}",
+        "output_name": "rexee_init",
+        "output_dir": "{{ params.output_dir }}",
+        "output_dataset_structure": {
+            "simulation_id": "simulation_id",
+            "dhdl": "-dhdl",
+            "gro_path": "-c",
+        },
+        "counter": 0,  # start from iteration_0
+    }
+    rexee_init_dag = TriggerDagRunOperator(
+        task_id="rexee_init_dag",
+        trigger_dag_id="grompp_mdrun",
+        poke_interval=1,
+        conf=rexee_init_grompp_mdrun_params,
+        wait_for_completion=True,
     )
-    dhdl_results = run_iteration(
-        grompp_input_list=grompp_input_list, shift_range="{{ params.shift_range }}"
+    input_gro >> rexee_init_dag
+    input_top >> rexee_init_dag
+    mdp_inputs_list >> rexee_init_dag
+
+    dhdl = json_from_dataset_path.override(task_id="dhdl_results")(
+        dataset_path="{{ params.output_dir }}/"
+        + f"{rexee_init_grompp_mdrun_params['output_name']}.json",
     )
+    rexee_init_dag >> dhdl
+    dhdl_results = extract_final_dhdl_info.partial(
+        shift_range="{{ params.shift_range }}"
+    ).expand(result=dhdl)
     dhdl_dict = reduce_dhdl(
         dhdl=dhdl_results, iteration=counter
     )  # key: iteration number; value: a list of dictionaries with keys like simulation_id, state, and gro
