@@ -41,10 +41,18 @@ with DAG(
     )
     mdp_sim = update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_sim_update")(
         mdp_json_file_path=input_mdp,
-        update_dict={"nsteps": 25000},
+        update_dict={"nsteps": 10000},
     )
-    grompp_result = run_gmxapi.override(task_id="grompp")(
-        args=["grompp"],
+    grompp_result = ResourceGmxOperator(
+        task_id="grompp",
+        executor_config={
+            "mpi_ranks": 1,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+        gmx_arguments=["grompp"],
         input_files={"-f": mdp_sim, "-c": input_gro, "-p": input_top},
         output_files={"-o": "run.tpr"},
         output_dir="{{ params.output_dir }}",
@@ -60,7 +68,7 @@ with DAG(
         },
         gmx_executable="gmx_mpi",
         gmx_arguments=["mdrun", "-ntomp", "2"],
-        input_files={"-s": grompp_result["-o"]},
+        input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
     ).expand(output_dir=outputs_dirs)
     """

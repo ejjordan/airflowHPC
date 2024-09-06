@@ -1,8 +1,5 @@
 alchemlyb
-dill
 ensemble_md
 #gmxapi
-h5py
 mdanalysis
 pytest
-zmq
