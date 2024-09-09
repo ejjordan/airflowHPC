@@ -70,8 +70,8 @@ def get_provider_info():
             }
         ],
         "executors": [
-            "airflowHPC.executors.radical_executor.RadicalExecutor",
-            "airflowHPC.executors.zmq_sequential_executor.ZMQSequentialExecutor",
+            "airflowHPC.executors.radical_local_executor.RadicalLocalExecutor",
+            "airflowHPC.executors.radical_local_executor.RadicalExecutor",
             "airflowHPC.executors.test_executor.TestExecutor",
             "airflowHPC.executors.resource_executor.ResourceExecutor",
         ],
