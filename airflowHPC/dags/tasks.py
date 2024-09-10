@@ -3,6 +3,7 @@ from airflow.decorators import task, task_group
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.operators.empty import EmptyOperator
 from dataclasses import dataclass
+from typing import Union
 
 __all__ = (
     "get_file",
@@ -189,8 +190,8 @@ def prepare_gmx_input(
     input_files: dict,
     output_files: dict,
     output_dir: str,
-    counter: int,
-    num_simulations: int,
+    counter: Union[int, str],
+    num_simulations: Union[int, str],
 ):
     return _prepare_gmx_input(
         args=args,

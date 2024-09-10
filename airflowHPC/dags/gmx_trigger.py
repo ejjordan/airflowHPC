@@ -250,6 +250,7 @@ with DAG(
         mode="poke",
         poke_interval=5,
         check_existence=True,
+        failed_states=["failed"],
     )
     total_time = simulation_time.override(task_id="total_time")(
         files="{{ task_instance.xcom_pull(task_ids='wait_for_data_paths', key='return_value') }}"
