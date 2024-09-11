@@ -46,6 +46,7 @@ with DAG(
         "output_dir": "outputs",
         "output_name": "sim",
         "output_dataset_structure": {},
+        "counter": 0,
     },
 ) as dag:
     gro = xcom_lookup.override(task_id="gro_from_xcom")(

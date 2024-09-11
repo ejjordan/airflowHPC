@@ -65,11 +65,11 @@ def initialize_MDP(
 
 
 @task
-def prepare_args_for_mdp_functions(counter: int, mode: str, num_simulations: int):
+def prepare_args_for_mdp_functions(counter: int, mode: str, num_simulations: int, output_dir: str):    
     if mode == "initialize":
         # For initializing MDP files for the first iteration
         expand_args = [
-            {"simulation_id": i, "output_dir": f"outputs/sim_{i}/iteration_1"}
+            {"simulation_id": i, "output_dir": f"{output_dir}/sim_{i}/iteration_0"}
             for i in range(num_simulations)
         ]
     elif mode == "update":
@@ -77,8 +77,8 @@ def prepare_args_for_mdp_functions(counter: int, mode: str, num_simulations: int
         expand_args = [
             {
                 "simulation_id": i,
-                "template": f"outputs/sim_{i}/iteration_{counter}/expanded.mdp",
-                "output_dir": f"outputs/sim_{i}/iteration_{counter+1}",
+                "template": f"{output_dir}/sim_{i}/iteration_{counter-1}/expanded.mdp",
+                "output_dir": f"{output_dir}/sim_{i}/iteration_{counter}",
             }
             for i in range(num_simulations)
         ]
@@ -231,7 +231,7 @@ def calc_prob_acc(
     new_state_1 = states[swap[0]] - shifts[swap[1]]
 
     logging.info(
-        f"old_state_0: {old_state_0}, old_state_1: {old_state_1}, new_state_0: {new_state_0}, new_state_1: {new_state_1}"
+        f"(Local state indices) old_state_0: {old_state_0}, old_state_1: {old_state_1}, new_state_0: {new_state_0}, new_state_1: {new_state_1}"
     )
 
     kT = 1.380649e-23 * 6.0221408e23 * temperature / 1000
@@ -438,6 +438,6 @@ def read_counter(input_dir):
         with open(counter_file, "r") as f:
             counter = int(f.read())
     else:
-        raise ValueError("No counter.txt found!")
+        raise ValueError(f"{counter_file} not found!")
 
     return counter

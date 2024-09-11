@@ -46,9 +46,10 @@ with DAG(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
     expand_args = prepare_args_for_mdp_functions(
-        counter=counter,
+        counter=0,  # does not matter if mode=="initialize", as iteration_0 will be used anyway
         mode="initialize",
         num_simulations="{{ params.num_simulations }}",
+        output_dir="{{ params.output_dir }}",
     )
     mdp_inputs = (
         initialize_MDP.override(task_id="intialize_mdp")
@@ -87,6 +88,7 @@ with DAG(
             "dhdl": "-dhdl",
             "gro_path": "-c",
         },
+        "counter": 0,  # start from iteration_0
     }
     rexee_init_dag = TriggerDagRunOperator(
         task_id="rexee_init_dag",
