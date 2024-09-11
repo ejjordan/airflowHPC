@@ -3,16 +3,18 @@ from airflow.decorators import task, task_group
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.operators.empty import EmptyOperator
 from dataclasses import dataclass
+from typing import Union
 
 __all__ = (
     "get_file",
     "run_gmxapi",
     "run_gmxapi_dataclass",
     "update_gmxapi_input",
-    "prepare_gmxapi_input",
+    "prepare_gmx_input",
     "branch_task",
     "list_from_xcom",
     "dataset_from_xcom_dicts",
+    "dict_from_xcom_dicts",
     "json_from_dataset_path",
     "branch_task_template",
     "evaluate_template_truth",
@@ -145,20 +147,37 @@ def update_gmxapi_input(
 
 
 @task
-def prepare_gmxapi_input(
+def prepare_gmx_input(
     args: list,
     input_files: dict,
     output_files: dict,
-    output_dir: str,
-    counter: int,
-    num_simulations: int,
+    output_path_parts: list,
+    num_simulations: Union[int, str],
 ):
+    """
+    Prepare a list of GmxapiInputHolder objects for running multiple simulations.
+
+    Parameters
+    ----------
+    args : list
+        The arguments to pass to the gmxapi command.
+    input_files : dict
+        The input files to pass to the gmxapi command.
+    output_files : dict
+        The output files to pass to the gmxapi command.
+    output_path_parts : list
+        The parts of the output path to join together.
+        Allows for flexible naming of output directories.
+        The only constraint is that the simulation_id is appended to the end of the final element.
+    num_simulations : int or str
+    """
     import os
     from dataclasses import asdict
     from copy import deepcopy
     from collections.abc import Iterable
 
     inputHolderList = []
+    output_dir = "/".join(output_path_parts)
 
     for i in range(num_simulations):
         inputs = deepcopy(input_files)
@@ -173,7 +192,7 @@ def prepare_gmxapi_input(
                     args=args,
                     input_files=inputs,
                     output_files=output_files,
-                    output_dir=f"{output_dir}/sim_{i}/iteration_{counter}",
+                    output_dir=f"{output_dir}{i}",
                     simulation_id=i,
                 )
             )
@@ -262,6 +281,10 @@ def dataset_from_xcom_dicts(
                 data[title] = data_dict["outputs"][key_name]
             elif "inputs" in data_dict and key_name in data_dict["inputs"]:
                 data[title] = data_dict["inputs"][key_name]
+            elif (
+                "inputs" in data_dict and key_name in data_dict["inputs"]["input_files"]
+            ):
+                data[title] = data_dict["inputs"]["input_files"][key_name]
             else:
                 raise KeyError(f"Key {key_name} not found in {data_dict}")
         output_data.append(data)
@@ -269,6 +292,40 @@ def dataset_from_xcom_dicts(
         json.dump(output_data, f, indent=2, separators=(",", ": "))
     dataset = Dataset(uri=output_file)
     return dataset
+
+
+@task
+def dict_from_xcom_dicts(list_of_dicts, dict_structure):
+    import os
+
+    output_data = list()
+    for data_dict in list_of_dicts:
+        data = dict()
+        for title, key_name in dict_structure.items():
+            if key_name in data_dict:
+                data[title] = data_dict[key_name]
+            elif "outputs" in data_dict and key_name in data_dict["outputs"]:
+                if not os.path.isabs(data_dict["outputs"][key_name]):
+                    data[title] = os.path.join(
+                        data_dict["output_dir"], data_dict["outputs"][key_name]
+                    )
+                else:
+                    data[title] = data_dict["outputs"][key_name]
+            elif "inputs" in data_dict and key_name in data_dict["inputs"]:
+                data[title] = data_dict["inputs"][key_name]
+            elif "input_files" in data_dict and key_name in data_dict["input_files"]:
+                data[title] = data_dict["input_files"][key_name]
+            elif "output_files" in data_dict and key_name in data_dict["output_files"]:
+                if not os.path.isabs(data_dict["output_files"][key_name]):
+                    data[title] = os.path.join(
+                        data_dict["output_dir"], data_dict["output_files"][key_name]
+                    )
+                else:
+                    data[title] = data_dict["output_files"][key_name]
+            else:
+                raise KeyError(f"Key {key_name} not found in {data_dict}")
+        output_data.append(data)
+    return output_data
 
 
 @task
