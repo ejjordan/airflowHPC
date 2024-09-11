@@ -241,6 +241,7 @@ with DAG(
         mode="poke",
         poke_interval=5,
         check_existence=True,
+        failed_states=["failed", "upstream_failed"],
     )
     wait_for_run = ExternalTaskSensor(
         task_id="wait_for_mdrun",
@@ -250,7 +251,7 @@ with DAG(
         mode="poke",
         poke_interval=5,
         check_existence=True,
-        failed_states=["failed"],
+        failed_states=["failed", "upstream_failed"],
     )
     total_time = simulation_time.override(task_id="total_time")(
         files="{{ task_instance.xcom_pull(task_ids='wait_for_data_paths', key='return_value') }}"
@@ -312,4 +313,5 @@ with DAG(
     )
 
     run_steps >> wait_for_run >> next_gro >> next_iteration
+    wait_for_data >> next_gro
     wait_for_run >> do_next_iteration >> next_iteration
