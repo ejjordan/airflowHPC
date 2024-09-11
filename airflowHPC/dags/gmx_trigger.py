@@ -26,9 +26,12 @@ def run_iteration(
         args=["grompp"],
         input_files={"-f": mdp, "-c": gro, "-p": top},
         output_files={"-o": f"{output_name}.tpr"},
-        output_dir_outer=output_dir,
-        output_dir_inner=f"lambda_{coul_lambda}",
-        counter=iteration_num,
+        output_path_parts=[
+            output_dir,
+            f"iteration_{iteration_num}",
+            f"lambda_{coul_lambda}",
+            "sim_",
+        ],
         num_simulations=num_simulations,
     )
 

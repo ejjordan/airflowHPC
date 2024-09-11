@@ -209,20 +209,37 @@ def prepare_gmx_input_deep(
     args: list,
     input_files: dict,
     output_files: dict,
-    output_dir_outer: str,
-    output_dir_inner: str,
-    counter: int,
+    output_path_parts: list,
     num_simulations: int,
 ):
-    return _prepare_gmx_input(
-        args=args,
-        input_files=input_files,
-        output_files=output_files,
-        output_dir_outer=output_dir_outer,
-        output_dir_inner=output_dir_inner,
-        counter=counter,
-        num_simulations=num_simulations,
-    )
+    import os
+    from dataclasses import asdict
+    from copy import deepcopy
+    from collections.abc import Iterable
+
+    inputHolderList = []
+    output_dir = "/".join(output_path_parts)
+
+    for i in range(num_simulations):
+        inputs = deepcopy(input_files)
+        for key, value in input_files.items():
+            if isinstance(value, str) and os.path.exists(value):
+                continue
+            if isinstance(value, Iterable):
+                inputs[key] = value[i]
+        inputHolderList.append(
+            asdict(
+                GmxapiInputHolder(
+                    args=args,
+                    input_files=inputs,
+                    output_files=output_files,
+                    output_dir=f"{output_dir}{i}",
+                    simulation_id=i,
+                )
+            )
+        )
+
+    return inputHolderList
 
 
 @task.branch
