@@ -3,7 +3,7 @@ from airflow.utils import timezone
 from airflow.models.param import Param
 from airflowHPC.dags.tasks import (
     get_file,
-    prepare_gmxapi_input,
+    prepare_gmx_input,
     run_gmxapi_dataclass,
     update_gmxapi_input,
     unpack_ref_t,
@@ -65,7 +65,7 @@ with DAG(
         file_name="{{ params.inputs.gro.filename }}",
         use_ref_data=False,
     )
-    grompp_input_list_npt = prepare_gmxapi_input(
+    grompp_input_list_npt = prepare_gmx_input(
         args=["grompp"],
         input_files={
             "-f": mdp_npt,
@@ -74,8 +74,11 @@ with DAG(
             "-p": top,
         },
         output_files={"-o": "npt.tpr"},
-        output_dir="{{ params.output_dir }}",
-        counter="{{ params.step_number }}",
+        output_path_parts=[
+            "{{ params.output_dir }}",
+            "iteration_{{ params.step_number }}",
+            "sim_",
+        ],
         num_simulations="{{ params.ref_t_list | length }}",
     )
     grompp_npt = run_gmxapi_dataclass.override(task_id="grompp_npt").expand(
