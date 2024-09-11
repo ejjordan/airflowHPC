@@ -161,11 +161,11 @@ class ResourceGmxOperator(ResourceBashOperator):
         host_flag = "-host"
         if mpi_executable is None:
             mpi_executable = "mpirun"
-        elif mpi_executable == "mpirun":
+        elif "mpirun" in mpi_executable:
             pass
-        elif mpi_executable == "mpiexec":
+        elif "mpiexec" in mpi_executable:
             pass
-        elif mpi_executable == "srun":
+        elif "srun" in mpi_executable:
             host_flag = "--nodelist"
         else:
             raise ValueError(
