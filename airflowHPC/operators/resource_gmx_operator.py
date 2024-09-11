@@ -180,7 +180,8 @@ class ResourceGmxOperator(ResourceBashOperator):
         call = list()
         call.append(mpi_executable)
         call.extend([self.num_ranks_flag, str(mpi_ranks)])
-        call.extend([host_flag, self.hostname])
+        if self.hostname:
+            call.extend([host_flag, self.hostname])
         call.append(gmx_executable)
         call.extend(gmx_arguments)
         call.extend(self.flatten_dict(input_files))
