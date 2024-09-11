@@ -146,72 +146,31 @@ def update_gmxapi_input(
     return asdict(updated_input_holder)
 
 
-def _prepare_gmx_input(
-    args: list,
-    input_files: dict,
-    output_files: dict,
-    output_dir_outer: str,
-    output_dir_inner: str,
-    counter: int,
-    num_simulations: int,
-):
-    import os
-    from dataclasses import asdict
-    from copy import deepcopy
-    from collections.abc import Iterable
-
-    inputHolderList = []
-
-    for i in range(num_simulations):
-        inputs = deepcopy(input_files)
-        for key, value in input_files.items():
-            if isinstance(value, str) and os.path.exists(value):
-                continue
-            if isinstance(value, Iterable):
-                inputs[key] = value[i]
-        inputHolderList.append(
-            asdict(
-                GmxapiInputHolder(
-                    args=args,
-                    input_files=inputs,
-                    output_files=output_files,
-                    output_dir=f"{output_dir_outer}/iteration_{counter}/{output_dir_inner}/sim_{i}",
-                    simulation_id=i,
-                )
-            )
-        )
-
-    return inputHolderList
-
-
 @task
 def prepare_gmx_input(
     args: list,
     input_files: dict,
     output_files: dict,
-    output_dir: str,
-    counter: Union[int, str],
+    output_path_parts: list,
     num_simulations: Union[int, str],
 ):
-    return _prepare_gmx_input(
-        args=args,
-        input_files=input_files,
-        output_files=output_files,
-        output_dir_outer=output_dir,
-        output_dir_inner="",
-        counter=counter,
-        num_simulations=num_simulations,
-    )
+    """
+    Prepare a list of GmxapiInputHolder objects for running multiple simulations.
 
-
-@task
-def prepare_gmx_input_deep(
-    args: list,
-    input_files: dict,
-    output_files: dict,
-    output_path_parts: list,
-    num_simulations: int,
-):
+    Parameters
+    ----------
+    args : list
+        The arguments to pass to the gmxapi command.
+    input_files : dict
+        The input files to pass to the gmxapi command.
+    output_files : dict
+        The output files to pass to the gmxapi command.
+    output_path_parts : list
+        The parts of the output path to join together.
+        Allows for flexible naming of output directories.
+        The only constraint is that the simulation_id is appended to the end of the final element.
+    num_simulations : int or str
+    """
     import os
     from dataclasses import asdict
     from copy import deepcopy

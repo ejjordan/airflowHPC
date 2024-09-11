@@ -68,8 +68,7 @@ with DAG(
         args=["grompp"],
         input_files={"-f": mdp, "-c": gro, "-p": top},
         output_files={"-o": "{{ params.output_name }}.tpr"},
-        output_dir="{{ params.output_dir }}",
-        counter=0,
+        output_path_parts=["{{ params.output_dir }}", "sim_"],
         num_simulations="{{ params.num_simulations }}",
     )
 

@@ -17,7 +17,7 @@ with DAG(
         "num_states": 9,
         "shift_range": 1,
         "temperature": 298,
-        "output_dir": "outputs",
+        "output_dir": "rexee",
         "dhdl_store_dir": "dhdl",
         "dhdl_store_fn": "dhdl.json",
     },

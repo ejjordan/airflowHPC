@@ -74,8 +74,11 @@ with DAG(
             "-p": top,
         },
         output_files={"-o": "npt.tpr"},
-        output_dir="{{ params.output_dir }}",
-        counter="{{ params.step_number }}",
+        output_path_parts=[
+            "{{ params.output_dir }}",
+            "iteration_{{ params.step_number }}",
+            "sim_",
+        ],
         num_simulations="{{ params.ref_t_list | length }}",
     )
     grompp_npt = run_gmxapi_dataclass.override(task_id="grompp_npt").expand(

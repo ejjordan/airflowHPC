@@ -20,9 +20,9 @@ def run_iteration(
     mdp, top, gro, output_dir, output_name, iteration_num, num_simulations, coul_lambda
 ):
     from airflowHPC.operators.resource_gmx_operator import ResourceGmxOperatorDataclass
-    from airflowHPC.dags.tasks import prepare_gmx_input_deep, update_gmxapi_input
+    from airflowHPC.dags.tasks import prepare_gmx_input, update_gmxapi_input
 
-    grompp_input_list = prepare_gmx_input_deep.override(task_id="grompp_input_list")(
+    grompp_input_list = prepare_gmx_input.override(task_id="grompp_input_list")(
         args=["grompp"],
         input_files={"-f": mdp, "-c": gro, "-p": top},
         output_files={"-o": f"{output_name}.tpr"},

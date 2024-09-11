@@ -28,7 +28,9 @@ def unpack_gro_inputs(**context):
         "{{ params.inputs.gro.directory }}", context
     )
     step_number = context["task"].render_template("{{ params.step_number }}", context)
-    input_dir = [f"{gro_input_dir}/step_{step_number}/sim_{i}" for i in temps_range]
+    input_dir = [
+        f"{gro_input_dir}/iteration_{step_number}/sim_{i}" for i in temps_range
+    ]
     return input_dir
 
 
@@ -45,7 +47,7 @@ def unpack_cpt_inputs(**context):
         "{{ params.inputs.cpt.directory }}", context
     )
     num_steps = context["task"].render_template("{{ params.step_number }}", context)
-    input_dir = [f"{cpt_input_dir}/step_{num_steps}/sim_{i}" for i in temps_range]
+    input_dir = [f"{cpt_input_dir}/iteration_{num_steps}/sim_{i}" for i in temps_range]
     return input_dir
 
 
@@ -143,8 +145,11 @@ with DAG(
             "-t": cpt_sim,
         },
         output_files={"-o": "sim.tpr"},
-        output_dir="{{ params.output_dir }}",
-        counter="{{ params.step_number }}",
+        output_path_parts=[
+            "{{ params.output_dir }}",
+            "iteration_{{ params.step_number }}",
+            "sim_",
+        ],
         num_simulations="{{ params.ref_t_list | length }}",
     )
     grompp_sim = run_gmxapi_dataclass.override(task_id="grompp_sim").expand(
@@ -153,7 +158,7 @@ with DAG(
     # If this task hangs try `export AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER=True`.
     mdrun_sim = BashOperator(
         bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir "
-        + "{{ params.output_dir }}/step_{{ params.step_number }}/sim_[0123] -s sim.tpr -deffnm sim",
+        + "{{ params.output_dir }}/iteration_{{ params.step_number }}/sim_[0123] -s sim.tpr -deffnm sim",
         task_id="mdrun_sim",
         cwd=os.path.curdir,
     )
