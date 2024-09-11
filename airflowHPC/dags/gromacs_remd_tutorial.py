@@ -10,7 +10,7 @@ from airflowHPC.dags.tasks import (
     get_file,
     run_gmxapi,
     branch_task,
-    prepare_gmx_input,
+    prepare_gmxapi_input,
     run_gmxapi_dataclass,
     update_gmxapi_input,
 )
@@ -185,7 +185,7 @@ with DAG(
         update_dict=[{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}]
     )
     equil_output_dir = "equil"
-    grompp_input_list_equil = prepare_gmx_input(
+    grompp_input_list_equil = prepare_gmxapi_input(
         args=["grompp"],
         input_files={
             "-f": mdp_equil,
@@ -194,7 +194,8 @@ with DAG(
             "-p": top_equil,
         },
         output_files={"-o": "equil.tpr"},
-        output_path_parts=[equil_output_dir, "sim_"],
+        output_dir=equil_output_dir,
+        counter=0,
         num_simulations=NUM_SIMULATIONS,
     )
     grompp_equil = run_gmxapi_dataclass.override(task_id="grompp_equil").expand(
@@ -246,7 +247,9 @@ with DAG(
     gro_sim = (
         get_file.override(task_id="get_sim_gro")
         .partial(file_name="result.gro", use_ref_data=False)
-        .expand(input_dir=[f"equil/sim_{i}" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            input_dir=[f"equil/sim_{i}/iteration_0" for i in range(NUM_SIMULATIONS)]
+        )
     )
     top_sim = get_file.override(task_id="get_sim_top")(
         input_dir="prep", file_name="topol.top", use_ref_data=False
@@ -254,7 +257,9 @@ with DAG(
     cpt_sim = (
         get_file.override(task_id="get_sim_cpt")
         .partial(file_name="result.cpt", use_ref_data=False)
-        .expand(input_dir=[f"equil/sim_{i}" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            input_dir=[f"equil/sim_{i}/iteration_0" for i in range(NUM_SIMULATIONS)]
+        )
     )
     mdp_json_sim = get_file.override(task_id="get_sim_mdp_json")(
         input_dir="mdp", file_name="sim.json"
@@ -265,7 +270,7 @@ with DAG(
         update_dict=[{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}]
     )
     sim_output_dir = "sim"
-    grompp_input_list_sim = prepare_gmx_input(
+    grompp_input_list_sim = prepare_gmxapi_input(
         args=["grompp"],
         input_files={
             "-f": mdp_sim,
@@ -275,21 +280,26 @@ with DAG(
             "-t": cpt_sim,
         },
         output_files={"-o": "sim.tpr"},
-        output_path_parts=[sim_output_dir, "sim_"],
+        output_dir=sim_output_dir,
+        counter=0,
         num_simulations=NUM_SIMULATIONS,
     )
     grompp_sim = run_gmxapi_dataclass.override(task_id="grompp_sim").expand(
         input_data=grompp_input_list_sim
     )
     mdrun_sim = BashOperator(
-        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir sim/sim_[0123] -s sim.tpr",
+        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir sim/sim_[0123]/iteration_0 -s sim.tpr",
         task_id="mdrun_sim",
         cwd=os.path.curdir,
     )
     potential_energy_list_sim = (
         extract_edr_info.override(task_id="gmx_ener_sim")
         .partial(field="Potential")
-        .expand(edr_file=[f"sim/sim_{i}/ener.edr" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            edr_file=[
+                f"sim/sim_{i}/iteration_0/ener.edr" for i in range(NUM_SIMULATIONS)
+            ]
+        )
     )
     hist_sim = plot_histograms.override(task_id="plot_histograms_sim")(
         data_list=potential_energy_list_sim,
@@ -300,10 +310,10 @@ with DAG(
         title="Potential Energy Histogram",
     )
     get_final_tpr = get_file.override(task_id="get_final_tpr")(
-        input_dir="sim/sim_0", file_name="sim.tpr", use_ref_data=False
+        input_dir="sim/sim_0/iteration_0", file_name="sim.tpr", use_ref_data=False
     )
     get_final_xtc = get_file.override(task_id="get_final_xtc")(
-        input_dir="sim/sim_0", file_name="traj_comp.xtc", use_ref_data=False
+        input_dir="sim/sim_0/iteration_0", file_name="traj_comp.xtc", use_ref_data=False
     )
     plot_ramachandran = plot_ramachandran_residue.override(task_id="plot_ramachandran")(
         tpr_file=get_final_tpr,
@@ -353,7 +363,9 @@ with DAG(
             use_ref_data=False,
             check_exists=True,
         )
-        .expand(input_dir=[f"equil/sim_{i}" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            input_dir=[f"equil/sim_{i}/iteration_0" for i in range(NUM_SIMULATIONS)]
+        )
     )
     trigger_equil = TriggerDagRunOperator(
         task_id="trigger_equil",
@@ -370,7 +382,7 @@ with DAG(
     )
 
     is_sim_done = get_file.override(task_id="is_sim_done")(
-        input_dir="sim/sim_0",
+        input_dir="sim/sim_0/iteration_0",
         file_name="sim.tpr",
         use_ref_data=False,
         check_exists=True,

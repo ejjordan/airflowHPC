@@ -11,7 +11,7 @@ def verify_files(input_dir, filename, ref_t_list, step_number):
     import logging
 
     input_files = [
-        f"{input_dir}/iteration_{step_number}/sim_{i}/{filename}"
+        f"{input_dir}/step_{step_number}/sim_{i}/{filename}"
         for i in range(len(ref_t_list))
     ]
     for file in input_files:

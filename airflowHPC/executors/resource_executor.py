@@ -160,6 +160,7 @@ class ResourceExecutor(BaseExecutor):
         self.result_queue: Queue[TaskInstanceStateType] | None = None
         self.task_queue: Queue[ExecutorWorkType] | None = None
         self.workers: list[ResourceWorker] = []
+        self.slots_dict: dict[TaskInstanceKey, Slot] = {}
 
     def start(self) -> None:
         """Start the executor."""
