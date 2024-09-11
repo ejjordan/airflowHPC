@@ -90,7 +90,7 @@ with DAG(
     render_template_as_native_obj=True,
     is_paused_upon_creation=False,
     params={
-        "output_dir": "outputs",
+        "output_dir": "dynamic",
         "output_name": "sim",
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "basic_md.json"},
@@ -206,7 +206,7 @@ with DAG(
     start_date=timezone.utcnow(),
     render_template_as_native_obj=True,
     params={
-        "output_dir": "outputs",
+        "output_dir": "dynamic",
         "output_name": "sim",
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "basic_md.json"},
@@ -277,8 +277,8 @@ with DAG(
         },
         "num_sims": 2,
         "iteration_num": 1,
-        "iterations_to_run": 1,
-        "branch_ps_wait_time": 500,
+        "iterations_to_run": 2,
+        "branch_ps_wait_time": 1e9,  # Make sure that the branch does not launch more branches
     }
     separate_branch = run_if_false.override(group_id="separate_branch")(
         dag_id="gmx_triggerer",
