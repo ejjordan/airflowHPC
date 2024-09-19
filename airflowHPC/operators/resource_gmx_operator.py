@@ -161,11 +161,11 @@ class ResourceGmxOperator(ResourceBashOperator):
         host_flag = "-host"
         if mpi_executable is None:
             mpi_executable = "mpirun"
-        elif mpi_executable == "mpirun":
+        elif "mpirun" in mpi_executable:
             pass
-        elif mpi_executable == "mpiexec":
+        elif "mpiexec" in mpi_executable:
             pass
-        elif mpi_executable == "srun":
+        elif "srun" in mpi_executable:
             host_flag = "--nodelist"
         else:
             raise ValueError(
@@ -180,7 +180,8 @@ class ResourceGmxOperator(ResourceBashOperator):
         call = list()
         call.append(mpi_executable)
         call.extend([self.num_ranks_flag, str(mpi_ranks)])
-        call.extend([host_flag, self.hostname])
+        if self.hostname:
+            call.extend([host_flag, self.hostname])
         call.append(gmx_executable)
         call.extend(gmx_arguments)
         call.extend(self.flatten_dict(input_files))

@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.utils import timezone
 from airflow.models.param import Param
 from airflowHPC.dags.tasks import (
-    prepare_gmxapi_input,
+    prepare_gmx_input,
     update_gmxapi_input,
     xcom_lookup,
     dataset_from_xcom_dicts,
@@ -65,12 +65,11 @@ with DAG(
         key="{{ params.inputs.mdp.key }}",
     )
 
-    grompp_input_list = prepare_gmxapi_input.override(task_id="grompp_input_list")(
+    grompp_input_list = prepare_gmx_input.override(task_id="grompp_input_list")(
         args=["grompp"],
         input_files={"-f": mdp, "-c": gro, "-p": top},
         output_files={"-o": "{{ params.output_name }}.tpr"},
-        output_dir="{{ params.output_dir }}",
-        counter="{{ params.counter }}",
+        output_path_parts=["{{ params.output_dir }}", "sim_"],
         num_simulations="{{ params.num_simulations }}",
     )
 
