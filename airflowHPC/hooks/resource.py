@@ -15,7 +15,6 @@ class ResourceOccupation:
 class Slot:
     cores: List[ResourceOccupation] = field(default_factory=list)
     gpus: List[ResourceOccupation] = field(default_factory=list)
-    lfs: int = 0
     mem: int = 0
     node_index: int = 0
     node_name: str = ""
@@ -27,7 +26,6 @@ class NodeResources:
     name: str = ""
     cores: List[ResourceOccupation] = field(default_factory=list)
     gpus: List[ResourceOccupation] = field(default_factory=list)
-    lfs: int = 0
     mem: int = 0
 
 
@@ -42,7 +40,6 @@ class RankRequirements:
     num_gpus: int = 0
     core_occupation: float = 1.0
     gpu_occupation: float = 1.0
-    lfs: int = 0
     mem: int = 0
 
     def __eq__(self, other: RankRequirements) -> bool:
@@ -84,7 +81,6 @@ class NodeManager:
             for ro in slot.gpus:
                 self.node.gpus[ro.index].occupation += ro.occupation
 
-            self.node.lfs -= slot.lfs
             self.node.mem -= slot.mem
 
     def deallocate_slot(self, slot: Slot) -> None:
@@ -95,7 +91,6 @@ class NodeManager:
             for ro in slot.gpus:
                 self.node.gpus[ro.index].occupation -= ro.occupation
 
-            self.node.lfs += slot.lfs
             self.node.mem += slot.mem
 
     def find_slot(self, rr: RankRequirements) -> Optional[Slot]:
@@ -138,15 +133,12 @@ class NodeManager:
                 if len(gpus) < rr.num_gpus:
                     return None
 
-            if rr.lfs and self.node.lfs < rr.lfs:
-                return None
             if rr.mem and self.node.mem < rr.mem:
                 return None
 
             slot = Slot(
                 cores=cores,
                 gpus=gpus,
-                lfs=rr.lfs,
                 mem=rr.mem,
                 node_index=self.node.index,
                 node_name=self.node.name,
@@ -185,7 +177,6 @@ class NodeList:
             if (
                 node.node.cores != node_0.cores
                 or node.node.gpus != node_0.gpus
-                or node.node.lfs != node_0.lfs
                 or node.node.mem != node_0.mem
             ):
                 self.uniform = False
@@ -194,7 +185,6 @@ class NodeList:
         if self.uniform:
             self.cores_per_node = len(node_0.cores)
             self.gpus_per_node = len(node_0.gpus)
-            self.lfs_per_node = node_0.lfs
             self.mem_per_node = node_0.mem
 
         else:
@@ -214,9 +204,6 @@ class NodeList:
 
         if rr.num_gpus:
             requirement = min(requirement, self.gpus_per_node / rr.num_gpus)
-
-        if rr.lfs:
-            requirement = min(requirement, self.lfs_per_node / rr.lfs)
 
         if rr.mem:
             requirement = min(requirement, self.mem_per_node / rr.mem)
