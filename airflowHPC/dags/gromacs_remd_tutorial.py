@@ -13,9 +13,7 @@ from airflowHPC.dags.tasks import (
     run_gmxapi,
     branch_task,
     prepare_gmx_input,
-    run_gmxapi_dataclass,
     update_gmx_input,
-    xcom_lookup,
     dict_from_xcom_dicts,
 )
 from gmxapi.commandline import cli_executable

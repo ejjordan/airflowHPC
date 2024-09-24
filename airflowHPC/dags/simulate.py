@@ -51,27 +51,6 @@ def unpack_cpt_inputs(**context):
 
 
 with DAG(
-    dag_id="simulate_done",
-    start_date=timezone.utcnow(),
-    schedule=None,
-    catchup=False,
-    render_template_as_native_obj=True,
-    max_active_runs=1,
-    params={
-        "inputs": {
-            "gro": {"directory": "sim", "filename": "sim.gro"},
-        },
-        "ref_t_list": [300, 310, 320, 330],
-        "step_number": 0,
-    },
-) as simulate:
-    simulate.doc = """Simulation of a system with replica exchange handled by mdrun -multidir option."""
-
-    ref_temps = unpack_ref_t()
-    gro_input_dirs = unpack_gro_inputs()
-
-
-with DAG(
     dag_id="simulate",
     start_date=timezone.utcnow(),
     catchup=False,
