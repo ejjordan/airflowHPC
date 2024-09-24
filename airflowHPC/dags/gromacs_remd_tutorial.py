@@ -97,24 +97,27 @@ with DAG(
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
+    params={
+        "output_dir": "remd",
+        "step_dir": "prep",
+    },
 ) as system_setup:
     system_setup.doc = """Initial setup of a system for replica exchange."""
 
     input_pdb = get_file.override(task_id="get_pdb")(
         input_dir="ala_tripeptide_remd", file_name="ala_tripeptide.pdb"
     )
-    prep_output_dir = "prep"
     pdb2gmx = run_gmxapi.override(task_id="pdb2gmx")(
         args=["pdb2gmx", "-ff", "charmm27", "-water", "tip3p"],
         input_files={"-f": input_pdb},
         output_files={"-o": "alanine.gro", "-p": "topol.top", "-i": "posre.itp"},
-        output_dir=prep_output_dir,
+        output_dir="{{ params.output_dir }}/{{ params.step_dir }}",
     )
     editconf = run_gmxapi.override(task_id="editconf")(
         args=["editconf", "-c", "-box", "3", "3", "3"],
         input_files={"-f": pdb2gmx["-o"]},
         output_files={"-o": "alanine_box.gro"},
-        output_dir=prep_output_dir,
+        output_dir="{{ params.output_dir }}/{{ params.step_dir }}",
     )
     # gmx solvate does not allow specifying different file names for input and output top files.
     # Here we rely on the fact that solvate overwrites the input top file with the solvated top file.
@@ -123,7 +126,7 @@ with DAG(
         args=["solvate"],
         input_files={"-cp": editconf["-o"], "-cs": "spc216.gro", "-p": pdb2gmx["-p"]},
         output_files={"-o": "alanine_solv.gro"},
-        output_dir=prep_output_dir,
+        output_dir="{{ params.output_dir }}/{{ params.step_dir }}",
     )
     mdp_json_em = get_file.override(task_id="get_min_mdp_json")(
         input_dir="mdp", file_name="min.json"
@@ -133,13 +136,13 @@ with DAG(
         args=["grompp"],
         input_files={"-f": mdp_em, "-c": solvate["-o"], "-p": pdb2gmx["-p"]},
         output_files={"-o": "em.tpr"},
-        output_dir=prep_output_dir,
+        output_dir="{{ params.output_dir }}/{{ params.step_dir }}",
     )
     mdrun_em = run_gmxapi.override(task_id="mdrun_em")(
         args=["mdrun", "-v", "-deffnm", "em"],
         input_files={"-s": grompp_em["-o"]},
         output_files={"-c": "em.gro"},
-        output_dir=prep_output_dir,
+        output_dir="{{ params.output_dir }}/{{ params.step_dir }}",
     )
     mdp_json_nvt = get_file.override(task_id="get_nvt_mdp_json")(
         input_dir="mdp", file_name="nvt.json"
@@ -154,13 +157,13 @@ with DAG(
             "-p": pdb2gmx["-p"],
         },
         output_files={"-o": "nvt.tpr"},
-        output_dir=prep_output_dir,
+        output_dir="{{ params.output_dir }}/{{ params.step_dir }}",
     )
     mdrun_nvt = run_gmxapi.override(task_id="mdrun_nvt")(
         args=["mdrun", "-v", "-deffnm", "nvt"],
         input_files={"-s": grompp_nvt["-o"]},
         output_files={"-c": "nvt.gro"},
-        output_dir=prep_output_dir,
+        output_dir="{{ params.output_dir }}/{{ params.step_dir }}",
     )
 
 
@@ -171,14 +174,22 @@ with DAG(
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
+    params={
+        "output_dir": "remd",
+        "step_dir": "equil",
+    },
 ) as equilibrate:
     equilibrate.doc = """Equilibration of a system for replica exchange."""
 
     gro_equil = get_file.override(task_id="get_equil_gro")(
-        input_dir="prep", file_name="nvt.gro", use_ref_data=False
+        input_dir="{{ params.output_dir }}/prep",
+        file_name="nvt.gro",
+        use_ref_data=False,
     )
     top_equil = get_file.override(task_id="get_equil_top")(
-        input_dir="prep", file_name="topol.top", use_ref_data=False
+        input_dir="{{ params.output_dir }}/prep",
+        file_name="topol.top",
+        use_ref_data=False,
     )
     mdp_json_equil = get_file.override(task_id="get_equil_mdp_json")(
         input_dir="mdp", file_name="npt.json"
@@ -188,7 +199,6 @@ with DAG(
     ).expand(
         update_dict=[{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}]
     )
-    equil_output_dir = "equil"
     grompp_input_list_equil = prepare_gmx_input(
         args=["grompp"],
         input_files={
@@ -198,7 +208,7 @@ with DAG(
             "-p": top_equil,
         },
         output_files={"-o": "equil.tpr"},
-        output_path_parts=[equil_output_dir, "sim_"],
+        output_path_parts=["{{ params.output_dir }}", "{{ params.step_dir }}", "sim_"],
         num_simulations=NUM_SIMULATIONS,
     )
     grompp_equil = ResourceGmxOperatorDataclass.partial(
@@ -266,21 +276,37 @@ with DAG(
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
+    params={
+        "output_dir": "remd",
+        "step_dir": "sim",
+    },
 ) as simulate_ala:
     simulate_ala.doc = """Simulation of a system for replica exchange."""
 
     gro_sim = (
         get_file.override(task_id="get_sim_gro")
         .partial(file_name="result.gro", use_ref_data=False)
-        .expand(input_dir=[f"equil/sim_{i}" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            input_dir=[
+                "{{ params.output_dir }}" + f"/equil/sim_{i}"
+                for i in range(NUM_SIMULATIONS)
+            ]
+        )
     )
     top_sim = get_file.override(task_id="get_sim_top")(
-        input_dir="prep", file_name="topol.top", use_ref_data=False
+        input_dir="{{ params.output_dir }}/prep",
+        file_name="topol.top",
+        use_ref_data=False,
     )
     cpt_sim = (
         get_file.override(task_id="get_sim_cpt")
         .partial(file_name="result.cpt", use_ref_data=False)
-        .expand(input_dir=[f"equil/sim_{i}" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            input_dir=[
+                "{{ params.output_dir }}" + f"/equil/sim_{i}"
+                for i in range(NUM_SIMULATIONS)
+            ]
+        )
     )
     mdp_json_sim = get_file.override(task_id="get_sim_mdp_json")(
         input_dir="mdp", file_name="sim.json"
@@ -290,7 +316,6 @@ with DAG(
     ).expand(
         update_dict=[{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}]
     )
-    sim_output_dir = "sim"
     grompp_input_list_sim = prepare_gmx_input(
         args=["grompp"],
         input_files={
@@ -301,7 +326,7 @@ with DAG(
             "-t": cpt_sim,
         },
         output_files={"-o": "sim.tpr"},
-        output_path_parts=[sim_output_dir, "sim_"],
+        output_path_parts=["{{ params.output_dir }}", "{{ params.step_dir }}", "sim_"],
         num_simulations=NUM_SIMULATIONS,
     )
     grompp_sim = ResourceGmxOperatorDataclass.partial(
@@ -315,14 +340,21 @@ with DAG(
         gmx_executable="gmx_mpi",
     ).expand(input_data=grompp_input_list_sim)
     mdrun_sim = BashOperator(
-        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir sim/sim_[0123] -s sim.tpr",
+        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir "
+        + "{{ params.output_dir }}/{{ params.step_dir }}/"
+        + f"/sim_[0123] -s sim.tpr",
         task_id="mdrun_sim",
         cwd=os.path.curdir,
     )
     potential_energy_list_sim = (
         extract_edr_info.override(task_id="gmx_ener_sim")
         .partial(field="Potential")
-        .expand(edr_file=[f"sim/sim_{i}/ener.edr" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            edr_file=[
+                "{{ params.output_dir }}/{{ params.step_dir }}/" + f"sim_{i}/ener.edr"
+                for i in range(NUM_SIMULATIONS)
+            ]
+        )
     )
     hist_sim = plot_histograms.override(task_id="plot_histograms_sim")(
         data_list=potential_energy_list_sim,
@@ -333,10 +365,14 @@ with DAG(
         title="Potential Energy Histogram",
     )
     get_final_tpr = get_file.override(task_id="get_final_tpr")(
-        input_dir="sim/sim_0", file_name="sim.tpr", use_ref_data=False
+        input_dir="{{ params.output_dir }}/{{ params.step_dir }}/sim_0",
+        file_name="sim.tpr",
+        use_ref_data=False,
     )
     get_final_xtc = get_file.override(task_id="get_final_xtc")(
-        input_dir="sim/sim_0", file_name="traj_comp.xtc", use_ref_data=False
+        input_dir="{{ params.output_dir }}/{{ params.step_dir }}/sim_0",
+        file_name="traj_comp.xtc",
+        use_ref_data=False,
     )
     plot_ramachandran = plot_ramachandran_residue.override(task_id="plot_ramachandran")(
         tpr_file=get_final_tpr,
@@ -357,13 +393,16 @@ with DAG(
     max_active_runs=1,
     params={
         "output_dir": "remd",
+        "setup_dir": "prep",
+        "equilibrate_dir": "equil",
+        "simulate_dir": "sim",
     },
 ) as coordinate:
     coordinate.doc = """Reworking of gromacs tutorial for replica exchange MD.
         Source: https://gitlab.com/gromacs/online-tutorials/tutorials-in-progress.git"""
 
     is_setup_done = get_file.override(task_id="is_setup_done")(
-        input_dir="prep",
+        input_dir="{{ params.output_dir }}/{{ params.setup_dir }}",
         file_name="nvt.gro",
         use_ref_data=False,
         check_exists=True,
@@ -374,6 +413,10 @@ with DAG(
         wait_for_completion=True,
         poke_interval=10,
         trigger_rule="none_failed",
+        conf={
+            "output_dir": "{{ params.output_dir }}",
+            "step_dir": "{{ params.setup_dir }}",
+        },
     )
     setup_done = EmptyOperator(task_id="setup_done", trigger_rule="none_failed")
     setup_done_branch = branch_task.override(task_id="setup_done_branch")(
@@ -389,7 +432,12 @@ with DAG(
             use_ref_data=False,
             check_exists=True,
         )
-        .expand(input_dir=[f"equil/sim_{i}" for i in range(NUM_SIMULATIONS)])
+        .expand(
+            input_dir=[
+                "{{ params.output_dir }}/{{ params.equilibrate_dir }}" + f"/sim_{i}"
+                for i in range(NUM_SIMULATIONS)
+            ]
+        )
     )
     trigger_equil = TriggerDagRunOperator(
         task_id="trigger_equil",
@@ -397,6 +445,10 @@ with DAG(
         wait_for_completion=True,
         poke_interval=10,
         trigger_rule="none_failed",
+        conf={
+            "output_dir": "{{ params.output_dir }}",
+            "step_dir": "{{ params.equilibrate_dir }}",
+        },
     )
     equil_done = EmptyOperator(task_id="equil_done", trigger_rule="none_failed")
     equil_done_branch = branch_task.override(task_id="equil_done_branch")(
@@ -406,7 +458,7 @@ with DAG(
     )
 
     is_sim_done = get_file.override(task_id="is_sim_done")(
-        input_dir="sim/sim_0",
+        input_dir="{{ params.output_dir }}/{{ params.simulate_dir }}/sim_0",
         file_name="sim.tpr",
         use_ref_data=False,
         check_exists=True,
@@ -417,6 +469,10 @@ with DAG(
         wait_for_completion=True,
         poke_interval=10,
         trigger_rule="none_failed",
+        conf={
+            "output_dir": "{{ params.output_dir }}",
+            "step_dir": "{{ params.simulate_dir }}",
+        },
     )
     sim_done = EmptyOperator(task_id="sim_done", trigger_rule="none_failed")
     sim_done_branch = branch_task.override(task_id="sim_done_branch")(
