@@ -4,10 +4,9 @@ import os
 import time
 import pprint
 import threading as mt
-from typing import TYPE_CHECKING, Sequence, Union, Iterable, Callable
+from typing import TYPE_CHECKING, Sequence, Iterable
 
-from airflow.exceptions import AirflowException, AirflowSkipException
-from airflow.models.mappedoperator import OperatorPartial
+from airflow.exceptions import AirflowException
 
 from airflowHPC.dags.tasks import GmxInputHolder, GmxRunInfoHolder
 
@@ -49,10 +48,10 @@ class ResourceRCTOperator(BaseOperator):
         **kwargs,
     ) -> None:
         self.log.info(f"=== ResourceRCTOperator: __init__ {kwargs}")
-      # kwargs.update({"cwd": output_dir})
+        # kwargs.update({"cwd": output_dir})
         super().__init__(**kwargs)
 
-        self.mpi_ranks = kwargs.get('executor_config', {}).get('mpi_ranks', 1)
+        self.mpi_ranks = kwargs.get("executor_config", {}).get("mpi_ranks", 1)
 
         if gmx_executable is None:
             try:
@@ -74,19 +73,18 @@ class ResourceRCTOperator(BaseOperator):
         self.show_return_value_in_logs = show_return_value_in_logs
 
     def execute(self, context: Context):
-
-        pub_address = os.environ.get('RCT_PUB_URL')
-        sub_address = os.environ.get('RCT_SUB_URL')
+        pub_address = os.environ.get("RCT_PUB_URL")
+        sub_address = os.environ.get("RCT_SUB_URL")
 
         assert pub_address is not None, "RCT_PUB_URL is not set"
         assert sub_address is not None, "RCT_SUB_URL is not set"
 
         self.log.info(f"======= SUB URL: {sub_address} {os.getpid()}")
-        self._rct_sub = ru.zmq.Subscriber(channel='rct', url=sub_address)
-        self._rct_sub.subscribe('update', cb=self._update_cb)
+        self._rct_sub = ru.zmq.Subscriber(channel="rct", url=sub_address)
+        self._rct_sub.subscribe("update", cb=self._update_cb)
 
         self.log.info(f"======= PUB URL: {pub_address}")
-        self._rct_pub = ru.zmq.Publisher(channel='rct', url=pub_address)
+        self._rct_pub = ru.zmq.Publisher(channel="rct", url=pub_address)
 
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -109,35 +107,41 @@ class ResourceRCTOperator(BaseOperator):
 
         sds = list()
         for f in output_files_paths.values():
-            sds.append({'source': os.path.basename(f),
-                        'target': out_dir_full_path,
-                        'action': rp.TRANSFER})
+            sds.append(
+                {
+                    "source": os.path.basename(f),
+                    "target": out_dir_full_path,
+                    "action": rp.TRANSFER,
+                }
+            )
 
-        td = rp.TaskDescription({
-                'executable': self.gmx_executable,
-                'arguments': args,
-                'ranks': self.mpi_ranks,
+        td = rp.TaskDescription(
+            {
+                "executable": self.gmx_executable,
+                "arguments": args,
+                "ranks": self.mpi_ranks,
                 # 'input_staging': input_files_paths,
-                'output_staging': sds,
-        })
+                "output_staging": sds,
+            }
+        )
 
-        self.log.info('====================== submit td %d' % os.getpid())
-        self._rct_pub.put('request', {'td': td.as_dict()})
+        self.log.info("====================== submit td %d" % os.getpid())
+        self._rct_pub.put("request", {"td": td.as_dict()})
 
         # timeout to avoid zombie tasks?
         timeout = 60 * 60  # FIXME
         start = time.time()
         while time.time() - start < timeout:
             if self._rct_event.wait(timeout=1.0):
-                self.log.info('=== waiting for task')
+                self.log.info("=== waiting for task")
                 break
             time.sleep(1)
 
-        self.log.info('=== task completed')
+        self.log.info("=== task completed")
         if not self._rct_task:
             raise AirflowException("=== No result from RCT task.")
 
-        state = self._rct_task['state']
+        state = self._rct_task["state"]
         if state in [rp.FAILED, rp.CANCELED]:
             raise AirflowException(f"Command failed with a state {state}.")
 
@@ -148,7 +152,7 @@ class ResourceRCTOperator(BaseOperator):
         #         f"Bash command returned exit code {result.exit_code}. Skipping."
         #     )
 
-        exit_code = self._rct_task['exit_code']
+        exit_code = self._rct_task["exit_code"]
         if exit_code != 0:
             raise AirflowException(
                 f"Bash command returned a non-zero exit code {exit_code}."
@@ -160,13 +164,12 @@ class ResourceRCTOperator(BaseOperator):
         return output_files_paths
 
     def _update_cb(self, topic, msg):
-
-        task = msg['task']
-        uid = task['uid']
-        state = task['state']
+        task = msg["task"]
+        uid = task["uid"]
+        state = task["state"]
         self.log.info("===================== update %s: %s" % (uid, state))
 
-        self._rct_task = msg['task']
+        self._rct_task = msg["task"]
 
         if state in rp.FINAL:
             self.log.info("=== task %s: \n%s" % (uid, pprint.pformat(task)))
@@ -195,7 +198,6 @@ class ResourceRCTOperatorDataclass(ResourceRCTOperator):
         self.input_data = input_data
 
     def execute(self, context: Context):
-
         self.log.info("=== Dataclass operator executing")
 
         from dataclasses import asdict
@@ -204,4 +206,3 @@ class ResourceRCTOperatorDataclass(ResourceRCTOperator):
         output = asdict(GmxRunInfoHolder(inputs=self.input_data, outputs=run_output))
         self.log.info(f"Done. Returned value was: {output}")
         return output
-
