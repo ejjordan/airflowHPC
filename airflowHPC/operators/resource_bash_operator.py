@@ -99,12 +99,15 @@ class ResourceBashOperator(BaseOperator):
                 ("mpiexec", "-np"),
                 ("srun", "-n"),
             ]:
-                if shutil.which(executable):
+                executable = self._exec_check(executable)
+                if shutil.which(executable) is not None:
                     self.mpi_executable = executable
                     self.num_ranks_flag = num_ranks_flag
                     break
             if not hasattr(self, "mpi_executable"):
-                self.mpi_executable = None
+                raise ValueError(
+                    "Could not find mpirun, mpiexec, or srun in PATH. Please check that one is loaded."
+                )
         else:
             self.mpi_executable = mpi_executable
             if "srun" in mpi_executable:
@@ -135,6 +138,21 @@ class ResourceBashOperator(BaseOperator):
         self.gpu_ids = []
         # This is also set by the executor
         self.hostname = ""
+
+    def _exec_check(self, executable: str):
+        """
+        In pydevd mode, the PATH cannot(?) be updated, so allow setting the executable
+        as an environment variable, e.g., `export mpiexec=/path/to/mpiexec`.
+        Note that if the full path is already specified, it will be used.
+        """
+        if shutil.which(executable) is None:
+            if executable in os.environ:
+                executable = os.environ[executable]
+            else:
+                raise ValueError(
+                    f"Could not find {executable} in PATH. Please check that it is loaded."
+                )
+        return executable
 
     def get_env(self, context):
         """Build the set of environment variables to be exposed for the bash command."""
@@ -191,10 +209,7 @@ class ResourceBashOperator(BaseOperator):
         bash_path = shutil.which("bash") or "bash"
         env = self.get_env(context)
 
-        if self.mpi_executable is None or shutil.which(self.mpi_executable) is None:
-            msg = f"Could not find mpi_executable '{self.mpi_executable}' in PATH."
-            msg += "Please check that it is loaded or specify a path to mpi_executable."
-            raise ValueError(msg)
+        assert shutil.which(self.mpi_executable) is not None
         self.log.info(f"mpi_executable: {self.mpi_executable}")
         self.log.info(f"mpi_ranks: {self.mpi_ranks}")
         self.log.info(f"cpus_per_task: {self.cpus_per_task}")

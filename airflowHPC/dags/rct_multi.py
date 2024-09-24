@@ -1,7 +1,7 @@
 from airflow import DAG
 from airflow.utils import timezone
-from airflowHPC.dags.tasks import get_file, prepare_gmx_input, update_gmxapi_input
-from airflowHPC.operators.resource_rct_operator import ResourceRCTOperatorDataclass
+from airflowHPC.dags.tasks import get_file, prepare_gmx_input, update_gmx_input
+from airflowHPC.operators import ResourceRCTOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
@@ -18,7 +18,7 @@ with DAG(
             "top": {"directory": "ensemble_md", "filename": "sys.top"},
         },
     },
-) as gmxapi_multi:
+) as rct_multi:
     input_gro = get_file.override(task_id="get_gro")(
         input_dir="{{ params.inputs.gro.directory }}",
         file_name="{{ params.inputs.gro.filename }}",
@@ -39,7 +39,7 @@ with DAG(
             {"nsteps": 5000},
             {"nsteps": 5000},
             {"nsteps": 5000},
-            {"nsteps": 5000, "dt": 0.002},
+            {"nsteps": 5000, "dt": 0.2},
         ]
     )
 
@@ -71,13 +71,13 @@ with DAG(
     grompp_input_list_sim >> grompp_result
 
     mdrun_input_list = (
-        update_gmxapi_input.override(task_id="mdrun_input_list")
+        update_gmx_input.override(task_id="mdrun_input_list")
         .partial(
             args=["mdrun", "-v", "-deffnm", "result", "-ntomp", "2"],
             input_files_keys={"-s": "-o"},
             output_files={"-c": "result.gro", "-x": "result.xtc"},
         )
-        .expand(gmxapi_output=grompp_result.output)
+        .expand(gmx_output=grompp_result.output)
     )
     mdrun_result = ResourceRCTOperatorDataclass.partial(
         task_id="mdrun",

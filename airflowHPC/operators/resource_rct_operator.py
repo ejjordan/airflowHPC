@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Sequence, Union, Iterable, Callable
 from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.models.mappedoperator import OperatorPartial
 
-from airflowHPC.dags.tasks import GmxapiInputHolder, GmxapiRunInfoHolder
+from airflowHPC.dags.tasks import GmxInputHolder, GmxRunInfoHolder
 
 if TYPE_CHECKING:
     from airflow.utils.context import Context
@@ -182,7 +182,7 @@ class ResourceRCTOperator(BaseOperator):
 
 
 class ResourceRCTOperatorDataclass(ResourceRCTOperator):
-    def __init__(self, *, input_data: GmxapiInputHolder, **kwargs) -> None:
+    def __init__(self, *, input_data: GmxInputHolder, **kwargs) -> None:
         kwargs.update({"gmx_arguments": input_data["args"]})
         kwargs.update({"input_files": input_data["input_files"]})
         kwargs.update({"output_files": input_data["output_files"]})
@@ -201,7 +201,7 @@ class ResourceRCTOperatorDataclass(ResourceRCTOperator):
         from dataclasses import asdict
 
         run_output = super().execute(context)
-        output = asdict(GmxapiRunInfoHolder(inputs=self.input_data, outputs=run_output))
+        output = asdict(GmxRunInfoHolder(inputs=self.input_data, outputs=run_output))
         self.log.info(f"Done. Returned value was: {output}")
         return output
 

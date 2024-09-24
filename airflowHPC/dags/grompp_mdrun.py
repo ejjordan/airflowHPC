@@ -3,11 +3,11 @@ from airflow.utils import timezone
 from airflow.models.param import Param
 from airflowHPC.dags.tasks import (
     prepare_gmx_input,
-    update_gmxapi_input,
+    update_gmx_input,
     xcom_lookup,
     dataset_from_xcom_dicts,
 )
-from airflowHPC.operators.resource_gmx_operator import ResourceGmxOperatorDataclass
+from airflowHPC.operators import ResourceGmxOperatorDataclass
 
 
 with DAG(
@@ -86,13 +86,13 @@ with DAG(
     grompp_input_list >> grompp
 
     mdrun_input_list = (
-        update_gmxapi_input.override(task_id="mdrun_input_list")
+        update_gmx_input.override(task_id="mdrun_input_list")
         .partial(
             args=["mdrun", "-v", "-deffnm", "{{ params.output_name }}", "-ntomp", "2"],
             input_files_keys={"-s": "-o"},
             output_files={"-c": "{{ params.output_name }}.gro", "-dhdl": "dhdl.xvg"},
         )
-        .expand(gmxapi_output=grompp.output)
+        .expand(gmx_output=grompp.output)
     )
     mdrun = ResourceGmxOperatorDataclass.partial(
         task_id="mdrun",

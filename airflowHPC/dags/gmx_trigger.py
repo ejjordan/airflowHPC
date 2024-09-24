@@ -19,8 +19,8 @@ from airflow import settings
 def run_iteration(
     mdp, top, gro, output_dir, output_name, iteration_num, num_simulations, coul_lambda
 ):
-    from airflowHPC.operators.resource_gmx_operator import ResourceGmxOperatorDataclass
-    from airflowHPC.dags.tasks import prepare_gmx_input, update_gmxapi_input
+    from airflowHPC.operators import ResourceGmxOperatorDataclass
+    from airflowHPC.dags.tasks import prepare_gmx_input, update_gmx_input
 
     grompp_input_list = prepare_gmx_input.override(task_id="grompp_input_list")(
         args=["grompp"],
@@ -48,7 +48,7 @@ def run_iteration(
     grompp_input_list >> grompp
 
     mdrun_input_list = (
-        update_gmxapi_input.override(task_id="mdrun_input_list")
+        update_gmx_input.override(task_id="mdrun_input_list")
         .partial(
             args=["mdrun", "-v", "-deffnm", output_name, "-ntomp", "2"],
             input_files_keys={"-s": "-o"},
@@ -58,7 +58,7 @@ def run_iteration(
                 "-dhdl": "dhdl.xvg",
             },
         )
-        .expand(gmxapi_output=grompp.output)
+        .expand(gmx_output=grompp.output)
     )
     mdrun = ResourceGmxOperatorDataclass.partial(
         task_id="mdrun",
