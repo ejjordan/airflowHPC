@@ -161,7 +161,7 @@ with DAG(
         },
         gmx_executable="gmx_mpi",
     ).expand(input_data=grompp_input_list_sim)
-    # This could be ResourceGmxOperator, but we use ResourceBashOperator to demo how they are equivalent
+    # This could be ResourceGmxOperator, but this shows how ResourceBashOperator can be equivalent
     mdrun_sim = ResourceBashOperator(
         task_id="mdrun_sim",
         bash_command=f"{cli_executable()} mdrun -replex 100 -multidir "
