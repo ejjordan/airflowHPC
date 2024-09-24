@@ -73,6 +73,7 @@ def extract_edr_info(edr_file, field):
 @task
 def plot_histograms(data_list, labels, hatch_list, xlabel, title, output_file):
     import matplotlib.pyplot as plt
+    import logging
 
     for data in data_list:
         plt.hist(
@@ -89,6 +90,7 @@ def plot_histograms(data_list, labels, hatch_list, xlabel, title, output_file):
     plt.title(title)
     plt.legend()
     plt.savefig(output_file)
+    logging.info(f"Saved histogram to {output_file}")
 
 
 with DAG(
@@ -263,7 +265,7 @@ with DAG(
         data_list=potential_energies_list_equil,
         labels=["300K", "310K", "320K", "330K"],
         hatch_list=["/", ".", "\\", "o"],
-        output_file="potential_energy_histogram.png",
+        output_file="{{ params.output_dir }}/{{ params.step_dir }}/potential_energy_histogram_equil.png",
         xlabel="Potential Energy (kJ/mol)",
         title="Potential Energy Histogram",
     )
@@ -360,7 +362,7 @@ with DAG(
         data_list=potential_energy_list_sim,
         labels=["300K", "310K", "320K", "330K"],
         hatch_list=["/", ".", "\\", "o"],
-        output_file="potential_energy_histogram_sim.png",
+        output_file="{{ params.output_dir }}/{{ params.step_dir }}/potential_energy_histogram_sim.png",
         xlabel="Potential Energy (kJ/mol)",
         title="Potential Energy Histogram",
     )
@@ -378,7 +380,7 @@ with DAG(
         tpr_file=get_final_tpr,
         xtc_file=get_final_xtc,
         resnum=2,
-        output_file="ramaPhiPsiALA2.png",
+        output_file="{{ params.output_dir }}/{{ params.step_dir }}/ramaPhiPsiALA2.png",
     )
     grompp_sim >> mdrun_sim >> potential_energy_list_sim >> hist_sim
     mdrun_sim >> (get_final_tpr, get_final_xtc) >> plot_ramachandran
