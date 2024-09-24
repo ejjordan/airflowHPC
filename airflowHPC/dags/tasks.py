@@ -9,7 +9,7 @@ __all__ = (
     "get_file",
     "run_gmxapi",
     "run_gmxapi_dataclass",
-    "update_gmxapi_input",
+    "update_gmx_input",
     "prepare_gmx_input",
     "branch_task",
     "list_from_xcom",
@@ -24,7 +24,7 @@ __all__ = (
 
 
 @dataclass
-class GmxapiInputHolder:
+class GmxInputHolder:
     args: list
     input_files: dict
     output_files: dict
@@ -33,8 +33,8 @@ class GmxapiInputHolder:
 
 
 @dataclass
-class GmxapiRunInfoHolder:
-    inputs: GmxapiInputHolder
+class GmxRunInfoHolder:
+    inputs: GmxInputHolder
     outputs: dict
 
 
@@ -101,7 +101,7 @@ def run_gmxapi(
 
 
 @task(multiple_outputs=True, max_active_tis_per_dagrun=1)
-def run_gmxapi_dataclass(input_data: GmxapiInputHolder):
+def run_gmxapi_dataclass(input_data: GmxInputHolder):
     """Ideally this could be an overload with multipledispatch but that does not play well with airflow"""
     from dataclasses import asdict
 
@@ -115,33 +115,33 @@ def run_gmxapi_dataclass(input_data: GmxapiInputHolder):
         f"{key}": f"{gmx.output.file[key].result()}"
         for key in input_data["output_files"].keys()
     }
-    return asdict(GmxapiRunInfoHolder(inputs=input_data, outputs=run_output))
+    return asdict(GmxRunInfoHolder(inputs=input_data, outputs=run_output))
 
 
 @task
-def update_gmxapi_input(
-    gmxapi_output: GmxapiRunInfoHolder,
+def update_gmx_input(
+    gmx_output: GmxRunInfoHolder,
     args: list,
     input_files_keys: dict,
     output_files: dict,
 ):
     from dataclasses import asdict
 
-    # Add values to the input_files dictionary if the keys are present in the gmxapi_output
+    # Add values to the input_files dictionary if the keys are present in the gmx_output
     input_files = {
-        key: gmxapi_output["outputs"][value]
+        key: gmx_output["outputs"][value]
         for key, value in input_files_keys.items()
-        if value in gmxapi_output["outputs"].keys()
+        if value in gmx_output["outputs"].keys()
     }
     # Ensure that we got all the requested input files
     assert all([key in input_files.keys() for key in input_files_keys.keys()])
     # Create the updated GmxapiInputHolder
-    updated_input_holder = GmxapiInputHolder(
+    updated_input_holder = GmxInputHolder(
         args=args,
         input_files=input_files,
         output_files=output_files,
-        output_dir=gmxapi_output["inputs"]["output_dir"],
-        simulation_id=gmxapi_output["inputs"]["simulation_id"],
+        output_dir=gmx_output["inputs"]["output_dir"],
+        simulation_id=gmx_output["inputs"]["simulation_id"],
     )
     return asdict(updated_input_holder)
 
@@ -188,7 +188,7 @@ def prepare_gmx_input(
                 inputs[key] = value[i]
         inputHolderList.append(
             asdict(
-                GmxapiInputHolder(
+                GmxInputHolder(
                     args=args,
                     input_files=inputs,
                     output_files=output_files,

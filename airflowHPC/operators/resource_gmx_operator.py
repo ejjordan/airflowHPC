@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Sequence, Union, Iterable
 
 from airflow.exceptions import AirflowException, AirflowSkipException
 
-from airflowHPC.dags.tasks import GmxapiInputHolder, GmxapiRunInfoHolder
-from airflowHPC.operators.resource_bash_operator import ResourceBashOperator
+from airflowHPC.dags.tasks import GmxInputHolder, GmxRunInfoHolder
+from airflowHPC.operators import ResourceBashOperator
 
 if TYPE_CHECKING:
     from airflow.utils.context import Context
@@ -50,14 +50,10 @@ class ResourceGmxOperator(ResourceBashOperator):
                 self.gmx_executable = cli_executable()
             except ImportError:
                 raise ImportError(
-                    "The gmx_executable argument must be set if the gmxapi package is not installed."
+                    "The gmx_executable argument must be set if the gmxapi python package is not installed."
                 )
         else:
-            if shutil.which(gmx_executable) is None:
-                raise ValueError(
-                    f"Could not find {gmx_executable} in PATH. Please check that it is loaded."
-                )
-            self.gmx_executable = gmx_executable
+            self.gmx_executable = self._exec_check(gmx_executable)
 
         self.gmx_arguments = gmx_arguments
         self.input_files = input_files
@@ -95,7 +91,9 @@ class ResourceGmxOperator(ResourceBashOperator):
         self.log.info(f"gpu_ids: {self.gpu_ids}")
         self.log.info(f"hostname: {self.hostname}")
 
-        self.bash_command = self.create_gmxapi_call(
+        assert shutil.which(self.gmx_executable) is not None
+        assert shutil.which(self.mpi_executable) is not None
+        self.bash_command = self.create_gmx_call(
             gmx_executable=self.gmx_executable,
             gmx_arguments=self.gmx_arguments,
             mpi_executable=self.mpi_executable,
@@ -131,7 +129,7 @@ class ResourceGmxOperator(ResourceBashOperator):
             else:
                 yield value
 
-    def create_gmxapi_call(
+    def create_gmx_call(
         self,
         gmx_executable: str,
         gmx_arguments: list | str | bytes,
@@ -144,36 +142,9 @@ class ResourceGmxOperator(ResourceBashOperator):
             input_files = {}
         if output_files is None:
             output_files = {}
-        try:
-            gmx_executable = str(gmx_executable)
-        except Exception as e:
-            raise TypeError(
-                "This operator requires paths and names to be strings. *executable* argument is "
-                f"{type(gmx_executable)}."
-            )
-        try:
-            mpi_executable = str(mpi_executable)
-        except Exception as e:
-            raise TypeError(
-                "This operator requires paths and names to be strings. *executable* argument is "
-                f"{type(mpi_executable)}."
-            )
-        host_flag = "-host"
-        if mpi_executable is None:
-            mpi_executable = "mpirun"
-        elif "mpirun" in mpi_executable:
-            pass
-        elif "mpiexec" in mpi_executable:
-            pass
-        elif "srun" in mpi_executable:
-            host_flag = "--nodelist"
-        else:
-            raise ValueError(
-                f"Unrecognized mpi_executable: {mpi_executable}. Must be one of ['mpirun', 'mpiexec', 'srun']"
-            )
+
         if isinstance(gmx_arguments, (str, bytes)):
             gmx_arguments = [gmx_arguments]
-
         if self.gpu_ids:
             gmx_arguments.extend(["-gpu_id", ",".join(map(str, self.gpu_ids))])
 
@@ -181,6 +152,9 @@ class ResourceGmxOperator(ResourceBashOperator):
         call.append(mpi_executable)
         call.extend([self.num_ranks_flag, str(mpi_ranks)])
         if self.hostname:
+            host_flag = "-host"
+            if "srun" in mpi_executable:
+                host_flag = "--nodelist"
             call.extend([host_flag, self.hostname])
         call.append(gmx_executable)
         call.extend(gmx_arguments)
@@ -190,7 +164,7 @@ class ResourceGmxOperator(ResourceBashOperator):
 
 
 class ResourceGmxOperatorDataclass(ResourceGmxOperator):
-    def __init__(self, *, input_data: GmxapiInputHolder, **kwargs) -> None:
+    def __init__(self, *, input_data: GmxInputHolder, **kwargs) -> None:
         kwargs.update({"gmx_arguments": input_data["args"]})
         kwargs.update({"input_files": input_data["input_files"]})
         kwargs.update({"output_files": input_data["output_files"]})
@@ -206,6 +180,6 @@ class ResourceGmxOperatorDataclass(ResourceGmxOperator):
         from dataclasses import asdict
 
         run_output = super().execute(context)
-        output = asdict(GmxapiRunInfoHolder(inputs=self.input_data, outputs=run_output))
+        output = asdict(GmxRunInfoHolder(inputs=self.input_data, outputs=run_output))
         self.log.info(f"Done. Returned value was: {output}")
         return output

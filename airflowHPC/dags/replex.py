@@ -65,7 +65,9 @@ def initialize_MDP(
 
 
 @task
-def prepare_args_for_mdp_functions(counter: int, mode: str, num_simulations: int, output_dir: str):    
+def prepare_args_for_mdp_functions(
+    counter: int, mode: str, num_simulations: int, output_dir: str
+):
     if mode == "initialize":
         # For initializing MDP files for the first iteration
         expand_args = [

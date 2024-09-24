@@ -5,6 +5,8 @@ from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
+
+from airflowHPC.operators import ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflowHPC.dags.tasks import (
     get_file,
@@ -12,7 +14,9 @@ from airflowHPC.dags.tasks import (
     branch_task,
     prepare_gmx_input,
     run_gmxapi_dataclass,
-    update_gmxapi_input,
+    update_gmx_input,
+    xcom_lookup,
+    dict_from_xcom_dicts,
 )
 from gmxapi.commandline import cli_executable
 
@@ -197,11 +201,18 @@ with DAG(
         output_path_parts=[equil_output_dir, "sim_"],
         num_simulations=NUM_SIMULATIONS,
     )
-    grompp_equil = run_gmxapi_dataclass.override(task_id="grompp_equil").expand(
-        input_data=grompp_input_list_equil
-    )
+    grompp_equil = ResourceGmxOperatorDataclass.partial(
+        task_id="grompp_equil",
+        executor_config={
+            "mpi_ranks": 1,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+    ).expand(input_data=grompp_input_list_equil)
     mdrun_input = (
-        update_gmxapi_input.override(task_id="mdrun_prepare_equil")
+        update_gmx_input.override(task_id="mdrun_prepare_equil")
         .partial(
             args=["mdrun"],
             input_files_keys={"-s": "-o"},
@@ -212,12 +223,27 @@ with DAG(
                 "-cpo": "result.cpt",
             },
         )
-        .expand(gmxapi_output=grompp_equil)
+        .expand(gmx_output=grompp_equil.output)
     )
-    mdrun_result = run_gmxapi_dataclass.override(task_id="mdrun_equil").expand(
-        input_data=mdrun_input
+    mdrun_result = ResourceGmxOperatorDataclass.partial(
+        task_id="mdrun_equil",
+        executor_config={
+            "mpi_ranks": 2,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+    ).expand(input_data=mdrun_input)
+    key_name = "edr"
+    dataset_dict = dict_from_xcom_dicts.override(task_id="make_dataset_dict")(
+        list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun_equil', key='return_value')}}",
+        dict_structure={
+            key_name: "-e",
+        },
     )
-    edr_files = mdrun_result.map(lambda x: x["outputs"]["-e"])
+    mdrun_result >> dataset_dict
+    edr_files = dataset_dict.map(lambda x: x[key_name])
     potential_energies_list_equil = (
         extract_edr_info.override(task_id="gmx_ener_equil")
         .partial(field="Potential")
@@ -278,9 +304,16 @@ with DAG(
         output_path_parts=[sim_output_dir, "sim_"],
         num_simulations=NUM_SIMULATIONS,
     )
-    grompp_sim = run_gmxapi_dataclass.override(task_id="grompp_sim").expand(
-        input_data=grompp_input_list_sim
-    )
+    grompp_sim = ResourceGmxOperatorDataclass.partial(
+        task_id="grompp_sim",
+        executor_config={
+            "mpi_ranks": 1,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+    ).expand(input_data=grompp_input_list_sim)
     mdrun_sim = BashOperator(
         bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir sim/sim_[0123] -s sim.tpr",
         task_id="mdrun_sim",
@@ -322,6 +355,9 @@ with DAG(
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
+    params={
+        "output_dir": "remd",
+    },
 ) as coordinate:
     coordinate.doc = """Reworking of gromacs tutorial for replica exchange MD.
         Source: https://gitlab.com/gromacs/online-tutorials/tutorials-in-progress.git"""
