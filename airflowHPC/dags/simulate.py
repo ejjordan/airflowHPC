@@ -5,12 +5,11 @@ from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
     get_file,
-    run_gmxapi_dataclass,
     prepare_gmx_input,
     unpack_ref_t,
 )
+from airflowHPC.operators import ResourceBashOperator, ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
-from airflow.operators.bash import BashOperator
 from gmxapi.commandline import cli_executable
 from airflow.models.param import Param
 
@@ -49,27 +48,6 @@ def unpack_cpt_inputs(**context):
     num_steps = context["task"].render_template("{{ params.step_number }}", context)
     input_dir = [f"{cpt_input_dir}/iteration_{num_steps}/sim_{i}" for i in temps_range]
     return input_dir
-
-
-with DAG(
-    dag_id="simulate_done",
-    start_date=timezone.utcnow(),
-    schedule=None,
-    catchup=False,
-    render_template_as_native_obj=True,
-    max_active_runs=1,
-    params={
-        "inputs": {
-            "gro": {"directory": "sim", "filename": "sim.gro"},
-        },
-        "ref_t_list": [300, 310, 320, 330],
-        "step_number": 0,
-    },
-) as simulate:
-    simulate.doc = """Simulation of a system with replica exchange handled by mdrun -multidir option."""
-
-    ref_temps = unpack_ref_t()
-    gro_input_dirs = unpack_gro_inputs()
 
 
 with DAG(
@@ -152,14 +130,27 @@ with DAG(
         ],
         num_simulations="{{ params.ref_t_list | length }}",
     )
-    grompp_sim = run_gmxapi_dataclass.override(task_id="grompp_sim").expand(
-        input_data=grompp_input_list_sim
-    )
-    # If this task hangs try `export AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER=True`.
-    mdrun_sim = BashOperator(
-        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir "
-        + "{{ params.output_dir }}/iteration_{{ params.step_number }}/sim_[0123] -s sim.tpr -deffnm sim",
+    grompp_sim = ResourceGmxOperatorDataclass.partial(
+        task_id="grompp_sim",
+        executor_config={
+            "mpi_ranks": 1,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+    ).expand(input_data=grompp_input_list_sim)
+    # This could be ResourceGmxOperator, but this shows how ResourceBashOperator can be equivalent
+    mdrun_sim = ResourceBashOperator(
         task_id="mdrun_sim",
+        bash_command=f"{cli_executable()} mdrun -replex 100 -multidir "
+        + "{{ params.output_dir }}/iteration_{{ params.step_number }}/sim_[0123] -s sim.tpr -deffnm sim",
+        executor_config={
+            "mpi_ranks": 4,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
         cwd=os.path.curdir,
     )
     grompp_sim >> mdrun_sim

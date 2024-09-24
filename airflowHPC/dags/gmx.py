@@ -1,6 +1,6 @@
 from airflow import DAG
 from airflow.utils import timezone
-from airflowHPC.dags.tasks import get_file, run_gmxapi
+from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceGmxOperator
 
 with DAG(

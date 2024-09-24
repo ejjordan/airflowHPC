@@ -4,10 +4,10 @@ from airflow.models.param import Param
 from airflowHPC.dags.tasks import (
     get_file,
     prepare_gmx_input,
-    run_gmxapi_dataclass,
-    update_gmxapi_input,
+    update_gmx_input,
     unpack_ref_t,
 )
+from airflowHPC.operators import ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
@@ -81,11 +81,18 @@ with DAG(
         ],
         num_simulations="{{ params.ref_t_list | length }}",
     )
-    grompp_npt = run_gmxapi_dataclass.override(task_id="grompp_npt").expand(
-        input_data=grompp_input_list_npt
-    )
+    grompp_npt = ResourceGmxOperatorDataclass.partial(
+        task_id="grompp_npt",
+        executor_config={
+            "mpi_ranks": 1,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+    ).expand(input_data=grompp_input_list_npt)
     mdrun_input = (
-        update_gmxapi_input.override(task_id="mdrun_prepare_npt")
+        update_gmx_input.override(task_id="mdrun_prepare_npt")
         .partial(
             args=["mdrun"],
             input_files_keys={"-s": "-o"},
@@ -96,8 +103,15 @@ with DAG(
                 "-cpo": "npt.cpt",
             },
         )
-        .expand(gmxapi_output=grompp_npt)
+        .expand(gmx_output=grompp_npt.output)
     )
-    mdrun_result = run_gmxapi_dataclass.override(task_id="mdrun_npt").expand(
-        input_data=mdrun_input
-    )
+    mdrun_result = ResourceGmxOperatorDataclass.partial(
+        task_id="mdrun_npt",
+        executor_config={
+            "mpi_ranks": 4,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+    ).expand(input_data=mdrun_input)

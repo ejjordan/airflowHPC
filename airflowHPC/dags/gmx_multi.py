@@ -1,8 +1,8 @@
 from airflow import DAG
 from airflow.decorators import task
 from airflow.utils import timezone
-from airflowHPC.dags.tasks import get_file, run_gmxapi
-from airflowHPC.operators.resource_gmx_operator import ResourceGmxOperator
+from airflowHPC.dags.tasks import get_file
+from airflowHPC.operators import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
@@ -26,7 +26,7 @@ with DAG(
             "top": {"directory": "ensemble_md", "filename": "sys.top"},
         },
     },
-) as gmxapi_multi:
+) as gmx_multi:
     input_gro = get_file.override(task_id="get_gro")(
         input_dir="{{ params.inputs.gro.directory }}",
         file_name="{{ params.inputs.gro.filename }}",

@@ -25,7 +25,9 @@ with DAG(
 ) as dag:
     dag.doc = """This is a DAG for running iterations of a REXEE simulation."""
 
-    output_dir_abs = os.path.abspath("{{ params.output_dir }}")  # to ensure the trigger DAGs are run in the same folder
+    output_dir_abs = os.path.abspath(
+        "{{ params.output_dir }}"
+    )  # to ensure the trigger DAGs are run in the same folder
 
     initialize_rexee_params = {
         "num_simulations": "{{ params.num_simulations }}",
@@ -37,7 +39,7 @@ with DAG(
         "dhdl_store_fn": "{{ params.dhdl_store_fn }}",
     }
     is_initialize_done = get_file.override(task_id="is_initialize_done")(
-        input_dir=output_dir_abs+"/{{ params.dhdl_store_dir }}",
+        input_dir=output_dir_abs + "/{{ params.dhdl_store_dir }}",
         file_name="{{ params.dhdl_store_fn }}",
         use_ref_data=False,
         check_exists=True,
