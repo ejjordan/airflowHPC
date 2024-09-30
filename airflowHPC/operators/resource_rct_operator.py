@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 import pprint
 import threading as mt
 from typing import TYPE_CHECKING, Sequence, Iterable
@@ -47,6 +48,7 @@ class ResourceRCTOperator(BaseOperator):
         show_return_value_in_logs: bool = True,
         **kwargs,
     ) -> None:
+        self._uuid = str(uuid.uuid4())
         self.log.info(f"=== ResourceRCTOperator: __init__ {kwargs}")
         # kwargs.update({"cwd": output_dir})
         super().__init__(**kwargs)
@@ -126,7 +128,7 @@ class ResourceRCTOperator(BaseOperator):
         )
 
         self.log.info("====================== submit td %d" % os.getpid())
-        self._rct_pub.put("request", {"td": td.as_dict()})
+        self._rct_pub.put("request", {"op_id": self._uuid, "td": td.as_dict()})
 
         # timeout to avoid zombie tasks?
         timeout = 60 * 60  # FIXME
@@ -164,9 +166,15 @@ class ResourceRCTOperator(BaseOperator):
         return output_files_paths
 
     def _update_cb(self, topic, msg):
+        uuid = msg["op_id"]
         task = msg["task"]
         uid = task["uid"]
         state = task["state"]
+
+        if uuid != self._uuid:
+            self.log.info("===================== ignore %s: %s" % (uid, state))
+            return
+
         self.log.info("===================== update %s: %s" % (uid, state))
 
         self._rct_task = msg["task"]

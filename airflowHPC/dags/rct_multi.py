@@ -40,6 +40,8 @@ with DAG(
             {"nsteps": 5000},
             {"nsteps": 5000},
             {"nsteps": 5000, "dt": 0.2},
+            # < 0.002 fs: expected to succeed
+            # > 0.1   fs: expected to fail
         ]
     )
 
