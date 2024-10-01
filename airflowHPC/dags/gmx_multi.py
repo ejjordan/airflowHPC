@@ -67,7 +67,7 @@ with DAG(
             "gpu_type": None,
         },
         gmx_executable="gmx_mpi",
-        gmx_arguments=["mdrun", "-ntomp", "2"],
+        gmx_arguments=["mdrun", "-ntomp", "2", "-pin", "on", "-pinstride", "2"],
         input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
     ).expand(output_dir=outputs_dirs)

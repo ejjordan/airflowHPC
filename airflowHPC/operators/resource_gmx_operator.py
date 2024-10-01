@@ -52,8 +52,10 @@ class ResourceGmxOperator(ResourceBashOperator):
                 raise ImportError(
                     "The gmx_executable argument must be set if the gmxapi python package is not installed."
                 )
+        elif gmx := self._exec_check(gmx_executable):
+            self.gmx_executable = gmx
         else:
-            self.gmx_executable = self._exec_check(gmx_executable)
+            raise ValueError(f"Executable {gmx_executable} not found.")
 
         self.gmx_arguments = gmx_arguments
         self.input_files = input_files
@@ -88,6 +90,7 @@ class ResourceGmxOperator(ResourceBashOperator):
         self.log.info(f"gmx_arguments: {self.gmx_arguments}")
         self.log.info(f"input_files: {self.input_files}")
         self.log.info(f"output_files: {output_files_paths}")
+        self.log.info(f"core_ids: {self.core_ids}")
         self.log.info(f"gpu_ids: {self.gpu_ids}")
         self.log.info(f"hostname: {self.hostname}")
 
@@ -151,12 +154,13 @@ class ResourceGmxOperator(ResourceBashOperator):
         call = list()
         call.append(mpi_executable)
         call.extend([self.num_ranks_flag, str(mpi_ranks)])
+        call.extend(["--cpu-set", self.core_ids])
         if self.hostname:
             if "srun" in mpi_executable:
                 host_flag = "--nodelist"
             else:
                 host_flag = "-host"
-            call.extend([host_flag, self.hostname])
+            call.extend([host_flag, f"{self.hostname}:{self.mpi_ranks}"])
         call.append(gmx_executable)
         call.extend(gmx_arguments)
         call.extend(self.flatten_dict(input_files))

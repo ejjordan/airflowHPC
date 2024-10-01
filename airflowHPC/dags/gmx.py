@@ -47,7 +47,7 @@ with DAG(
     mdrun_result = ResourceGmxOperator(
         task_id="mdrun",
         executor_config={
-            "mpi_ranks": 1,
+            "mpi_ranks": 4,
             "cpus_per_task": 2,
             "gpus": 0,
             "gpu_type": None,

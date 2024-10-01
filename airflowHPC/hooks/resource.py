@@ -17,7 +17,7 @@ class Slot:
     gpus: List[ResourceOccupation] = field(default_factory=list)
     mem: int = 0
     node_index: int = 0
-    node_name: str = ""
+    hostname: str = ""
 
 
 @dataclass
@@ -36,7 +36,8 @@ DOWN = None
 
 @dataclass
 class RankRequirements:
-    num_cores: int = 1
+    num_ranks: int = 1
+    num_threads: int = 1
     num_gpus: int = 0
     core_occupation: float = 1.0
     gpu_occupation: float = 1.0
@@ -101,7 +102,7 @@ class NodeManager:
             # NOTE: the current mechanism will never use the same core or gpu
             #       multiple times for the created slot, even if the respective
             #       occupation would allow for it.
-            if rr.num_cores:
+            if rr.num_ranks:
                 for ro in self.node.cores:
                     if ro.occupation is DOWN:
                         continue
@@ -111,10 +112,10 @@ class NodeManager:
                                 index=ro.index, occupation=rr.core_occupation
                             )
                         )
-                    if len(cores) == rr.num_cores:
+                    if len(cores) == rr.num_ranks:
                         break
 
-                if len(cores) < rr.num_cores:
+                if len(cores) < rr.num_ranks:
                     return None
 
             if rr.num_gpus:
@@ -141,7 +142,7 @@ class NodeManager:
                 gpus=gpus,
                 mem=rr.mem,
                 node_index=self.node.index,
-                node_name=self.node.name,
+                hostname=self.node.name,
             )
             self._allocate_slot(slot)
 
@@ -197,10 +198,10 @@ class NodeList:
         if not self.uniform:
             raise RuntimeError("verification unsupported for non-uniform nodes")
 
-        if not rr.num_cores:
+        if not rr.num_ranks:
             raise ValueError(f"invalid rank requirements: {rr}")
 
-        requirement = self.cores_per_node / rr.num_cores
+        requirement = self.cores_per_node / rr.num_ranks
 
         if rr.num_gpus:
             requirement = min(requirement, self.gpus_per_node / rr.num_gpus)

@@ -86,23 +86,34 @@ class SlurmHook(BaseHook):
     def threads_per_core(self) -> int:
         return int(conf.get("hpc", "threads_per_core", fallback=2))
 
+    def get_core_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
+        if task_instance_key not in self.slots_dict:
+            self.log.info(f"Task keys {self.task_resource_requests.keys()}")
+            raise ValueError(f"Resource not allocated for task {task_instance_key}")
+        return [core.index for core in self.slots_dict[task_instance_key].cores]
+
     def get_gpu_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
         if task_instance_key not in self.slots_dict:
             self.log.info(f"Task keys {self.task_resource_requests.keys()}")
             raise ValueError(f"Resource not allocated for task {task_instance_key}")
         return [gpu.index for gpu in self.slots_dict[task_instance_key].gpus]
 
-    def get_node_name(self, task_instance_key: TaskInstanceKey) -> str:
+    def get_hostname(self, task_instance_key: TaskInstanceKey) -> str:
         if task_instance_key not in self.slots_dict:
             self.log.info(f"Task keys {self.task_resource_requests.keys()}")
             raise ValueError(f"Resource not allocated for task {task_instance_key}")
-        return self.slots_dict[task_instance_key].node_name
+        return self.slots_dict[task_instance_key].hostname
 
     def set_task_resources(
-        self, task_instance_key: TaskInstanceKey, num_cores: int, num_gpus: int
+        self,
+        task_instance_key: TaskInstanceKey,
+        num_ranks: int,
+        num_threads: int,
+        num_gpus: int,
     ):
         resource_request = RankRequirements(
-            num_cores=num_cores,
+            num_ranks=num_ranks,
+            num_threads=num_threads,
             num_gpus=num_gpus,
         )
         self.task_resource_requests[task_instance_key] = resource_request
