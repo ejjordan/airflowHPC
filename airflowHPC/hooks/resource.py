@@ -84,6 +84,20 @@ class NodeManager:
 
             self.node.mem -= slot.mem
 
+    def find_available_slots(self, rr_list: List[RankRequirements]) -> List[Slot]:
+        with self.__lock__:
+            slots = list()
+            for rr in rr_list:
+                slot = self.find_slot(rr)
+                if slot:
+                    slots.append(slot)
+                    self._allocate_slot(slot)
+                else:
+                    break
+            for slot in slots:
+                self.deallocate_slot(slot)
+            return slots
+
     def deallocate_slot(self, slot: Slot) -> None:
         with self.__lock__:
             for ro in slot.cores:
@@ -144,9 +158,15 @@ class NodeManager:
                 node_index=self.node.index,
                 hostname=self.node.name,
             )
-            self._allocate_slot(slot)
 
             return slot
+
+    def allocate_slot(self, rr: RankRequirements) -> Slot:
+        slot = self.find_slot(rr)
+        if slot is None:
+            raise RuntimeError("could not allocate slot")
+        self._allocate_slot(slot)
+        return slot
 
 
 class NodeList:
@@ -212,7 +232,7 @@ class NodeList:
         if requirement < 1:
             raise ValueError(f"invalid rank requirements: {rr}")
 
-    def find_slots(self, rr: RankRequirements) -> Slot | None:
+    def find_slot(self, rr: RankRequirements) -> Slot | None:
         self._assert_rr(rr)
 
         for node in self.nodes:
@@ -221,6 +241,26 @@ class NodeList:
                 return slot
         return None
 
-    def release_slots(self, slot: Slot) -> None:
+    def find_available_slots(self, rr_list: List[RankRequirements]) -> List[Slot]:
+        slots = list()
+        for node in self.nodes:
+            node_slots = node.find_available_slots(rr_list)
+            if node_slots:
+                slots.extend(node_slots)
+            else:
+                break
+        return slots
+
+    def allocate_slot(self, rr: RankRequirements) -> Slot | None:
+        self._assert_rr(rr)
+
+        for node in self.nodes:
+            slot = node.find_slot(rr)
+            if slot:
+                node.allocate_slot(rr)
+                return slot
+        return None
+
+    def release_slot(self, slot: Slot) -> None:
         node = self.nodes[slot.node_index]
         node.deallocate_slot(slot)

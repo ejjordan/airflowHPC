@@ -19,7 +19,7 @@ with DAG(
     catchup=False,
     params={
         "output_dir": "outputs",
-        "num_sims": 4,
+        "num_sims": 2,
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "basic_md.json"},
             "gro": {"directory": "ensemble_md", "filename": "sys.gro"},
@@ -58,10 +58,23 @@ with DAG(
         output_dir="{{ params.output_dir }}",
     )
     outputs_dirs = outputs_list.override(task_id="get_output_dirs")()
-    mdrun_result = ResourceGmxOperator.partial(
-        task_id="mdrun",
+    mdrun_batch_1 = ResourceGmxOperator.partial(
+        task_id="mdrun_batch_1",
         executor_config={
             "mpi_ranks": 4,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+        gmx_arguments=["mdrun", "-ntomp", "2", "-pin", "on", "-pinstride", "2"],
+        input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
+        output_files={"-c": "result.gro", "-x": "result.xtc"},
+    ).expand(output_dir=outputs_dirs)
+    mdrun_batch_2 = ResourceGmxOperator.partial(
+        task_id="mdrun_batch_2",
+        executor_config={
+            "mpi_ranks": 2,
             "cpus_per_task": 2,
             "gpus": 0,
             "gpu_type": None,
@@ -92,4 +105,5 @@ with DAG(
         output_files={"-c": "result.gro", "-x": "result.xtc"},
     ).expand(output_dir=outputs_dirs)
     """
-    grompp_result >> mdrun_result
+    grompp_result >> mdrun_batch_1
+    grompp_result >> mdrun_batch_2

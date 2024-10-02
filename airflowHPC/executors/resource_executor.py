@@ -107,6 +107,9 @@ class ResourceWorker(Process, LoggingMixin):
             env.update({self.hostname_env_var_name: hostname})
         state = self._execute_work_in_subprocess(command, env)
         self.result_queue.put((key, state))
+        self.log.info(
+            f"Task {key.task_id}.{key.map_index} finished with state {state} on {self.name}"
+        )
         # Remove the command since the worker is done executing the task
         setproctitle("airflow worker -- ResourceExecutor")
 
@@ -177,11 +180,16 @@ class ResourceExecutor(BaseExecutor):
         if not self.parallelism:
             open_slots = len(self.queued_tasks)
         else:
-            for task in self.queued_tasks:
-                # Here is where it would be useful to account for resources a task requires in calculating open_slots
-                resource_request = self.slurm_hook.task_resource_requests[task]
-                self.log.info(f"Task {task} has slots {resource_request}")
-            open_slots = self.parallelism - len(self.running)
+            slots = self.slurm_hook.find_available_slots(
+                [task for task in self.queued_tasks]
+            )
+            open_slots = len(slots)
+            if open_slots > 0:
+                self.log.info(f"Open slots: {open_slots}")
+                self.log.info(
+                    f"Queued tasks: {[(task.task_id, task.map_index) for task in self.queued_tasks]}"
+                )
+                self.log.info(f"Slots: {slots}")
 
         num_running_tasks = len(self.running)
         num_queued_tasks = len(self.queued_tasks)
@@ -301,6 +309,7 @@ class ResourceExecutor(BaseExecutor):
 
         # this would work if we could be sure that we don't get here when there are no resources available
         # thus fixing the accounting of slots in the heartbeat would make this work
+        # self.log.info(f"task {key.task_id} freeing cores: {core_ids}")
         # self.slurm_hook.release_task_resources(key)
 
     def trigger_tasks(self, open_slots: int) -> None:
@@ -346,6 +355,10 @@ class ResourceExecutor(BaseExecutor):
             else:
                 try:
                     found_slots = self.slurm_hook.assign_task_resources(key)
+                    core_ids = self.slurm_hook.get_core_ids(key)
+                    self.log.info(
+                        f"ALLOCATED task {key.task_id} using cores: {core_ids}"
+                    )
                     if not found_slots:
                         self.log.debug(f"No available resources for task: {key}.")
                         sorted_queue.append(
@@ -377,7 +390,9 @@ class ResourceExecutor(BaseExecutor):
                 try:
                     if state in {TaskInstanceState.SUCCESS, TaskInstanceState.FAILED}:
                         core_ids = self.slurm_hook.get_core_ids(key)
-                        self.log.info(f"task {key.task_id} freeing cores: {core_ids}")
+                        self.log.info(
+                            f"FREED task {key.task_id} using cores: {core_ids}"
+                        )
                         # Due to sync being called after trigger_tasks, this is too late for resources to be released
                         # before subsequent tasks are triggered, meaning that resource placement is suboptimal
                         # In general, it may also be useful to set a minumum slot size to avoid fragmentation
