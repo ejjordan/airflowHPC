@@ -15,10 +15,9 @@ class ResourceOccupation:
 class Slot:
     cores: List[ResourceOccupation] = field(default_factory=list)
     gpus: List[ResourceOccupation] = field(default_factory=list)
-    lfs: int = 0
     mem: int = 0
     node_index: int = 0
-    node_name: str = ""
+    hostname: str = ""
 
 
 @dataclass
@@ -27,7 +26,6 @@ class NodeResources:
     name: str = ""
     cores: List[ResourceOccupation] = field(default_factory=list)
     gpus: List[ResourceOccupation] = field(default_factory=list)
-    lfs: int = 0
     mem: int = 0
 
 
@@ -38,11 +36,11 @@ DOWN = None
 
 @dataclass
 class RankRequirements:
-    num_cores: int = 1
+    num_ranks: int = 1
+    num_threads: int = 1
     num_gpus: int = 0
     core_occupation: float = 1.0
     gpu_occupation: float = 1.0
-    lfs: int = 0
     mem: int = 0
 
     def __eq__(self, other: RankRequirements) -> bool:
@@ -84,8 +82,21 @@ class NodeManager:
             for ro in slot.gpus:
                 self.node.gpus[ro.index].occupation += ro.occupation
 
-            self.node.lfs -= slot.lfs
             self.node.mem -= slot.mem
+
+    def find_available_slots(self, rr_list: List[RankRequirements]) -> List[Slot]:
+        with self.__lock__:
+            slots = list()
+            for rr in rr_list:
+                slot = self.find_slot(rr)
+                if slot:
+                    slots.append(slot)
+                    self._allocate_slot(slot)
+                else:
+                    break
+            for slot in slots:
+                self.deallocate_slot(slot)
+            return slots
 
     def deallocate_slot(self, slot: Slot) -> None:
         with self.__lock__:
@@ -95,7 +106,6 @@ class NodeManager:
             for ro in slot.gpus:
                 self.node.gpus[ro.index].occupation -= ro.occupation
 
-            self.node.lfs += slot.lfs
             self.node.mem += slot.mem
 
     def find_slot(self, rr: RankRequirements) -> Optional[Slot]:
@@ -106,7 +116,7 @@ class NodeManager:
             # NOTE: the current mechanism will never use the same core or gpu
             #       multiple times for the created slot, even if the respective
             #       occupation would allow for it.
-            if rr.num_cores:
+            if rr.num_ranks:
                 for ro in self.node.cores:
                     if ro.occupation is DOWN:
                         continue
@@ -116,10 +126,10 @@ class NodeManager:
                                 index=ro.index, occupation=rr.core_occupation
                             )
                         )
-                    if len(cores) == rr.num_cores:
+                    if len(cores) == rr.num_ranks:
                         break
 
-                if len(cores) < rr.num_cores:
+                if len(cores) < rr.num_ranks:
                     return None
 
             if rr.num_gpus:
@@ -138,22 +148,25 @@ class NodeManager:
                 if len(gpus) < rr.num_gpus:
                     return None
 
-            if rr.lfs and self.node.lfs < rr.lfs:
-                return None
             if rr.mem and self.node.mem < rr.mem:
                 return None
 
             slot = Slot(
                 cores=cores,
                 gpus=gpus,
-                lfs=rr.lfs,
                 mem=rr.mem,
                 node_index=self.node.index,
-                node_name=self.node.name,
+                hostname=self.node.name,
             )
-            self._allocate_slot(slot)
 
             return slot
+
+    def allocate_slot(self, rr: RankRequirements) -> Slot:
+        slot = self.find_slot(rr)
+        if slot is None:
+            raise RuntimeError("could not allocate slot")
+        self._allocate_slot(slot)
+        return slot
 
 
 class NodeList:
@@ -185,7 +198,6 @@ class NodeList:
             if (
                 node.node.cores != node_0.cores
                 or node.node.gpus != node_0.gpus
-                or node.node.lfs != node_0.lfs
                 or node.node.mem != node_0.mem
             ):
                 self.uniform = False
@@ -194,7 +206,6 @@ class NodeList:
         if self.uniform:
             self.cores_per_node = len(node_0.cores)
             self.gpus_per_node = len(node_0.gpus)
-            self.lfs_per_node = node_0.lfs
             self.mem_per_node = node_0.mem
 
         else:
@@ -207,16 +218,13 @@ class NodeList:
         if not self.uniform:
             raise RuntimeError("verification unsupported for non-uniform nodes")
 
-        if not rr.num_cores:
+        if not rr.num_ranks:
             raise ValueError(f"invalid rank requirements: {rr}")
 
-        requirement = self.cores_per_node / rr.num_cores
+        requirement = self.cores_per_node / rr.num_ranks
 
         if rr.num_gpus:
             requirement = min(requirement, self.gpus_per_node / rr.num_gpus)
-
-        if rr.lfs:
-            requirement = min(requirement, self.lfs_per_node / rr.lfs)
 
         if rr.mem:
             requirement = min(requirement, self.mem_per_node / rr.mem)
@@ -224,7 +232,7 @@ class NodeList:
         if requirement < 1:
             raise ValueError(f"invalid rank requirements: {rr}")
 
-    def find_slots(self, rr: RankRequirements) -> Slot | None:
+    def find_slot(self, rr: RankRequirements) -> Slot | None:
         self._assert_rr(rr)
 
         for node in self.nodes:
@@ -233,6 +241,26 @@ class NodeList:
                 return slot
         return None
 
-    def release_slots(self, slot: Slot) -> None:
+    def find_available_slots(self, rr_list: List[RankRequirements]) -> List[Slot]:
+        slots = list()
+        for node in self.nodes:
+            node_slots = node.find_available_slots(rr_list)
+            if node_slots:
+                slots.extend(node_slots)
+            else:
+                break
+        return slots
+
+    def allocate_slot(self, rr: RankRequirements) -> Slot | None:
+        self._assert_rr(rr)
+
+        for node in self.nodes:
+            slot = node.find_slot(rr)
+            if slot:
+                node.allocate_slot(rr)
+                return slot
+        return None
+
+    def release_slot(self, slot: Slot) -> None:
         node = self.nodes[slot.node_index]
         node.deallocate_slot(slot)
