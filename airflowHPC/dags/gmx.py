@@ -44,8 +44,22 @@ with DAG(
         output_dir="{{ params.output_dir }}",
     )
     """
-    mdrun_result = ResourceGmxOperator(
-        task_id="mdrun",
+    mdrun_result1 = ResourceGmxOperator(
+        task_id="mdrun1",
+        executor_config={
+            "mpi_ranks": 1,
+            "cpus_per_task": 1,
+            "gpus": 0,
+            "gpu_type": None,
+        },
+        gmx_executable="gmx_mpi",
+        gmx_arguments=["mdrun", "-ntomp", "1"],
+        input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
+        output_files={"-c": "result.gro", "-x": "result.xtc"},
+        output_dir="{{ params.output_dir }}",
+    )
+    mdrun_result2 = ResourceGmxOperator(
+        task_id="mdrun2",
         executor_config={
             "mpi_ranks": 4,
             "cpus_per_task": 2,
@@ -58,4 +72,4 @@ with DAG(
         output_files={"-c": "result.gro", "-x": "result.xtc"},
         output_dir="{{ params.output_dir }}",
     )
-    grompp_result >> mdrun_result
+    grompp_result >> mdrun_result1 >> mdrun_result2

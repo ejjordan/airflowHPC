@@ -20,7 +20,6 @@ from airflowHPC.hooks.slurm import SlurmHook
 from airflowHPC.operators import is_resource_operator
 
 if TYPE_CHECKING:
-    from multiprocessing.managers import SyncManager
     from queue import Queue
 
     from airflow.executors.base_executor import CommandType
@@ -170,26 +169,24 @@ class ResourceExecutor(BaseExecutor):
         )
         if self.parallelism < 0:
             raise AirflowException("parallelism must be bigger than or equal to 0")
-        self.manager: SyncManager | None = None
-        self.result_queue: Queue[TaskInstanceStateType] | None = None
-        self.task_queue: Queue[ExecutorWorkType] | None = None
+        self.manager = Manager()
+        self.result_queue: Queue[TaskInstanceStateType] = self.manager.Queue()
+        self.task_queue: Queue[ExecutorWorkType] = self.manager.Queue()
         self.workers: list[ResourceWorker] = []
 
     def heartbeat(self) -> None:
         """Heartbeat sent to trigger new jobs."""
-        if not self.parallelism:
-            open_slots = len(self.queued_tasks)
-        else:
-            slots = self.slurm_hook.find_available_slots(
-                [task for task in self.queued_tasks]
+        slots = self.slurm_hook.find_available_slots(
+            [task for task in self.queued_tasks]
+        )
+        open_slots = len(slots)
+        if open_slots > 0:
+            self.log.debug(
+                f"Queued tasks: {[(task.task_id, task.map_index) for task in self.queued_tasks]}"
             )
-            open_slots = len(slots)
-            if open_slots > 0:
-                self.log.info(f"Open slots: {open_slots}")
-                self.log.info(
-                    f"Queued tasks: {[(task.task_id, task.map_index) for task in self.queued_tasks]}"
-                )
-                self.log.info(f"Slots: {slots}")
+            self.log.debug(
+                f"Running tasks: {[(task.task_id, task.map_index) for task in self.running]}"
+            )
 
         num_running_tasks = len(self.running)
         num_queued_tasks = len(self.queued_tasks)
@@ -214,9 +211,11 @@ class ResourceExecutor(BaseExecutor):
             tags={"status": "running", "name": self.__class__.__name__},
         )
 
+        self.log.debug("Calling the %s sync method", self.__class__)
+        self.sync()
+
         self.trigger_tasks(open_slots)
 
-        # Calling child class sync method
         self.log.debug("Calling the %s sync method", self.__class__)
         self.sync()
 
@@ -224,13 +223,10 @@ class ResourceExecutor(BaseExecutor):
         """Start the executor."""
         old_proctitle = getproctitle()
         setproctitle("airflow executor -- ResourceExecutor")
-        self.manager = Manager()
         setproctitle(old_proctitle)
-        self.result_queue = self.manager.Queue()
         self.workers = []
         self.workers_active = 0
 
-        self.task_queue = self.manager.Queue()
         self.workers = [
             ResourceWorker(
                 self.task_queue,
@@ -253,7 +249,9 @@ class ResourceExecutor(BaseExecutor):
     ):
         """Queues command to task."""
         if task_instance.key not in self.queued_tasks:
-            self.log.info("Adding to queue: %s", command)
+            self.log.info(
+                f"Adding to queue: {task_instance.key.task_id}.{task_instance.key.map_index}"
+            )
             if is_resource_operator(task_instance.operator_name):
                 assert task_instance.executor_config
                 assert "mpi_ranks" in task_instance.executor_config
@@ -266,11 +264,11 @@ class ResourceExecutor(BaseExecutor):
                 msg = f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key].num_ranks} "
                 msg += f"MPI ranks, {self.slurm_hook.task_resource_requests[task_instance.key].num_threads} threads, "
                 msg += f"and {self.slurm_hook.task_resource_requests[task_instance.key].num_gpus} GPU(s) "
-                msg += f"for task {task_instance.key}"
+                msg += f"for task {task_instance.key.task_id}.{task_instance.key.map_index}"
                 self.log.info(msg)
             else:
                 self.log.info(
-                    f"Setting task resources to 1 core and 0 gpus for task {task_instance.key}"
+                    f"Setting task resources to 1 core and 0 gpus for task {task_instance.key.task_id}.{task_instance.key.map_index}"
                 )
                 self.slurm_hook.set_task_resources(
                     task_instance_key=task_instance.key,
@@ -302,9 +300,14 @@ class ResourceExecutor(BaseExecutor):
         if TYPE_CHECKING:
             assert self.task_queue
 
+        self.slurm_hook.assign_task_resources(key)
         core_ids = self.slurm_hook.get_core_ids(key)
         gpu_ids = self.slurm_hook.get_gpu_ids(key)
         hostname = self.slurm_hook.get_hostname(key)
+        self.log.info(
+            f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids}"
+        )
+
         self.task_queue.put((key, command, core_ids, gpu_ids, hostname))
 
         # this would work if we could be sure that we don't get here when there are no resources available
@@ -354,11 +357,10 @@ class ResourceExecutor(BaseExecutor):
                 del self.queued_tasks[key]
             else:
                 try:
-                    found_slots = self.slurm_hook.assign_task_resources(key)
-                    core_ids = self.slurm_hook.get_core_ids(key)
-                    self.log.info(
-                        f"ALLOCATED task {key.task_id} using cores: {core_ids}"
-                    )
+                    # Since we are not actually allocating resources until the execute_async method is called,
+                    # there could arise a situation where trigger_tasks is being called on multiple processes,
+                    # meaning that the assignment might fail in execute_async, but this seems unlikely
+                    found_slots = self.slurm_hook.find_available_slots([key])
                     if not found_slots:
                         self.log.debug(f"No available resources for task: {key}.")
                         sorted_queue.append(
@@ -391,7 +393,7 @@ class ResourceExecutor(BaseExecutor):
                     if state in {TaskInstanceState.SUCCESS, TaskInstanceState.FAILED}:
                         core_ids = self.slurm_hook.get_core_ids(key)
                         self.log.info(
-                            f"FREED task {key.task_id} using cores: {core_ids}"
+                            f"FREED task {key.task_id}.{key.map_index} using cores: {core_ids}"
                         )
                         # Due to sync being called after trigger_tasks, this is too late for resources to be released
                         # before subsequent tasks are triggered, meaning that resource placement is suboptimal
@@ -415,6 +417,7 @@ class ResourceExecutor(BaseExecutor):
 
         # Wait for commands to finish
         self.task_queue.join()
+        self.result_queue.join()
         self.sync()
         self.manager.shutdown()
 
