@@ -174,51 +174,6 @@ class ResourceExecutor(BaseExecutor):
         self.task_queue: Queue[ExecutorWorkType] = self.manager.Queue()
         self.workers: list[ResourceWorker] = []
 
-    def heartbeat(self) -> None:
-        """Heartbeat sent to trigger new jobs."""
-        slots = self.slurm_hook.find_available_slots(
-            [task for task in self.queued_tasks]
-        )
-        open_slots = len(slots)
-        if open_slots > 0:
-            self.log.debug(
-                f"Queued tasks: {[(task.task_id, task.map_index) for task in self.queued_tasks]}"
-            )
-            self.log.debug(
-                f"Running tasks: {[(task.task_id, task.map_index) for task in self.running]}"
-            )
-
-        num_running_tasks = len(self.running)
-        num_queued_tasks = len(self.queued_tasks)
-
-        self.log.debug("%s running task instances", num_running_tasks)
-        self.log.debug("%s in queue", num_queued_tasks)
-        self.log.debug("%s open slots", open_slots)
-
-        Stats.gauge(
-            "executor.open_slots",
-            value=open_slots,
-            tags={"status": "open", "name": self.__class__.__name__},
-        )
-        Stats.gauge(
-            "executor.queued_tasks",
-            value=num_queued_tasks,
-            tags={"status": "queued", "name": self.__class__.__name__},
-        )
-        Stats.gauge(
-            "executor.running_tasks",
-            value=num_running_tasks,
-            tags={"status": "running", "name": self.__class__.__name__},
-        )
-
-        self.log.debug("Calling the %s sync method", self.__class__)
-        self.sync()
-
-        self.trigger_tasks(open_slots)
-
-        self.log.debug("Calling the %s sync method", self.__class__)
-        self.sync()
-
     def start(self) -> None:
         """Start the executor."""
         old_proctitle = getproctitle()
@@ -383,6 +338,51 @@ class ResourceExecutor(BaseExecutor):
 
         if task_tuples:
             self._process_tasks(task_tuples)
+
+    def heartbeat(self) -> None:
+        """Heartbeat sent to trigger new jobs."""
+        slots = self.slurm_hook.find_available_slots(
+            [task for task in self.queued_tasks]
+        )
+        open_slots = len(slots)
+        if open_slots > 0:
+            self.log.debug(
+                f"Queued tasks: {[(task.task_id, task.map_index) for task in self.queued_tasks]}"
+            )
+            self.log.debug(
+                f"Running tasks: {[(task.task_id, task.map_index) for task in self.running]}"
+            )
+
+        num_running_tasks = len(self.running)
+        num_queued_tasks = len(self.queued_tasks)
+
+        self.log.debug("%s running task instances", num_running_tasks)
+        self.log.debug("%s in queue", num_queued_tasks)
+        self.log.debug("%s open slots", open_slots)
+
+        Stats.gauge(
+            "executor.open_slots",
+            value=open_slots,
+            tags={"status": "open", "name": self.__class__.__name__},
+        )
+        Stats.gauge(
+            "executor.queued_tasks",
+            value=num_queued_tasks,
+            tags={"status": "queued", "name": self.__class__.__name__},
+        )
+        Stats.gauge(
+            "executor.running_tasks",
+            value=num_running_tasks,
+            tags={"status": "running", "name": self.__class__.__name__},
+        )
+
+        self.log.debug("Calling the %s sync method", self.__class__)
+        self.sync()
+
+        self.trigger_tasks(open_slots)
+
+        self.log.debug("Calling the %s sync method", self.__class__)
+        self.sync()
 
     def sync(self) -> None:
         """Sync will get called periodically by the heartbeat method."""
