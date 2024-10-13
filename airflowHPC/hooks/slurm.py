@@ -116,13 +116,12 @@ class SlurmHook(BaseHook):
             num_threads=num_threads,
             num_gpus=num_gpus,
         )
+        # This will raise if the request cannot be satisfied
+        self.nodes_list.find_slot(resource_request)
         self.task_resource_requests[task_instance_key] = resource_request
 
     def assign_task_resources(self, task_instance_key: TaskInstanceKey):
-        if task_instance_key not in self.task_resource_requests:
-            raise RuntimeError(
-                f"Resource request not found for task {task_instance_key}"
-            )
+        assert task_instance_key in self.task_resource_requests
         resource_request = self.task_resource_requests[task_instance_key]
         slot = self.nodes_list.allocate_slot(resource_request)
         if not slot:
@@ -135,10 +134,7 @@ class SlurmHook(BaseHook):
     def slots_available(self, task_instance_keys: List[TaskInstanceKey]):
         slots: List[Slot] = []
         for task_instance_key in task_instance_keys:
-            if task_instance_key not in self.task_resource_requests:
-                raise RuntimeError(
-                    f"Resource request not found for task {task_instance_key}"
-                )
+            assert task_instance_key in self.task_resource_requests
             resource_request = self.task_resource_requests[task_instance_key]
             # Check if the resource request can be satisfied
             slot = self.nodes_list.find_slot(resource_request)
@@ -150,10 +146,7 @@ class SlurmHook(BaseHook):
     def find_available_slots(self, task_instance_keys: List[TaskInstanceKey]):
         resource_requests: List[RankRequirements] = []
         for task_instance_key in task_instance_keys:
-            if task_instance_key not in self.task_resource_requests:
-                raise RuntimeError(
-                    f"Resource request not found for task {task_instance_key}"
-                )
+            assert task_instance_key in self.task_resource_requests
             resource_requests.append(self.task_resource_requests[task_instance_key])
         slots = self.nodes_list.find_available_slots(resource_requests)
         return slots

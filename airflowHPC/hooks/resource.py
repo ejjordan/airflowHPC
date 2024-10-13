@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from airflow.configuration import conf
+from airflow.utils.providers_configuration_loader import providers_configuration_loaded
 from dataclasses import dataclass, field, asdict
+from functools import cached_property
 from typing import List, Optional
 from threading import RLock
 
@@ -74,6 +77,11 @@ class NodeManager:
         self.node = node
         self.__lock__ = RLock()
 
+    @cached_property
+    @providers_configuration_loaded
+    def allow_dispersed_cores(self) -> bool:
+        return conf.getboolean("hpc", "allow_dispersed_cores", fallback=True)
+
     def _allocate_slot(self, slot: Slot) -> None:
         with self.__lock__:
             for ro in slot.cores:
@@ -113,39 +121,51 @@ class NodeManager:
             cores = list()
             gpus = list()
 
-            # NOTE: the current mechanism will never use the same core or gpu
-            #       multiple times for the created slot, even if the respective
-            #       occupation would allow for it.
             if rr.num_ranks:
-                for ro in self.node.cores:
-                    if ro.occupation is DOWN:
-                        continue
-                    if rr.core_occupation <= BUSY - ro.occupation:
-                        cores.append(
+                free_cores_list = [
+                    self.node.cores[i].index
+                    for i in range(len(self.node.cores))
+                    if self.node.cores[i].occupation == FREE
+                ]
+                if len(free_cores_list) < rr.num_ranks:
+                    return None
+                # TODO: It should be possible to just search the free_cores_list for sequential cores
+                for i in range(len(free_cores_list) - rr.num_ranks + 1):
+                    if all(
+                        self.node.cores[i + j].occupation == FREE
+                        for j in range(rr.num_ranks)
+                    ):
+                        cores = [
                             ResourceOccupation(
-                                index=ro.index, occupation=rr.core_occupation
+                                index=i + j, occupation=rr.core_occupation
                             )
-                        )
-                    if len(cores) == rr.num_ranks:
+                            for j in range(rr.num_ranks)
+                        ]
                         break
-
-                if len(cores) < rr.num_ranks:
+                if self.allow_dispersed_cores and not cores:
+                    cores = [
+                        ResourceOccupation(index=i, occupation=rr.core_occupation)
+                        for i in free_cores_list[: rr.num_ranks]
+                    ]
+                if not cores:
                     return None
 
+            # TODO: It might make sense to ensure GPUs are contiguous, but more important would be to ensure they are on the same NUMA node
             if rr.num_gpus:
-                for ro in self.node.gpus:
-                    if ro.occupation is DOWN:
-                        continue
-                    if rr.gpu_occupation <= BUSY - ro.occupation:
-                        gpus.append(
+                for i in range(len(self.node.gpus) - rr.num_gpus + 1):
+                    if all(
+                        self.node.gpus[i + j].occupation == FREE
+                        for j in range(rr.num_gpus)
+                    ):
+                        gpus = [
                             ResourceOccupation(
-                                index=ro.index, occupation=rr.gpu_occupation
+                                index=i + j, occupation=rr.gpu_occupation
                             )
-                        )
-                    if len(gpus) == rr.num_gpus:
+                            for j in range(rr.num_gpus)
+                        ]
                         break
 
-                if len(gpus) < rr.num_gpus:
+                if not gpus:
                     return None
 
             if rr.mem and self.node.mem < rr.mem:

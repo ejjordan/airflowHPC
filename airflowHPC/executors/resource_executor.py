@@ -210,18 +210,32 @@ class ResourceExecutor(BaseExecutor):
             if is_resource_operator(task_instance.operator_name):
                 assert task_instance.executor_config
                 assert "mpi_ranks" in task_instance.executor_config
-                self.slurm_hook.set_task_resources(
-                    task_instance_key=task_instance.key,
-                    num_ranks=task_instance.executor_config["mpi_ranks"],
-                    num_threads=task_instance.executor_config.get("cpus_per_task", 1),
-                    num_gpus=task_instance.executor_config.get("gpus", 0),
-                )
-                msg = f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key].num_ranks} "
-                msg += f"MPI ranks, {self.slurm_hook.task_resource_requests[task_instance.key].num_threads} threads, "
-                msg += f"and {self.slurm_hook.task_resource_requests[task_instance.key].num_gpus} GPU(s) "
-                msg += f"for task {task_instance.key.task_id}.{task_instance.key.map_index}"
-                self.log.info(msg)
+                try:
+                    self.slurm_hook.set_task_resources(
+                        task_instance_key=task_instance.key,
+                        num_ranks=task_instance.executor_config["mpi_ranks"],
+                        num_threads=task_instance.executor_config.get(
+                            "cpus_per_task", 1
+                        ),
+                        num_gpus=task_instance.executor_config.get("gpus", 0),
+                    )
+                    msg = f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key].num_ranks} "
+                    msg += f"MPI ranks, {self.slurm_hook.task_resource_requests[task_instance.key].num_threads} threads, "
+                    msg += f"and {self.slurm_hook.task_resource_requests[task_instance.key].num_gpus} GPU(s) "
+                    msg += f"for task {task_instance.key.task_id}.{task_instance.key.map_index}"
+                    self.log.info(msg)
+                except ValueError:
+                    self.log.error(
+                        f"Failed to set task resources for task {task_instance.key.task_id}.{task_instance.key.map_index}"
+                    )
+                    self.change_state(
+                        key=task_instance.key,
+                        state=TaskInstanceState.FAILED,
+                        info=f"No viable resource assignment for task: {task_instance.key.task_id}.{task_instance.key.map_index}",
+                    )
+                    return
             else:
+                # No need to catch exceptions here, as the task will be queued with default resources
                 self.log.info(
                     f"Setting task resources to 1 core and 0 gpus for task {task_instance.key.task_id}.{task_instance.key.map_index}"
                 )
@@ -311,27 +325,6 @@ class ResourceExecutor(BaseExecutor):
                 del self.attempts[key]
                 del self.queued_tasks[key]
             else:
-                try:
-                    # Since we are not actually allocating resources until the execute_async method is called,
-                    # there could arise a situation where trigger_tasks is being called on multiple processes,
-                    # meaning that the assignment might fail in execute_async, but this seems unlikely
-                    found_slots = self.slurm_hook.find_available_slots([key])
-                    if not found_slots:
-                        self.log.debug(f"No available resources for task: {key}.")
-                        sorted_queue.append(
-                            (key, (command, priority, queue, ti.executor_config))
-                        )
-                        break
-                except:
-                    self.log.error(f"No viable resource assignment for task: {key}.")
-                    del self.queued_tasks[key]
-                    self.change_state(
-                        key=key,
-                        state=TaskInstanceState.FAILED,
-                        info=f"No viable resource assignment for executor_config {ti.executor_config}",
-                    )
-                    break
-
                 if key in self.attempts:
                     del self.attempts[key]
                 task_tuples.append((key, command, queue, ti))
@@ -352,6 +345,7 @@ class ResourceExecutor(BaseExecutor):
             self.log.debug(
                 f"Running tasks: {[(task.task_id, task.map_index) for task in self.running]}"
             )
+            self.log.debug(f"slots: {slots}")
 
         num_running_tasks = len(self.running)
         num_queued_tasks = len(self.queued_tasks)
