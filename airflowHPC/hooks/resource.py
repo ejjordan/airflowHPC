@@ -15,7 +15,9 @@ class ResourceOccupation:
 
 
 @dataclass
-class Slot:
+class NodeResources:
+    """For keeping track of resources on a node."""
+
     cores: List[ResourceOccupation] = field(default_factory=list)
     gpus: List[ResourceOccupation] = field(default_factory=list)
     mem: int = 0
@@ -23,13 +25,10 @@ class Slot:
     hostname: str = ""
 
 
-@dataclass
-class NodeResources:
-    index: int = 0
-    name: str = ""
-    cores: List[ResourceOccupation] = field(default_factory=list)
-    gpus: List[ResourceOccupation] = field(default_factory=list)
-    mem: int = 0
+class Slot(NodeResources):
+    """For keeping track of resources allocated to a task."""
+
+    pass
 
 
 FREE = 0.0
@@ -151,7 +150,7 @@ class NodeList:
                 return slot
         return None
 
-    def _find_slot(self, node, rr: RankRequirements) -> Optional[Slot]:
+    def _find_slot(self, node: NodeResources, rr: RankRequirements) -> Optional[Slot]:
         with self.__lock__:
             cores = list()
             gpus = list()
@@ -209,8 +208,8 @@ class NodeList:
                 cores=cores,
                 gpus=gpus,
                 mem=rr.mem,
-                node_index=node.index,
-                hostname=node.name,
+                node_index=node.node_index,
+                hostname=node.hostname,
             )
 
             return slot
@@ -227,7 +226,7 @@ class NodeList:
         return slots
 
     def _find_available_slots(
-        self, node, rr_list: List[RankRequirements]
+        self, node: NodeResources, rr_list: List[RankRequirements]
     ) -> List[Slot]:
         with self.__lock__:
             slots = list()
@@ -252,7 +251,7 @@ class NodeList:
                 return slot
         return None
 
-    def _allocate_slot(self, node, rr: RankRequirements) -> Slot:
+    def _allocate_slot(self, node: NodeResources, rr: RankRequirements) -> Slot:
         slot = self.find_slot(rr)
         if slot is None:
             raise RuntimeError("could not allocate slot")
@@ -270,7 +269,7 @@ class NodeList:
         node = self.nodes[slot.node_index]
         self._deallocate_slot(node, slot)
 
-    def _deallocate_slot(self, node, slot: Slot) -> None:
+    def _deallocate_slot(self, node: NodeResources, slot: Slot) -> None:
         with self.__lock__:
             for ro in slot.cores:
                 node.cores[ro.index].occupation -= ro.occupation

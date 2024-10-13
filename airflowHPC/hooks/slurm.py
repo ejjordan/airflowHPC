@@ -40,8 +40,8 @@ class SlurmHook(BaseHook):
             self.node_names = [socket.gethostname()]
         nodes = [
             NodeResources(
-                index=i,
-                name=self.node_names[i],
+                node_index=i,
+                hostname=self.node_names[i],
                 cores=[
                     ResourceOccupation(index=core_idx, occupation=FREE)
                     for core_idx in range(self.tasks_per_node)
