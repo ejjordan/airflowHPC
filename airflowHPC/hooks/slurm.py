@@ -14,7 +14,6 @@ from typing import List
 from airflowHPC.hooks.resource import (
     ResourceOccupation,
     Slot,
-    NodeManager,
     NodeList,
     NodeResources,
     RankRequirements,
@@ -40,20 +39,18 @@ class SlurmHook(BaseHook):
                 raise ValueError("SLURM_JOB_NODELIST not set and SLURM_NNODES > 1")
             self.node_names = [socket.gethostname()]
         nodes = [
-            NodeManager(
-                NodeResources(
-                    index=i,
-                    name=self.node_names[i],
-                    cores=[
-                        ResourceOccupation(index=core_idx, occupation=FREE)
-                        for core_idx in range(self.tasks_per_node)
-                    ],
-                    gpus=[
-                        ResourceOccupation(index=gpu_idx, occupation=FREE)
-                        for gpu_idx in range(self.gpus_per_node)
-                    ],
-                    mem=self.mem_per_node,
-                )
+            NodeResources(
+                index=i,
+                name=self.node_names[i],
+                cores=[
+                    ResourceOccupation(index=core_idx, occupation=FREE)
+                    for core_idx in range(self.tasks_per_node)
+                ],
+                gpus=[
+                    ResourceOccupation(index=gpu_idx, occupation=FREE)
+                    for gpu_idx in range(self.gpus_per_node)
+                ],
+                mem=self.mem_per_node,
             )
             for i in range(self.num_nodes)
         ]
@@ -131,23 +128,11 @@ class SlurmHook(BaseHook):
         self.log.debug(f"Allocated slots {slot}")
         return True
 
-    def slots_available(self, task_instance_keys: List[TaskInstanceKey]):
-        slots: List[Slot] = []
-        for task_instance_key in task_instance_keys:
-            assert task_instance_key in self.task_resource_requests
-            resource_request = self.task_resource_requests[task_instance_key]
-            # Check if the resource request can be satisfied
-            slot = self.nodes_list.find_slot(resource_request)
-            if not slot:
-                break
-            slots.append(slot)
-        return slots
-
     def find_available_slots(self, task_instance_keys: List[TaskInstanceKey]):
         resource_requests: List[RankRequirements] = []
-        for task_instance_key in task_instance_keys:
-            assert task_instance_key in self.task_resource_requests
-            resource_requests.append(self.task_resource_requests[task_instance_key])
+        for ti_key in task_instance_keys:
+            assert ti_key in self.task_resource_requests
+            resource_requests.append(self.task_resource_requests[ti_key])
         slots = self.nodes_list.find_available_slots(resource_requests)
         return slots
 

@@ -72,127 +72,10 @@ class RankRequirements:
         return asdict(self) == asdict(other)
 
 
-class NodeManager:
-    def __init__(self, node: NodeResources):
-        self.node = node
-        self.__lock__ = RLock()
-
-    @cached_property
-    @providers_configuration_loaded
-    def allow_dispersed_cores(self) -> bool:
-        return conf.getboolean("hpc", "allow_dispersed_cores", fallback=True)
-
-    def _allocate_slot(self, slot: Slot) -> None:
-        with self.__lock__:
-            for ro in slot.cores:
-                self.node.cores[ro.index].occupation += ro.occupation
-
-            for ro in slot.gpus:
-                self.node.gpus[ro.index].occupation += ro.occupation
-
-            self.node.mem -= slot.mem
-
-    def find_available_slots(self, rr_list: List[RankRequirements]) -> List[Slot]:
-        with self.__lock__:
-            slots = list()
-            for rr in rr_list:
-                slot = self.find_slot(rr)
-                if slot:
-                    slots.append(slot)
-                    self._allocate_slot(slot)
-                else:
-                    break
-            for slot in slots:
-                self.deallocate_slot(slot)
-            return slots
-
-    def deallocate_slot(self, slot: Slot) -> None:
-        with self.__lock__:
-            for ro in slot.cores:
-                self.node.cores[ro.index].occupation -= ro.occupation
-
-            for ro in slot.gpus:
-                self.node.gpus[ro.index].occupation -= ro.occupation
-
-            self.node.mem += slot.mem
-
-    def find_slot(self, rr: RankRequirements) -> Optional[Slot]:
-        with self.__lock__:
-            cores = list()
-            gpus = list()
-
-            if rr.num_ranks:
-                free_cores_list = [
-                    self.node.cores[i].index
-                    for i in range(len(self.node.cores))
-                    if self.node.cores[i].occupation == FREE
-                ]
-                if len(free_cores_list) < rr.num_ranks:
-                    return None
-                # TODO: It should be possible to just search the free_cores_list for sequential cores
-                for i in range(len(free_cores_list) - rr.num_ranks + 1):
-                    if all(
-                        self.node.cores[i + j].occupation == FREE
-                        for j in range(rr.num_ranks)
-                    ):
-                        cores = [
-                            ResourceOccupation(
-                                index=i + j, occupation=rr.core_occupation
-                            )
-                            for j in range(rr.num_ranks)
-                        ]
-                        break
-                if self.allow_dispersed_cores and not cores:
-                    cores = [
-                        ResourceOccupation(index=i, occupation=rr.core_occupation)
-                        for i in free_cores_list[: rr.num_ranks]
-                    ]
-                if not cores:
-                    return None
-
-            # TODO: It might make sense to ensure GPUs are contiguous, but more important would be to ensure they are on the same NUMA node
-            if rr.num_gpus:
-                for i in range(len(self.node.gpus) - rr.num_gpus + 1):
-                    if all(
-                        self.node.gpus[i + j].occupation == FREE
-                        for j in range(rr.num_gpus)
-                    ):
-                        gpus = [
-                            ResourceOccupation(
-                                index=i + j, occupation=rr.gpu_occupation
-                            )
-                            for j in range(rr.num_gpus)
-                        ]
-                        break
-
-                if not gpus:
-                    return None
-
-            if rr.mem and self.node.mem < rr.mem:
-                return None
-
-            slot = Slot(
-                cores=cores,
-                gpus=gpus,
-                mem=rr.mem,
-                node_index=self.node.index,
-                hostname=self.node.name,
-            )
-
-            return slot
-
-    def allocate_slot(self, rr: RankRequirements) -> Slot:
-        slot = self.find_slot(rr)
-        if slot is None:
-            raise RuntimeError("could not allocate slot")
-        self._allocate_slot(slot)
-        return slot
-
-
 class NodeList:
     def __init__(
         self,
-        nodes: List[NodeManager],
+        nodes: List[NodeResources],
         uniform: bool = True,
         cores_per_node: int = None,
         gpus_per_node: int = None,
@@ -206,19 +89,26 @@ class NodeList:
         self.lfs_per_node = lfs_per_node
         self.mem_per_node = mem_per_node
 
+        self.__lock__ = RLock()
+
         self.verify()
+
+    @cached_property
+    @providers_configuration_loaded
+    def allow_dispersed_cores(self) -> bool:
+        return conf.getboolean("hpc", "allow_dispersed_cores", fallback=True)
 
     def verify(self) -> None:
         if not self.nodes:
             return
 
         self.uniform = True
-        node_0 = self.nodes[0].node
+        node_0 = self.nodes[0]
         for node in self.nodes[1:]:
             if (
-                node.node.cores != node_0.cores
-                or node.node.gpus != node_0.gpus
-                or node.node.mem != node_0.mem
+                node.cores != node_0.cores
+                or node.gpus != node_0.gpus
+                or node.mem != node_0.mem
             ):
                 self.uniform = False
                 break
@@ -256,31 +146,136 @@ class NodeList:
         self._assert_rr(rr)
 
         for node in self.nodes:
-            slot = node.find_slot(rr)
+            slot = self._find_slot(node, rr)
             if slot:
                 return slot
         return None
 
+    def _find_slot(self, node, rr: RankRequirements) -> Optional[Slot]:
+        with self.__lock__:
+            cores = list()
+            gpus = list()
+
+            if rr.num_ranks:
+                free_cores_list = [
+                    node.cores[i].index
+                    for i in range(len(node.cores))
+                    if node.cores[i].occupation == FREE
+                ]
+                if len(free_cores_list) < rr.num_ranks:
+                    return None
+                # TODO: It should be possible to just search the free_cores_list for sequential cores
+                for i in range(len(free_cores_list) - rr.num_ranks + 1):
+                    if all(
+                        node.cores[i + j].occupation == FREE
+                        for j in range(rr.num_ranks)
+                    ):
+                        cores = [
+                            ResourceOccupation(
+                                index=i + j, occupation=rr.core_occupation
+                            )
+                            for j in range(rr.num_ranks)
+                        ]
+                        break
+                if self.allow_dispersed_cores and not cores:
+                    cores = [
+                        ResourceOccupation(index=i, occupation=rr.core_occupation)
+                        for i in free_cores_list[: rr.num_ranks]
+                    ]
+                if not cores:
+                    return None
+
+            # TODO: It might make sense to ensure GPUs are contiguous, but more important would be to ensure they are on the same NUMA node
+            if rr.num_gpus:
+                for i in range(len(node.gpus) - rr.num_gpus + 1):
+                    if all(
+                        node.gpus[i + j].occupation == FREE for j in range(rr.num_gpus)
+                    ):
+                        gpus = [
+                            ResourceOccupation(
+                                index=i + j, occupation=rr.gpu_occupation
+                            )
+                            for j in range(rr.num_gpus)
+                        ]
+                        break
+
+                if not gpus:
+                    return None
+
+            if rr.mem and node.mem < rr.mem:
+                return None
+
+            slot = Slot(
+                cores=cores,
+                gpus=gpus,
+                mem=rr.mem,
+                node_index=node.index,
+                hostname=node.name,
+            )
+
+            return slot
+
     def find_available_slots(self, rr_list: List[RankRequirements]) -> List[Slot]:
         slots = list()
+        # TODO: this will not work if more than one node is requested
         for node in self.nodes:
-            node_slots = node.find_available_slots(rr_list)
+            node_slots = self._find_available_slots(node, rr_list)
             if node_slots:
                 slots.extend(node_slots)
             else:
                 break
         return slots
 
+    def _find_available_slots(
+        self, node, rr_list: List[RankRequirements]
+    ) -> List[Slot]:
+        with self.__lock__:
+            slots = list()
+            for rr in rr_list:
+                slot = self._find_slot(node, rr)
+                if slot:
+                    slots.append(slot)
+                    self._allocate_slot(node, rr)
+                else:
+                    break
+            for slot in slots:
+                self._deallocate_slot(node, slot)
+            return slots
+
     def allocate_slot(self, rr: RankRequirements) -> Slot | None:
         self._assert_rr(rr)
 
         for node in self.nodes:
-            slot = node.find_slot(rr)
+            slot = self._find_slot(node, rr)
             if slot:
-                node.allocate_slot(rr)
+                self._allocate_slot(node, rr)
                 return slot
         return None
 
+    def _allocate_slot(self, node, rr: RankRequirements) -> Slot:
+        slot = self.find_slot(rr)
+        if slot is None:
+            raise RuntimeError("could not allocate slot")
+        with self.__lock__:
+            for ro in slot.cores:
+                node.cores[ro.index].occupation += ro.occupation
+
+            for ro in slot.gpus:
+                node.gpus[ro.index].occupation += ro.occupation
+
+            node.mem -= slot.mem
+        return slot
+
     def release_slot(self, slot: Slot) -> None:
         node = self.nodes[slot.node_index]
-        node.deallocate_slot(slot)
+        self._deallocate_slot(node, slot)
+
+    def _deallocate_slot(self, node, slot: Slot) -> None:
+        with self.__lock__:
+            for ro in slot.cores:
+                node.cores[ro.index].occupation -= ro.occupation
+
+            for ro in slot.gpus:
+                node.gpus[ro.index].occupation -= ro.occupation
+
+            node.mem += slot.mem
