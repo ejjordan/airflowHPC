@@ -58,8 +58,8 @@ def get_provider_info():
                     "allow_dispersed_cores": {
                         "description": "Whether the cores for a task can be non-contiguous in a node",
                         "type": "boolean",
-                        "default": "True",
-                        "example": "True",
+                        "default": "False",
+                        "example": "False",
                         "version_added": "0.0.0",
                         "sensitive": False,
                     },
