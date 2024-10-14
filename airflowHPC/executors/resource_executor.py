@@ -271,13 +271,14 @@ class ResourceExecutor(BaseExecutor):
 
         self.slurm_hook.assign_task_resources(key)
         core_ids = self.slurm_hook.get_core_ids(key)
+        rank_ids = self.slurm_hook.get_rank_ids(key)
         gpu_ids = self.slurm_hook.get_gpu_ids(key)
         hostname = self.slurm_hook.get_hostname(key)
         self.log.info(
-            f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids}"
+            f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids} and rank IDs: {rank_ids}"
         )
 
-        self.task_queue.put((key, command, core_ids, gpu_ids, hostname))
+        self.task_queue.put((key, command, rank_ids, gpu_ids, hostname))
 
         # this would work if we could be sure that we don't get here when there are no resources available
         # thus fixing the accounting of slots in the heartbeat would make this work

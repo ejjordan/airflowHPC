@@ -130,7 +130,7 @@ class NodeList:
         if not rr.num_ranks:
             raise ValueError(f"invalid rank requirements: {rr}")
 
-        requirement = self.cores_per_node / rr.num_ranks
+        requirement = self.cores_per_node / (rr.num_ranks * rr.num_threads)
 
         if rr.num_gpus:
             requirement = min(requirement, self.gpus_per_node / rr.num_gpus)
@@ -161,25 +161,27 @@ class NodeList:
                     for i in range(len(node.cores))
                     if node.cores[i].occupation == FREE
                 ]
-                if len(free_cores_list) < rr.num_ranks:
+                if len(free_cores_list) < rr.num_ranks * rr.num_threads:
                     return None
                 # TODO: It should be possible to just search the free_cores_list for sequential cores
-                for i in range(len(free_cores_list) - rr.num_ranks + 1):
+                for i in range(
+                    len(free_cores_list) - rr.num_ranks * rr.num_threads + 1
+                ):
                     if all(
                         node.cores[i + j].occupation == FREE
-                        for j in range(rr.num_ranks)
+                        for j in range(rr.num_ranks * rr.num_threads)
                     ):
                         cores = [
                             ResourceOccupation(
                                 index=i + j, occupation=rr.core_occupation
                             )
-                            for j in range(rr.num_ranks)
+                            for j in range(rr.num_ranks * rr.num_threads)
                         ]
                         break
                 if self.allow_dispersed_cores and not cores:
                     cores = [
                         ResourceOccupation(index=i, occupation=rr.core_occupation)
-                        for i in free_cores_list[: rr.num_ranks]
+                        for i in free_cores_list[: rr.num_ranks * rr.num_threads]
                     ]
                 if not cores:
                     return None

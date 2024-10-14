@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import os
 import shutil
+from functools import cached_property
 from typing import TYPE_CHECKING, Sequence, Union, Iterable
 
+from airflow.configuration import conf
+from airflow.utils.providers_configuration_loader import providers_configuration_loaded
 from airflow.exceptions import AirflowException, AirflowSkipException
 
 from airflowHPC.dags.tasks import GmxInputHolder, GmxRunInfoHolder
@@ -72,6 +75,11 @@ class ResourceGmxOperator(ResourceBashOperator):
                     raise ValueError(msg)
         self.show_return_value_in_logs = show_return_value_in_logs
 
+    @cached_property
+    @providers_configuration_loaded
+    def allow_dispersed_cores(self) -> bool:
+        return conf.getboolean("hpc", "allow_dispersed_cores", fallback=True)
+
     def execute(self, context: Context):
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -83,6 +91,24 @@ class ResourceGmxOperator(ResourceBashOperator):
 
         bash_path = shutil.which("bash") or "bash"
         env = self.get_env(context)
+
+        if isinstance(self.gmx_arguments, (str, bytes)):
+            self.gmx_arguments = [self.gmx_arguments]
+        if self.gmx_arguments[0] in ["mdrun", "mdrun_mpi"]:
+            ranks_id = self.core_ids.split(",")
+            if not self.allow_dispersed_cores:
+                self.gmx_arguments.extend(["-pin", "on", "-pinoffset", ranks_id[0]])
+            elif self.allow_dispersed_cores and all(
+                x <= y for x, y in zip(ranks_id, ranks_id[1:])
+            ):
+                self.gmx_arguments.extend(["-pin", "on", "-pinoffset", ranks_id[0]])
+            else:
+                self.log.error(
+                    f"mdrun pinning only works with sequential rank ids, try setting allow_dispersed_cores to False"
+                )
+                raise AirflowException(f"Could not pin cores for mdrun")
+        if self.gpu_ids:
+            self.gmx_arguments.extend(["-gpu_id", ",".join(map(str, self.gpu_ids))])
 
         self.log.info(f"mpi_executable: {self.mpi_executable}")
         self.log.info(f"mpi_ranks: {self.mpi_ranks}")
@@ -145,11 +171,6 @@ class ResourceGmxOperator(ResourceBashOperator):
             input_files = {}
         if output_files is None:
             output_files = {}
-
-        if isinstance(gmx_arguments, (str, bytes)):
-            gmx_arguments = [gmx_arguments]
-        if self.gpu_ids:
-            gmx_arguments.extend(["-gpu_id", ",".join(map(str, self.gpu_ids))])
 
         call = list()
         call.append(mpi_executable)

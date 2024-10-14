@@ -89,6 +89,11 @@ class SlurmHook(BaseHook):
             raise ValueError(f"Resource not allocated for task {task_instance_key}")
         return [core.index for core in self.slots_dict[task_instance_key].cores]
 
+    def get_rank_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
+        return self.get_core_ids(task_instance_key)[
+            :: self.task_resource_requests[task_instance_key].num_threads
+        ]
+
     def get_gpu_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
         if task_instance_key not in self.slots_dict:
             self.log.info(f"Task keys {self.task_resource_requests.keys()}")
