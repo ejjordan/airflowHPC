@@ -64,21 +64,29 @@ class ResourceGmxOperator(ResourceBashOperator):
         self.input_files = input_files
         self.output_files = output_files
         self.output_dir = output_dir
-        for i, arg in enumerate(self.gmx_arguments):
-            if arg in ["-ntomp", "-ntmpi", "-nt"]:
-                if int(self.gmx_arguments[i + 1]) != int(
-                    kwargs["executor_config"]["cpus_per_task"]
-                ):
-                    msg = f"Argument {arg} is '{self.gmx_arguments[i + 1]}', "
-                    msg += "but must be the same as executor_config['cpus_per_task']: "
-                    msg += f"'{kwargs['executor_config']['cpus_per_task']}'"
-                    raise ValueError(msg)
+        for arg in self.gmx_arguments:
+            if arg in ["-ntmpi", "-nt"]:
+                msg = f"{self.__class__.__name__} is designed for MPI versions of GROMACS and does not support {arg}\n"
+                msg += f"The number of OpenMP threads (flag '-ntomp') is managed by this operator and need not be set."
+                raise ValueError(msg)
+
         self.show_return_value_in_logs = show_return_value_in_logs
 
     @cached_property
     @providers_configuration_loaded
     def allow_dispersed_cores(self) -> bool:
         return conf.getboolean("hpc", "allow_dispersed_cores", fallback=True)
+
+    def check_add_args(self, arg: str, value: str):
+        for i, gmx_arg in enumerate(self.gmx_arguments):
+            if arg == gmx_arg:
+                if value != self.gmx_arguments[i + 1]:
+                    msg = f"Changing argument '{arg} {self.gmx_arguments[i + 1]}' to '{arg} {value}'."
+                    msg += f"The mdrun flag '{arg}' is managed by the operator and user input will be overridden."
+                    self.log.warning(msg)
+                    self.gmx_arguments[i + 1] = value
+                return
+        self.gmx_arguments.extend([arg, value])
 
     def execute(self, context: Context):
         if not os.path.exists(self.output_dir):
@@ -95,13 +103,16 @@ class ResourceGmxOperator(ResourceBashOperator):
         if isinstance(self.gmx_arguments, (str, bytes)):
             self.gmx_arguments = [self.gmx_arguments]
         if self.gmx_arguments[0] in ["mdrun", "mdrun_mpi"]:
+            self.check_add_args("-ntomp", str(self.executor_config["cpus_per_task"]))
             ranks_id = self.core_ids.split(",")
             if not self.allow_dispersed_cores:
-                self.gmx_arguments.extend(["-pin", "on", "-pinoffset", ranks_id[0]])
+                self.check_add_args("-pin", "on")
+                self.check_add_args("-pinoffset", ranks_id[0])
             elif self.allow_dispersed_cores and all(
                 x <= y for x, y in zip(ranks_id, ranks_id[1:])
             ):
-                self.gmx_arguments.extend(["-pin", "on", "-pinoffset", ranks_id[0]])
+                self.check_add_args("-pin", "on")
+                self.check_add_args("-pinoffset", ranks_id[0])
             else:
                 self.log.error(
                     f"mdrun pinning only works with sequential rank ids, try setting allow_dispersed_cores to False"
