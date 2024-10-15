@@ -274,7 +274,7 @@ class ResourceExecutor(BaseExecutor):
         rank_ids = self.slurm_hook.get_rank_ids(key)
         gpu_ids = self.slurm_hook.get_gpu_ids(key)
         hostname = self.slurm_hook.get_hostname(key)
-        self.log.info(
+        self.log.debug(
             f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids} and rank IDs: {rank_ids}"
         )
 
@@ -295,7 +295,7 @@ class ResourceExecutor(BaseExecutor):
         task_tuples = []
 
         for _ in range(min((open_slots, len(self.queued_tasks)))):
-            key, (command, priority, queue, ti) = sorted_queue.pop(0)
+            key, (command, _, queue, ti) = sorted_queue.pop(0)
 
             # If a task makes it here but is still understood by the executor
             # to be running, it generally means that the task has been killed
@@ -328,7 +328,7 @@ class ResourceExecutor(BaseExecutor):
             else:
                 if key in self.attempts:
                     del self.attempts[key]
-                task_tuples.append((key, command, queue, ti))
+                task_tuples.append((key, command, queue, ti.executor_config))
 
         if task_tuples:
             self._process_tasks(task_tuples)
@@ -387,7 +387,7 @@ class ResourceExecutor(BaseExecutor):
                 try:
                     if state in {TaskInstanceState.SUCCESS, TaskInstanceState.FAILED}:
                         core_ids = self.slurm_hook.get_core_ids(key)
-                        self.log.info(
+                        self.log.debug(
                             f"FREED task {key.task_id}.{key.map_index} using cores: {core_ids}"
                         )
                         # Due to sync being called after trigger_tasks, this is too late for resources to be released

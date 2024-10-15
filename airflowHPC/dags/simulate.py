@@ -139,7 +139,7 @@ with DAG(
         task_id="grompp_sim",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 2,
+            "cpus_per_task": 1,
             "gpus": 0,
             "gpu_type": None,
         },

@@ -54,7 +54,7 @@ with DAG(
         task_id="grompp_batch_1",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 2,
+            "cpus_per_task": 1,
             "gpus": 0,
             "gpu_type": None,
         },
@@ -67,13 +67,13 @@ with DAG(
     mdrun_batch_1 = ResourceGmxOperator(
         task_id="mdrun_batch_1",
         executor_config={
-            "mpi_ranks": 1,
-            "cpus_per_task": 1,
+            "mpi_ranks": 2,
+            "cpus_per_task": 3,
             "gpus": 0,
             "gpu_type": None,
         },
         gmx_executable="gmx_mpi",
-        gmx_arguments=["mdrun", "-ntomp", "1"],
+        gmx_arguments=["mdrun"],
         input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp_batch_1')['-o'] }}"},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
         output_dir="{{ params.output_dir }}" + "/batch_1",
@@ -82,13 +82,13 @@ with DAG(
         task_id="mdp_sim_update2"
     )(
         mdp_json_file_path=input_mdp,
-        update_dict={"nsteps": 100},
+        update_dict={"nsteps": 1000},
     )
     grompp_batch_2 = ResourceGmxOperator(
         task_id="grompp_batch_2",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 2,
+            "cpus_per_task": 1,
             "gpus": 0,
             "gpu_type": None,
         },
@@ -108,7 +108,7 @@ with DAG(
             "gpu_type": None,
         },
         gmx_executable="gmx_mpi",
-        gmx_arguments=["mdrun", "-ntomp", "2", "-pin", "on", "-pinstride", "2"],
+        gmx_arguments=["mdrun"],
         input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp_batch_2')['-o'] }}"},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
     ).expand(output_dir=outputs_dirs_2)
@@ -133,5 +133,5 @@ with DAG(
         output_files={"-c": "result.gro", "-x": "result.xtc"},
     ).expand(output_dir=outputs_dirs)
     """
-    grompp_batch_1 >> mdrun_batch_1 >> mdrun_batch_2
+    grompp_batch_1 >> mdrun_batch_1
     grompp_batch_2 >> mdrun_batch_2
