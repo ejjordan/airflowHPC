@@ -46,6 +46,13 @@ class ResourceGmxOperator(ResourceBashOperator):
     ) -> None:
         kwargs.update({"cwd": output_dir})
         super().__init__(**kwargs)
+        if (
+            self.executor_config
+            and gmx_arguments[0] not in ["mdrun", "mdrun_mpi"]
+            and self.executor_config["cpus_per_task"] > 1
+        ):
+            self.executor_config["cpus_per_task"] = 1
+            self.warn = f"Overriding 'cpus_per_task' to 1 for {gmx_arguments[0]} as it is not supported."
         if gmx_executable is None:
             try:
                 from gmxapi.commandline import cli_executable
@@ -118,6 +125,8 @@ class ResourceGmxOperator(ResourceBashOperator):
                     f"mdrun pinning only works with sequential rank ids, try setting allow_dispersed_cores to False"
                 )
                 raise AirflowException(f"Could not pin cores for mdrun")
+        if "warn" in self.__dict__ and self.warn:
+            self.log.warning(self.warn)
         if self.gpu_ids:
             self.gmx_arguments.extend(["-gpu_id", ",".join(map(str, self.gpu_ids))])
 
