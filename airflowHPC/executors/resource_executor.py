@@ -280,59 +280,6 @@ class ResourceExecutor(BaseExecutor):
 
         self.task_queue.put((key, command, rank_ids, gpu_ids, hostname))
 
-        # this would work if we could be sure that we don't get here when there are no resources available
-        # thus fixing the accounting of slots in the heartbeat would make this work
-        # self.log.info(f"task {key.task_id} freeing cores: {core_ids}")
-        # self.slurm_hook.release_task_resources(key)
-
-    def trigger_tasks(self, open_slots: int) -> None:
-        """
-        Initiate async execution of the queued tasks, up to the number of available slots.
-
-        :param open_slots: Number of open slots
-        """
-        sorted_queue = self.order_queued_tasks_by_priority()
-        task_tuples = []
-
-        for _ in range(min((open_slots, len(self.queued_tasks)))):
-            key, (command, _, queue, ti) = sorted_queue.pop(0)
-
-            # If a task makes it here but is still understood by the executor
-            # to be running, it generally means that the task has been killed
-            # externally and not yet been marked as failed.
-            #
-            # However, when a task is deferred, there is also a possibility of
-            # a race condition where a task might be scheduled again during
-            # trigger processing, even before we are able to register that the
-            # deferred task has completed. In this case and for this reason,
-            # we make a small number of attempts to see if the task has been
-            # removed from the running set in the meantime.
-            if key in self.running:
-                attempt = self.attempts[key]
-                if attempt.can_try_again():
-                    # if it hasn't been much time since first check, let it be checked again next time
-                    self.log.info(
-                        "queued but still running; attempt=%s task=%s",
-                        attempt.total_tries,
-                        key,
-                    )
-                    continue
-                # Otherwise, we give up and remove the task from the queue.
-                self.log.error(
-                    "could not queue task %s (still running after %d attempts)",
-                    key,
-                    attempt.total_tries,
-                )
-                del self.attempts[key]
-                del self.queued_tasks[key]
-            else:
-                if key in self.attempts:
-                    del self.attempts[key]
-                task_tuples.append((key, command, queue, ti.executor_config))
-
-        if task_tuples:
-            self._process_tasks(task_tuples)
-
     def heartbeat(self) -> None:
         """Heartbeat sent to trigger new jobs."""
         slots = self.slurm_hook.find_available_slots(
@@ -390,9 +337,8 @@ class ResourceExecutor(BaseExecutor):
                         self.log.debug(
                             f"FREED task {key.task_id}.{key.map_index} using cores: {core_ids}"
                         )
-                        # Due to sync being called after trigger_tasks, this is too late for resources to be released
-                        # before subsequent tasks are triggered, meaning that resource placement is suboptimal
-                        # In general, it may also be useful to set a minumum slot size to avoid fragmentation
+                        # TODO: The slurm hook should be connected to a DB backend so that allocate and free
+                        # can be called by the task execute method
                         self.slurm_hook.release_task_resources(key)
                     self.change_state(key, state)
                 finally:
