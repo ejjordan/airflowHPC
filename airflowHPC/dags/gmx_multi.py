@@ -18,7 +18,7 @@ with DAG(
     start_date=timezone.utcnow(),
     catchup=False,
     params={
-        "output_dir": "outputs",
+        "output_dir": "gmx_multi",
         "num_sims": 4,
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "basic_md.json"},

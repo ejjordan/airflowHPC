@@ -293,7 +293,7 @@ class ResourceExecutor(BaseExecutor):
             self.log.debug(
                 f"Running tasks: {[(task.task_id, task.map_index) for task in self.running]}"
             )
-            self.log.debug(f"slots: {slots}")
+            self.log.debug(f"SLOTS: {[[ro.index for ro in slot.cores] for slot in slots]}")
 
         num_running_tasks = len(self.running)
         num_queued_tasks = len(self.queued_tasks)

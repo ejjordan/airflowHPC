@@ -164,9 +164,7 @@ class NodeList:
                 if len(free_cores_list) < rr.num_ranks * rr.num_threads:
                     return None
                 # TODO: It should be possible to just search the free_cores_list for sequential cores
-                for i in range(
-                    len(free_cores_list) - rr.num_ranks * rr.num_threads + 1
-                ):
+                for i in range(len(node.cores) - rr.num_ranks * rr.num_threads + 1):
                     if all(
                         node.cores[i + j].occupation == FREE
                         for j in range(rr.num_ranks * rr.num_threads)
