@@ -238,7 +238,7 @@ class NodeList:
                 else:
                     break
             for slot in slots:
-                self._deallocate_slot(node, slot)
+                self._release_slot(node, slot)
             return slots
 
     def allocate_slot(self, rr: RankRequirements) -> Slot | None:
@@ -267,9 +267,9 @@ class NodeList:
 
     def release_slot(self, slot: Slot) -> None:
         node = self.nodes[slot.node_index]
-        self._deallocate_slot(node, slot)
+        self._release_slot(node, slot)
 
-    def _deallocate_slot(self, node: NodeResources, slot: Slot) -> None:
+    def _release_slot(self, node: NodeResources, slot: Slot) -> None:
         with self.__lock__:
             for ro in slot.cores:
                 node.cores[ro.index].occupation -= ro.occupation
