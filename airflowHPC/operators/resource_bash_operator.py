@@ -175,6 +175,7 @@ class ResourceBashOperator(BaseOperator):
             " ".join(f"{k}={v!r}" for k, v in airflow_context_vars.items()),
         )
         env.update(airflow_context_vars)
+        assert self.cpus_per_task >= 1
         env.update({"OMP_NUM_THREADS": str(self.cpus_per_task)})
         if self.gpu_type == None:
             if self.gpus > 0:
