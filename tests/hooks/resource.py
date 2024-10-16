@@ -82,3 +82,44 @@ def test_find_available_slots_busy(rr_list, expected_result):
     assert len(slots) == expected_result[0]
     for i in range(expected_result[0]):
         assert slots[i].cores[0].index == expected_result[i + 1]
+
+
+def test_allocate_slot():
+    node_names = ["node1"]
+    nodes_list = get_node(node_names)
+    num_ranks = 2
+    num_threads = 2
+    rr = RankRequirements(num_ranks=num_ranks, num_threads=num_threads)
+    slot = nodes_list.allocate_slot(rr)
+    assert slot is not None
+    assert len(slot.cores) == num_ranks * num_threads
+    assert [slot.cores[i].occupation == BUSY for i in range(num_ranks * num_threads)]
+    assert slot.mem == 0  # Didn't request memory
+    assert slot.node_index == 0
+    assert slot.hostname == "node1"
+    assert len(slot.gpus) == 0
+    assert slot.gpus == []
+    assert [
+        nodes_list.nodes[0].cores[0].occupation == BUSY
+        for i in range(num_ranks * num_threads)
+    ]
+    assert [core.occupation == FREE for core in nodes_list.nodes[0].cores[4:]]
+
+
+def test_release_slot():
+    node_names = ["node1"]
+    nodes_list = get_node(node_names)
+    num_ranks = 2
+    num_threads = 2
+    rr = RankRequirements(num_ranks=num_ranks, num_threads=num_threads)
+    slot = nodes_list.allocate_slot(rr)
+    assert [slot.cores[i].occupation == BUSY for i in range(num_ranks * num_threads)]
+    assert [
+        nodes_list.nodes[0].cores[0].occupation == BUSY
+        for i in range(num_ranks * num_threads)
+    ]
+    nodes_list.release_slot(slot)
+    assert [
+        nodes_list.nodes[0].cores[i].occupation == FREE
+        for i in range(len(nodes_list.nodes[0].cores))
+    ]
