@@ -204,9 +204,7 @@ class ResourceExecutor(BaseExecutor):
     ):
         """Queues command to task."""
         if task_instance.key not in self.queued_tasks:
-            self.log.info(
-                f"Adding to queue: {task_instance.key.task_id}.{task_instance.key.map_index}"
-            )
+            self.log.info(f"Adding to queue: {command}")
             if is_resource_operator(task_instance.operator_name):
                 assert task_instance.executor_config
                 assert "mpi_ranks" in task_instance.executor_config
@@ -293,7 +291,9 @@ class ResourceExecutor(BaseExecutor):
             self.log.debug(
                 f"Running tasks: {[(task.task_id, task.map_index) for task in self.running]}"
             )
-            self.log.debug(f"SLOTS: {[[ro.index for ro in slot.cores] for slot in slots]}")
+            self.log.debug(
+                f"SLOTS: {[[ro.index for ro in slot.cores] for slot in slots]}"
+            )
 
         num_running_tasks = len(self.running)
         num_queued_tasks = len(self.queued_tasks)

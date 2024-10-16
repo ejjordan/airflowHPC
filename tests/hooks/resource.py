@@ -106,6 +106,25 @@ def test_allocate_slot():
     assert [core.occupation == FREE for core in nodes_list.nodes[0].cores[4:]]
 
 
+def test_allocate_slot_multinode():
+    node_names = ["node1", "node2"]
+    nodes_list = get_node(node_names)
+    num_ranks = 3
+    num_threads = 2
+    rr_list = [RankRequirements(num_ranks=num_ranks, num_threads=num_threads)] * 6
+    slots = [nodes_list.allocate_slot(rr) for rr in rr_list]
+
+    assert len(slots) == 6
+    assert [
+        [core.occupation == BUSY for core in nodes_list.nodes[i].cores[:12]]
+        for i in range(len(node_names))
+    ]
+    assert [
+        [core.occupation == FREE for core in nodes_list.nodes[i].cores[12:]]
+        for i in range(len(node_names))
+    ]
+
+
 def test_release_slot():
     node_names = ["node1"]
     nodes_list = get_node(node_names)
