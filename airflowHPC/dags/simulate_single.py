@@ -1,53 +1,10 @@
 from airflow import DAG
-from airflow.decorators import task
 from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
-from gmxapi.commandline import cli_executable
 from airflow.models.param import Param
-
-try:
-    gmx_executable = cli_executable()
-except:
-    gmx_executable = "gmx_mpi"
-
-
-@task
-def unpack_gro_inputs(**context):
-    """
-    It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
-    Thus, this task prepares gro input files for grompp.
-    """
-    temps_range = range(
-        len(context["task"].render_template("{{ params.ref_t_list | list}}", context))
-    )
-    gro_input_dir = context["task"].render_template(
-        "{{ params.inputs.gro.directory }}", context
-    )
-    step_number = context["task"].render_template("{{ params.step_number }}", context)
-    input_dir = [
-        f"{gro_input_dir}/iteration_{step_number}/sim_{i}" for i in temps_range
-    ]
-    return input_dir
-
-
-@task
-def unpack_cpt_inputs(**context):
-    """
-    It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
-    Thus, this task prepares cpt input files for grompp.
-    """
-    temps_range = range(
-        len(context["task"].render_template("{{ params.ref_t_list | list}}", context))
-    )
-    cpt_input_dir = context["task"].render_template(
-        "{{ params.inputs.cpt.directory }}", context
-    )
-    num_steps = context["task"].render_template("{{ params.step_number }}", context)
-    input_dir = [f"{cpt_input_dir}/iteration_{num_steps}/sim_{i}" for i in temps_range]
-    return input_dir
 
 
 with DAG(
@@ -55,7 +12,6 @@ with DAG(
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
-    max_active_runs=1,
     params={
         "inputs": Param(
             {
@@ -153,7 +109,6 @@ with DAG(
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
-    max_active_runs=1,
     params={
         "inputs": Param(
             {
