@@ -1,12 +1,11 @@
 import os
 from airflow import DAG
 from airflow.decorators import task
-from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 
-from airflowHPC.operators import ResourceGmxOperatorDataclass
+from airflowHPC.operators import ResourceGmxOperatorDataclass, ResourceBashOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflowHPC.dags.tasks import (
     get_file,
@@ -344,11 +343,17 @@ with DAG(
         },
         gmx_executable="gmx_mpi",
     ).expand(input_data=grompp_input_list_sim)
-    mdrun_sim = BashOperator(
-        bash_command=f"mpirun -np 4 {gmx_executable} mdrun -replex 100 -multidir "
-        + "{{ params.output_dir }}/{{ params.step_dir }}/"
-        + f"/sim_[0123] -s sim.tpr",
+    # This could be ResourceGmxOperator, but this shows how ResourceBashOperator can be equivalent
+    mdrun_sim = ResourceBashOperator(
         task_id="mdrun_sim",
+        bash_command=f"{gmx_executable} mdrun -replex 100 -multidir "
+        + "{{ params.output_dir }}/{{ params.step_dir }}/sim_[0123] -s sim.tpr -deffnm sim",
+        executor_config={
+            "mpi_ranks": 4,
+            "cpus_per_task": 2,
+            "gpus": 0,
+            "gpu_type": None,
+        },
         cwd=os.path.curdir,
     )
     potential_energy_list_sim = (
@@ -356,7 +361,7 @@ with DAG(
         .partial(field="Potential")
         .expand(
             edr_file=[
-                "{{ params.output_dir }}/{{ params.step_dir }}/" + f"sim_{i}/ener.edr"
+                "{{ params.output_dir }}/{{ params.step_dir }}/" + f"sim_{i}/sim.edr"
                 for i in range(NUM_SIMULATIONS)
             ]
         )
@@ -376,7 +381,7 @@ with DAG(
     )
     get_final_xtc = get_file.override(task_id="get_final_xtc")(
         input_dir="{{ params.output_dir }}/{{ params.step_dir }}/sim_0",
-        file_name="traj_comp.xtc",
+        file_name="sim.xtc",
         use_ref_data=False,
     )
     plot_ramachandran = plot_ramachandran_residue.override(task_id="plot_ramachandran")(
