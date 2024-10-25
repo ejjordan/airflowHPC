@@ -5,7 +5,7 @@ from airflowHPC.dags.tasks import (
     get_file,
     prepare_gmx_input,
     update_gmx_input,
-    unpack_ref_t,
+    unpack_mdp_options,
 )
 from airflowHPC.operators import ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -39,7 +39,7 @@ with DAG(
         ),
         "output_dir": "npt_equil",
         "expected_output": "npt.gro",
-        "ref_t_list": [300, 310, 320, 330],
+        "mdp_options": [{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}],
         "step_number": 0,
     },
 ) as npt_equil:
@@ -49,7 +49,7 @@ with DAG(
         input_dir="{{ params.inputs.mdp.directory }}",
         file_name="{{ params.inputs.mdp.filename }}",
     )
-    ref_temps = unpack_ref_t()
+    ref_temps = unpack_mdp_options()
     mdp_npt = (
         update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_npt_update")
         .partial(mdp_json_file_path=mdp_json_npt)

@@ -357,15 +357,12 @@ def xcom_lookup(dag_id, task_id, key, **context):
 
 
 @task
-def unpack_ref_t(**context):
+def unpack_mdp_options(param_name: str = "{{ params.mdp_options | list}}", **context):
     """
     It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
-    Thus, this task handles dynamic sizing of the ref_t_list.
+    Thus, this task handles dynamic sizing of mdp options.
     """
-    temps_list = context["task"].render_template(
-        "{{ params.ref_t_list | list}}", context
-    )
-    return list([{"ref_t": ref_t} for ref_t in temps_list])
+    return context["task"].render_template(param_name, context)
 
 
 @task_group

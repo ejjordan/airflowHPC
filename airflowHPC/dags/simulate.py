@@ -6,7 +6,7 @@ from airflow.utils import timezone
 from airflowHPC.dags.tasks import (
     get_file,
     prepare_gmx_input,
-    unpack_ref_t,
+    unpack_mdp_options,
 )
 from airflowHPC.operators import ResourceBashOperator, ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -82,7 +82,7 @@ with DAG(
             },
             section="inputs",
         ),
-        "ref_t_list": [300, 310, 320, 330],
+        "mdp_options": [{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}],
         "step_number": 0,
         "output_dir": "sim",
         "expected_output": "sim.gro",
@@ -90,7 +90,7 @@ with DAG(
 ) as simulate:
     simulate.doc = """Simulation of a system with replica exchange handled by mdrun -multidir option."""
 
-    ref_temps = unpack_ref_t()
+    ref_temps = unpack_mdp_options()
     gro_input_dirs = unpack_gro_inputs()
     cpt_input_dirs = unpack_cpt_inputs()
 
