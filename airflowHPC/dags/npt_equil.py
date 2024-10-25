@@ -108,7 +108,7 @@ with DAG(
     mdrun_result = ResourceGmxOperatorDataclass.partial(
         task_id="mdrun_npt",
         executor_config={
-            "mpi_ranks": 4,
+            "mpi_ranks": 3,
             "cpus_per_task": 2,
             "gpus": 0,
             "gpu_type": None,

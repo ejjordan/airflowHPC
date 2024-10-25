@@ -22,12 +22,12 @@ def verify_files(input_dir, filename, ref_t_list, step_number):
 
 
 with DAG(
-    dag_id="fs_peptide",
+    dag_id="replex_multidir",
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
-    params={"ref_t_list": [300, 310, 320, 330], "output_dir": "fs_peptide"},
+    params={"ref_t_list": [300, 310, 320, 330], "output_dir": "replex_multidir"},
 ) as fs_peptide:
     fs_peptide.doc = """Replica exchange simulation of a peptide in water."""
 
@@ -59,7 +59,9 @@ with DAG(
         "output_dir": "{{ params.output_dir }}/em",
         "expected_output": "em.gro",
     }
-    minimize = run_if_needed.override(group_id="minimize")("minimize", minimize_params)
+    minimize = run_if_needed.override(group_id="minimize")(
+        "simulate_no_cpt", minimize_params
+    )
 
     nvt_params = {
         "inputs": {
@@ -73,7 +75,9 @@ with DAG(
         "output_dir": "{{ params.output_dir }}/nvt_equil",
         "expected_output": "nvt.gro",
     }
-    nvt_equil = run_if_needed.override(group_id="nvt_equil")("nvt_equil", nvt_params)
+    nvt_equil = run_if_needed.override(group_id="nvt_equil")(
+        "simulate_no_cpt", nvt_params
+    )
 
     npt_params = {
         "inputs": {
