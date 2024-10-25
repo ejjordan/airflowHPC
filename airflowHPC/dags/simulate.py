@@ -26,7 +26,7 @@ def unpack_gro_inputs(**context):
     Thus, this task prepares gro input files for grompp.
     """
     temps_range = range(
-        len(context["task"].render_template("{{ params.ref_t_list | list}}", context))
+        len(context["task"].render_template("{{ params.mdp_options | list}}", context))
     )
     gro_input_dir = context["task"].render_template(
         "{{ params.inputs.gro.directory }}", context
@@ -45,7 +45,7 @@ def unpack_cpt_inputs(**context):
     Thus, this task prepares cpt input files for grompp.
     """
     temps_range = range(
-        len(context["task"].render_template("{{ params.ref_t_list | list}}", context))
+        len(context["task"].render_template("{{ params.mdp_options | list}}", context))
     )
     cpt_input_dir = context["task"].render_template(
         "{{ params.inputs.cpt.directory }}", context
@@ -90,7 +90,7 @@ with DAG(
 ) as simulate:
     simulate.doc = """Simulation of a system with replica exchange handled by mdrun -multidir option."""
 
-    ref_temps = unpack_mdp_options()
+    mdp_options = unpack_mdp_options()
     gro_input_dirs = unpack_gro_inputs()
     cpt_input_dirs = unpack_cpt_inputs()
 
@@ -116,7 +116,7 @@ with DAG(
     mdp_sim = (
         update_write_mdp_json_as_mdp_from_file.override(task_id="write_mdp_sim")
         .partial(mdp_json_file_path=mdp_json_sim)
-        .expand(update_dict=ref_temps)
+        .expand(update_dict=mdp_options)
     )
     grompp_input_list_sim = prepare_gmx_input(
         args=["grompp"],
@@ -133,7 +133,7 @@ with DAG(
             "iteration_{{ params.step_number }}",
             "sim_",
         ],
-        num_simulations="{{ params.ref_t_list | length }}",
+        num_simulations="{{ params.mdp_options | length }}",
     )
     grompp_sim = ResourceGmxOperatorDataclass.partial(
         task_id="grompp_sim",

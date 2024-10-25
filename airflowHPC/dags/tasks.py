@@ -362,7 +362,11 @@ def unpack_mdp_options(param_name: str = "{{ params.mdp_options | list}}", **con
     It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
     Thus, this task handles dynamic sizing of mdp options.
     """
-    return context["task"].render_template(param_name, context)
+    import ast
+
+    mdp_options = context["task"].render_template(param_name, context)
+    mdp_options_parsed = [ast.literal_eval(option) for option in mdp_options]
+    return mdp_options_parsed
 
 
 @task_group

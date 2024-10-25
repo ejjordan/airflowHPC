@@ -49,11 +49,11 @@ with DAG(
         input_dir="{{ params.inputs.mdp.directory }}",
         file_name="{{ params.inputs.mdp.filename }}",
     )
-    ref_temps = unpack_mdp_options()
+    mdp_options = unpack_mdp_options()
     mdp_npt = (
         update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_npt_update")
         .partial(mdp_json_file_path=mdp_json_npt)
-        .expand(update_dict=ref_temps)
+        .expand(update_dict=mdp_options)
     )
     top = get_file.override(task_id="get_top")(
         input_dir="{{ params.inputs.top.directory }}",
@@ -79,7 +79,7 @@ with DAG(
             "iteration_{{ params.step_number }}",
             "sim_",
         ],
-        num_simulations="{{ params.ref_t_list | length }}",
+        num_simulations="{{ params.mdp_options | length }}",
     )
     grompp_npt = ResourceGmxOperatorDataclass.partial(
         task_id="grompp_npt",

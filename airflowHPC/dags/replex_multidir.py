@@ -6,13 +6,13 @@ from airflowHPC.dags.tasks import run_if_needed, run_if_false
 
 
 @task(trigger_rule="none_failed")
-def verify_files(input_dir, filename, ref_t_list, step_number):
+def verify_files(input_dir, filename, mdp_options, step_number):
     """Workaround for steps where multiple files are expected."""
     import logging
 
     input_files = [
         f"{input_dir}/iteration_{step_number}/sim_{i}/{filename}"
-        for i in range(len(ref_t_list))
+        for i in range(len(mdp_options))
     ]
     for file in input_files:
         logging.info(f"Checking if {file} exists: {os.path.exists(file)}")
@@ -27,7 +27,10 @@ with DAG(
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
-    params={"ref_t_list": [300, 310, 320, 330], "output_dir": "replex_multidir"},
+    params={
+        "mdp_options": [{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}],
+        "output_dir": "replex_multidir",
+    },
 ) as fs_peptide:
     fs_peptide.doc = """Replica exchange simulation of a peptide in water."""
 
@@ -93,7 +96,7 @@ with DAG(
                 "filename": "system_prepared.top",
             },
         },
-        "ref_t_list": "{{ params.ref_t_list }}",
+        "mdp_options": "{{ params.mdp_options }}",
         "step_number": 0,
         "output_dir": "{{ params.output_dir }}/npt_equil",
         "expected_output": "npt.gro",
@@ -101,7 +104,7 @@ with DAG(
     npt_equil_has_run = verify_files.override(task_id="npt_equil_has_run")(
         input_dir="{{ params.output_dir }}/npt_equil",
         filename="npt.gro",
-        ref_t_list="{{ params.ref_t_list }}",
+        mdp_options="{{ params.mdp_options }}",
         step_number=0,
     )
     npt_equil = run_if_false.override(group_id="npt_equil")(
@@ -127,7 +130,7 @@ with DAG(
                 "filename": "system_prepared.top",
             },
         },
-        "ref_t_list": "{{ params.ref_t_list }}",
+        "mdp_options": "{{ params.mdp_options }}",
         "step_number": 0,
         "output_dir": "{{ params.output_dir }}/sim",
         "expected_output": "sim.gro",
@@ -135,7 +138,7 @@ with DAG(
     sim_has_run = verify_files.override(task_id="sim_has_run")(
         input_dir="{{ params.output_dir }}/sim",
         filename="sim.gro",
-        ref_t_list="{{ params.ref_t_list }}",
+        mdp_options="{{ params.mdp_options }}",
         step_number=0,
     )
     simulate = run_if_false.override(group_id="simulate")(
