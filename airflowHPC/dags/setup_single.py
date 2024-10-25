@@ -25,8 +25,8 @@ with DAG(
     render_template_as_native_obj=True,
     max_active_runs=1,
     params={"output_dir": "setup_single"},
-) as fs_peptide:
-    fs_peptide.doc = """Replica exchange simulation of a peptide in water."""
+) as setup_single:
+    setup_single.doc = """Set up and equilibrate a system."""
 
     setup_params = {
         "inputs": {
@@ -40,7 +40,7 @@ with DAG(
         "expected_output": "system_prepared.gro",
     }
     setup = run_if_needed.override(group_id="prepare_system")(
-        "prepare_system", setup_params
+        dag_id="prepare_system", dag_params=setup_params
     )
 
     minimize_params = {
@@ -59,7 +59,9 @@ with DAG(
         "expected_output": "em.gro",
     }
     minimize = run_if_needed.override(group_id="minimize")(
-        "simulate_no_cpt", minimize_params
+        dag_id="simulate_no_cpt",
+        dag_params=minimize_params,
+        dag_display_name="minimize",
     )
 
     nvt_params = {
@@ -75,7 +77,7 @@ with DAG(
         "expected_output": "nvt.gro",
     }
     nvt_equil = run_if_needed.override(group_id="nvt_equil")(
-        "simulate_no_cpt", nvt_params
+        dag_id="simulate_no_cpt", dag_params=nvt_params, dag_display_name="nvt_equil"
     )
 
     npt_params = {
@@ -98,7 +100,10 @@ with DAG(
         filename="npt.gro",
     )
     npt_equil = run_if_false.override(group_id="npt_equil")(
-        "simulate_no_cpt", npt_params, npt_equil_has_run
+        dag_id="simulate_no_cpt",
+        dag_params=npt_params,
+        truth_value=npt_equil_has_run,
+        dag_display_name="npt_equil",
     )
 
     sim_params = {
@@ -125,7 +130,10 @@ with DAG(
         filename="sim.gro",
     )
     simulate = run_if_false.override(group_id="simulate")(
-        "simulate_cpt", sim_params, sim_has_run
+        dag_id="simulate_cpt",
+        dag_params=sim_params,
+        truth_value=sim_has_run,
+        dag_display_name="simulate",
     )
 
     (

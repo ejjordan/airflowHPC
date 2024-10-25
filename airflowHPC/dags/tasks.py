@@ -369,23 +369,27 @@ def unpack_ref_t(**context):
 
 
 @task_group
-def run_if_needed(dag_id, dag_params):
-    is_dag_done = get_file.override(task_id=f"is_{dag_id}_done")(
+def run_if_needed(dag_id: str, dag_params: dict, dag_display_name: str = None):
+    if dag_display_name is None:
+        dag_display_name = dag_id
+    is_dag_done = get_file.override(task_id=f"is_{dag_display_name}_done")(
         input_dir=dag_params["output_dir"],
         file_name=dag_params["expected_output"],
         use_ref_data=False,
         check_exists=True,
     )
     trigger_dag = TriggerDagRunOperator(
-        task_id=f"trigger_{dag_id}",
+        task_id=f"trigger_{dag_display_name}",
         trigger_dag_id=dag_id,
         wait_for_completion=True,
         poke_interval=10,
         trigger_rule="none_failed",
         conf=dag_params,
     )
-    dag_done = EmptyOperator(task_id=f"{dag_id}_done", trigger_rule="none_failed")
-    dag_done_branch = branch_task.override(task_id=f"{dag_id}_done_branch")(
+    dag_done = EmptyOperator(
+        task_id=f"{dag_display_name}_done", trigger_rule="none_failed"
+    )
+    dag_done_branch = branch_task.override(task_id=f"{dag_display_name}_done_branch")(
         truth_value=is_dag_done,
         task_if_true=dag_done.task_id,
         task_if_false=trigger_dag.task_id,
@@ -395,19 +399,27 @@ def run_if_needed(dag_id, dag_params):
 
 @task_group
 def run_if_false(
-    dag_id, dag_params, truth_value: bool, wait_for_completion: bool = True
+    dag_id,
+    dag_params,
+    truth_value: bool,
+    wait_for_completion: bool = True,
+    dag_display_name: str = None,
 ):
+    if dag_display_name is None:
+        dag_display_name = dag_id
     trigger_dag = TriggerDagRunOperator(
-        task_id=f"trigger_{dag_id}",
+        task_id=f"trigger_{dag_display_name}",
         trigger_dag_id=dag_id,
         wait_for_completion=wait_for_completion,
         poke_interval=10,
         trigger_rule="none_failed",
         conf=dag_params,
     )
-    dag_done = EmptyOperator(task_id=f"{dag_id}_done", trigger_rule="none_failed")
+    dag_done = EmptyOperator(
+        task_id=f"{dag_display_name}_done", trigger_rule="none_failed"
+    )
     dag_done_branch = branch_task.override(
-        task_id=f"{dag_id}_done_branch", trigger_rule="none_failed"
+        task_id=f"{dag_display_name}_done_branch", trigger_rule="none_failed"
     )(
         truth_value=truth_value,
         task_if_true=dag_done.task_id,

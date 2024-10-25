@@ -60,7 +60,9 @@ with DAG(
         "expected_output": "em.gro",
     }
     minimize = run_if_needed.override(group_id="minimize")(
-        "simulate_no_cpt", minimize_params
+        dag_id="simulate_no_cpt",
+        dag_params=minimize_params,
+        dag_display_name="minimize",
     )
 
     nvt_params = {
@@ -76,7 +78,7 @@ with DAG(
         "expected_output": "nvt.gro",
     }
     nvt_equil = run_if_needed.override(group_id="nvt_equil")(
-        "simulate_no_cpt", nvt_params
+        dag_id="simulate_no_cpt", dag_params=nvt_params, dag_display_name="nvt_equil"
     )
 
     npt_params = {
@@ -103,7 +105,10 @@ with DAG(
         step_number=0,
     )
     npt_equil = run_if_false.override(group_id="npt_equil")(
-        "npt_equil", npt_params, npt_equil_has_run
+        dag_id="npt_equil",
+        dag_params=npt_params,
+        truth_value=npt_equil_has_run,
+        dag_display_name="npt_equil",
     )
 
     sim_params = {
@@ -134,7 +139,7 @@ with DAG(
         step_number=0,
     )
     simulate = run_if_false.override(group_id="simulate")(
-        "simulate", sim_params, sim_has_run
+        dag_id="simulate", dag_params=sim_params, truth_value=sim_has_run
     )
 
     (
