@@ -7,7 +7,7 @@ with DAG(
     "run_gmx",
     start_date=timezone.utcnow(),
     catchup=False,
-    params={"output_dir": "outputs"},
+    params={"output_dir": "run_gmx"},
 ) as dag:
     input_gro = get_file.override(task_id="get_gro")(
         input_dir="ensemble_md", file_name="sys.gro"
@@ -22,7 +22,7 @@ with DAG(
         task_id="grompp",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 2,
+            "cpus_per_task": 1,
             "gpus": 0,
             "gpu_type": None,
         },
@@ -53,7 +53,7 @@ with DAG(
             "gpu_type": None,
         },
         gmx_executable="gmx_mpi",
-        gmx_arguments=["mdrun", "-ntomp", "2"],
+        gmx_arguments=["mdrun"],
         input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
         output_dir="{{ params.output_dir }}",

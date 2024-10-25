@@ -88,7 +88,7 @@ with DAG(
     mdrun_input_list = (
         update_gmx_input.override(task_id="mdrun_input_list")
         .partial(
-            args=["mdrun", "-v", "-deffnm", "{{ params.output_name }}", "-ntomp", "2"],
+            args=["mdrun", "-v", "-deffnm", "{{ params.output_name }}"],
             input_files_keys={"-s": "-o"},
             output_files={"-c": "{{ params.output_name }}.gro", "-dhdl": "dhdl.xvg"},
         )

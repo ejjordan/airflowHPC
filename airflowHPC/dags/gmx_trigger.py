@@ -50,7 +50,7 @@ def run_iteration(
     mdrun_input_list = (
         update_gmx_input.override(task_id="mdrun_input_list")
         .partial(
-            args=["mdrun", "-v", "-deffnm", output_name, "-ntomp", "2"],
+            args=["mdrun", "-v", "-deffnm", output_name],
             input_files_keys={"-s": "-o"},
             output_files={
                 "-c": f"{output_name}.gro",
