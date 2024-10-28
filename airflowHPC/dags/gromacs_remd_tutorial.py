@@ -18,6 +18,11 @@ from airflowHPC.dags.tasks import (
 )
 from gmxapi.commandline import cli_executable
 
+try:
+    gmx_executable = cli_executable()
+except:
+    gmx_executable = "gmx_mpi"
+
 NUM_SIMULATIONS = 4
 
 
@@ -340,7 +345,7 @@ with DAG(
         gmx_executable="gmx_mpi",
     ).expand(input_data=grompp_input_list_sim)
     mdrun_sim = BashOperator(
-        bash_command=f"mpirun -np 4 {cli_executable()} mdrun -replex 100 -multidir "
+        bash_command=f"mpirun -np 4 {gmx_executable} mdrun -replex 100 -multidir "
         + "{{ params.output_dir }}/{{ params.step_dir }}/"
         + f"/sim_[0123] -s sim.tpr",
         task_id="mdrun_sim",

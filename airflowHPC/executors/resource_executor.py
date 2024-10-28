@@ -14,12 +14,12 @@ from airflow.executors.base_executor import BaseExecutor
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import TaskInstanceState
 from airflow.models.taskinstance import TaskInstance
+from airflow.stats import Stats
 
-from airflowHPC.hooks.slurm import SlurmHook, Slot
+from airflowHPC.hooks.slurm import SlurmHook
 from airflowHPC.operators import is_resource_operator
 
 if TYPE_CHECKING:
-    from multiprocessing.managers import SyncManager
     from queue import Queue
 
     from airflow.executors.base_executor import CommandType
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     ExecutorWorkType = Tuple[
         Optional[TaskInstanceKey],
         Optional[CommandType],
+        Optional[list[int]],
         Optional[list[int]],
         Optional[str],
     ]
@@ -74,16 +75,18 @@ class ResourceWorker(Process, LoggingMixin):
         self,
         key: TaskInstanceKey,
         command: CommandType,
+        core_ids: list[int],
         gpu_ids: list[int],
-        node_name: str,
+        hostname: str,
     ) -> None:
         """
         Execute command received and stores result state in queue.
 
         :param key: the key to identify the task instance
         :param command: the command to execute
+        :param core_ids: the core IDs to use
         :param gpu_ids: the GPU IDs to use
-        :param node_name: the hostname of the node
+        :param hostname: the hostname of the node
         """
         if key is None:
             return
@@ -91,15 +94,21 @@ class ResourceWorker(Process, LoggingMixin):
         self.log.info("%s running %s", self.__class__.__name__, command)
         setproctitle(f"airflow worker -- ResourceExecutor: {command}")
         env = os.environ.copy()
+        if core_ids:
+            self.log.debug(f"Using cores: {core_ids}")
+            env.update({"CORE_IDS": f"{','.join(map(str, core_ids))}"})
         if gpu_ids:
             visible_devices = ",".join(map(str, gpu_ids))
             self.log.debug(f"Setting {self.gpu_env_var_name} to {visible_devices}")
             env.update({self.gpu_env_var_name: visible_devices})
-        if node_name:
-            self.log.debug(f"Setting {self.hostname_env_var_name} to {node_name}")
-            env.update({self.hostname_env_var_name: node_name})
+        if hostname:
+            self.log.debug(f"Setting {self.hostname_env_var_name} to {hostname}")
+            env.update({self.hostname_env_var_name: hostname})
         state = self._execute_work_in_subprocess(command, env)
         self.result_queue.put((key, state))
+        self.log.info(
+            f"Task {key.task_id}.{key.map_index} finished with state {state} on {self.name}"
+        )
         # Remove the command since the worker is done executing the task
         setproctitle("airflow worker -- ResourceExecutor")
 
@@ -124,7 +133,7 @@ class ResourceWorker(Process, LoggingMixin):
     def do_work(self) -> None:
         while True:
             try:
-                key, command, gpu_ids, node_name = self.task_queue.get()
+                key, command, core_ids, gpu_ids, hostname = self.task_queue.get()
             except EOFError:
                 self.log.info(
                     "Failed to read tasks from the task queue because the other "
@@ -137,7 +146,11 @@ class ResourceWorker(Process, LoggingMixin):
                     # Received poison pill, no more tasks to run
                     break
                 self.execute_work(
-                    key=key, command=command, gpu_ids=gpu_ids, node_name=node_name
+                    key=key,
+                    command=command,
+                    core_ids=core_ids,
+                    gpu_ids=gpu_ids,
+                    hostname=hostname,
                 )
             finally:
                 self.task_queue.task_done()
@@ -156,22 +169,19 @@ class ResourceExecutor(BaseExecutor):
         )
         if self.parallelism < 0:
             raise AirflowException("parallelism must be bigger than or equal to 0")
-        self.manager: SyncManager | None = None
-        self.result_queue: Queue[TaskInstanceStateType] | None = None
-        self.task_queue: Queue[ExecutorWorkType] | None = None
+        self.manager = Manager()
+        self.result_queue: Queue[TaskInstanceStateType] = self.manager.Queue()
+        self.task_queue: Queue[ExecutorWorkType] = self.manager.Queue()
         self.workers: list[ResourceWorker] = []
 
     def start(self) -> None:
         """Start the executor."""
         old_proctitle = getproctitle()
         setproctitle("airflow executor -- ResourceExecutor")
-        self.manager = Manager()
         setproctitle(old_proctitle)
-        self.result_queue = self.manager.Queue()
         self.workers = []
         self.workers_active = 0
 
-        self.task_queue = self.manager.Queue()
         self.workers = [
             ResourceWorker(
                 self.task_queue,
@@ -194,26 +204,43 @@ class ResourceExecutor(BaseExecutor):
     ):
         """Queues command to task."""
         if task_instance.key not in self.queued_tasks:
-            self.log.info("Adding to queue: %s", command)
+            self.log.info(f"Adding to queue: {command}")
             if is_resource_operator(task_instance.operator_name):
                 assert task_instance.executor_config
                 assert "mpi_ranks" in task_instance.executor_config
-                self.slurm_hook.set_task_resources(
-                    task_instance_key=task_instance.key,
-                    num_cores=task_instance.executor_config["mpi_ranks"],
-                    num_gpus=task_instance.executor_config.get("gpus", 0),
-                )
-                msg = f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key].num_cores} "
-                msg += f"core(s) and {self.slurm_hook.task_resource_requests[task_instance.key].num_gpus} GPU(s) "
-                msg += f"for task {task_instance.key}"
-                self.log.info(msg)
+                try:
+                    self.slurm_hook.set_task_resources(
+                        task_instance_key=task_instance.key,
+                        num_ranks=task_instance.executor_config["mpi_ranks"],
+                        num_threads=task_instance.executor_config.get(
+                            "cpus_per_task", 1
+                        ),
+                        num_gpus=task_instance.executor_config.get("gpus", 0),
+                    )
+                    msg = f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key].num_ranks} "
+                    msg += f"MPI ranks, {self.slurm_hook.task_resource_requests[task_instance.key].num_threads} threads, "
+                    msg += f"and {self.slurm_hook.task_resource_requests[task_instance.key].num_gpus} GPU(s) "
+                    msg += f"for task {task_instance.key.task_id}.{task_instance.key.map_index}"
+                    self.log.info(msg)
+                except ValueError:
+                    self.log.error(
+                        f"Failed to set task resources for task {task_instance.key.task_id}.{task_instance.key.map_index}"
+                    )
+                    self.change_state(
+                        key=task_instance.key,
+                        state=TaskInstanceState.FAILED,
+                        info=f"No viable resource assignment for task: {task_instance.key.task_id}.{task_instance.key.map_index}",
+                    )
+                    return
             else:
+                # No need to catch exceptions here, as the task will be queued with default resources
                 self.log.info(
-                    f"Setting task resources to 1 core and 0 gpus for task {task_instance.key}"
+                    f"Setting task resources to 1 core and 0 gpus for task {task_instance.key.task_id}.{task_instance.key.map_index}"
                 )
                 self.slurm_hook.set_task_resources(
                     task_instance_key=task_instance.key,
-                    num_cores=1,
+                    num_ranks=1,
+                    num_threads=1,
                     num_gpus=0,
                 )
             self.queued_tasks[task_instance.key] = (
@@ -240,75 +267,64 @@ class ResourceExecutor(BaseExecutor):
         if TYPE_CHECKING:
             assert self.task_queue
 
+        self.slurm_hook.assign_task_resources(key)
+        core_ids = self.slurm_hook.get_core_ids(key)
+        rank_ids = self.slurm_hook.get_rank_ids(key)
         gpu_ids = self.slurm_hook.get_gpu_ids(key)
-        node_name = self.slurm_hook.get_node_name(key)
-        self.task_queue.put((key, command, gpu_ids, node_name))
+        hostname = self.slurm_hook.get_hostname(key)
+        self.log.debug(
+            f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids} and rank IDs: {rank_ids}"
+        )
 
-    def trigger_tasks(self, open_slots: int) -> None:
-        """
-        Initiate async execution of the queued tasks, up to the number of available slots.
+        self.task_queue.put((key, command, rank_ids, gpu_ids, hostname))
 
-        :param open_slots: Number of open slots
-        """
-        sorted_queue = self.order_queued_tasks_by_priority()
-        task_tuples = []
+    def heartbeat(self) -> None:
+        """Heartbeat sent to trigger new jobs."""
+        slots = self.slurm_hook.find_available_slots(
+            [task for task in self.queued_tasks]
+        )
+        open_slots = len(slots)
+        if open_slots > 0:
+            self.log.debug(
+                f"Queued tasks: {[(task.task_id, task.map_index) for task in self.queued_tasks]}"
+            )
+            self.log.debug(
+                f"Running tasks: {[(task.task_id, task.map_index) for task in self.running]}"
+            )
+            self.log.debug(
+                f"SLOTS: {[[ro.index for ro in slot.cores] for slot in slots]}"
+            )
 
-        for _ in range(min((open_slots, len(self.queued_tasks)))):
-            key, (command, priority, queue, ti) = sorted_queue.pop(0)
+        num_running_tasks = len(self.running)
+        num_queued_tasks = len(self.queued_tasks)
 
-            # If a task makes it here but is still understood by the executor
-            # to be running, it generally means that the task has been killed
-            # externally and not yet been marked as failed.
-            #
-            # However, when a task is deferred, there is also a possibility of
-            # a race condition where a task might be scheduled again during
-            # trigger processing, even before we are able to register that the
-            # deferred task has completed. In this case and for this reason,
-            # we make a small number of attempts to see if the task has been
-            # removed from the running set in the meantime.
-            if key in self.running:
-                attempt = self.attempts[key]
-                if attempt.can_try_again():
-                    # if it hasn't been much time since first check, let it be checked again next time
-                    self.log.info(
-                        "queued but still running; attempt=%s task=%s",
-                        attempt.total_tries,
-                        key,
-                    )
-                    continue
-                # Otherwise, we give up and remove the task from the queue.
-                self.log.error(
-                    "could not queue task %s (still running after %d attempts)",
-                    key,
-                    attempt.total_tries,
-                )
-                del self.attempts[key]
-                del self.queued_tasks[key]
-            else:
-                try:
-                    found_slots = self.slurm_hook.assign_task_resources(key)
-                    if not found_slots:
-                        self.log.debug(f"No available resources for task: {key}.")
-                        sorted_queue.append(
-                            (key, (command, priority, queue, ti.executor_config))
-                        )
-                        break
-                except:
-                    self.log.error(f"No viable resource assignment for task: {key}.")
-                    del self.queued_tasks[key]
-                    self.change_state(
-                        key=key,
-                        state=TaskInstanceState.FAILED,
-                        info=f"No viable resource assignment for executor_config {ti.executor_config}",
-                    )
-                    break
+        self.log.debug("%s running task instances", num_running_tasks)
+        self.log.debug("%s in queue", num_queued_tasks)
+        self.log.debug("%s open slots", open_slots)
 
-                if key in self.attempts:
-                    del self.attempts[key]
-                task_tuples.append((key, command, queue, ti))
+        Stats.gauge(
+            "executor.open_slots",
+            value=open_slots,
+            tags={"status": "open", "name": self.__class__.__name__},
+        )
+        Stats.gauge(
+            "executor.queued_tasks",
+            value=num_queued_tasks,
+            tags={"status": "queued", "name": self.__class__.__name__},
+        )
+        Stats.gauge(
+            "executor.running_tasks",
+            value=num_running_tasks,
+            tags={"status": "running", "name": self.__class__.__name__},
+        )
 
-        if task_tuples:
-            self._process_tasks(task_tuples)
+        self.log.debug("Calling the %s sync method", self.__class__)
+        self.sync()
+
+        self.trigger_tasks(open_slots)
+
+        self.log.debug("Calling the %s sync method", self.__class__)
+        self.sync()
 
     def sync(self) -> None:
         """Sync will get called periodically by the heartbeat method."""
@@ -316,9 +332,15 @@ class ResourceExecutor(BaseExecutor):
             while True:
                 key, state = self.result_queue.get_nowait()
                 try:
-                    self.change_state(key=key, state=state)
                     if state in {TaskInstanceState.SUCCESS, TaskInstanceState.FAILED}:
+                        core_ids = self.slurm_hook.get_core_ids(key)
+                        self.log.debug(
+                            f"FREED task {key.task_id}.{key.map_index} using cores: {core_ids}"
+                        )
+                        # TODO: The slurm hook should be connected to a DB backend so that allocate and free
+                        # can be called by the task execute method
                         self.slurm_hook.release_task_resources(key)
+                    self.change_state(key, state)
                 finally:
                     self.result_queue.task_done()
 
@@ -332,10 +354,11 @@ class ResourceExecutor(BaseExecutor):
             "; waiting for running tasks to finish.  Signal again if you don't want to wait."
         )
         for _ in self.workers:
-            self.task_queue.put((None, None, None, None))
+            self.task_queue.put((None, None, None, None, None))
 
         # Wait for commands to finish
         self.task_queue.join()
+        self.result_queue.join()
         self.sync()
         self.manager.shutdown()
 

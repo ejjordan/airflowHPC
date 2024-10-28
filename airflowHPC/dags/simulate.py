@@ -13,6 +13,11 @@ from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from gmxapi.commandline import cli_executable
 from airflow.models.param import Param
 
+try:
+    gmx_executable = cli_executable()
+except:
+    gmx_executable = "gmx_mpi"
+
 
 @task
 def unpack_gro_inputs(**context):
@@ -134,7 +139,7 @@ with DAG(
         task_id="grompp_sim",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 2,
+            "cpus_per_task": 1,
             "gpus": 0,
             "gpu_type": None,
         },
@@ -143,7 +148,7 @@ with DAG(
     # This could be ResourceGmxOperator, but this shows how ResourceBashOperator can be equivalent
     mdrun_sim = ResourceBashOperator(
         task_id="mdrun_sim",
-        bash_command=f"{cli_executable()} mdrun -replex 100 -multidir "
+        bash_command=f"{gmx_executable} mdrun -replex 100 -multidir "
         + "{{ params.output_dir }}/iteration_{{ params.step_number }}/sim_[0123] -s sim.tpr -deffnm sim",
         executor_config={
             "mpi_ranks": 4,

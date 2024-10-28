@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import os
 import shutil
+from functools import cached_property
 from typing import TYPE_CHECKING, Sequence, Union, Iterable
 
+from airflow.configuration import conf
+from airflow.utils.providers_configuration_loader import providers_configuration_loaded
 from airflow.exceptions import AirflowException, AirflowSkipException
 
 from airflowHPC.dags.tasks import GmxInputHolder, GmxRunInfoHolder
@@ -43,6 +46,13 @@ class ResourceGmxOperator(ResourceBashOperator):
     ) -> None:
         kwargs.update({"cwd": output_dir})
         super().__init__(**kwargs)
+        if (
+            self.executor_config
+            and gmx_arguments[0] not in ["mdrun", "mdrun_mpi"]
+            and self.executor_config["cpus_per_task"] > 1
+        ):
+            self.executor_config["cpus_per_task"] = 1
+            self.warn = f"Overriding 'cpus_per_task' to 1 for {gmx_arguments[0]} as it is not supported."
         if gmx_executable is None:
             try:
                 from gmxapi.commandline import cli_executable
@@ -52,23 +62,38 @@ class ResourceGmxOperator(ResourceBashOperator):
                 raise ImportError(
                     "The gmx_executable argument must be set if the gmxapi python package is not installed."
                 )
+        elif gmx := self._exec_check(gmx_executable):
+            self.gmx_executable = gmx
         else:
-            self.gmx_executable = self._exec_check(gmx_executable)
+            raise ValueError(f"Executable {gmx_executable} not found.")
 
         self.gmx_arguments = gmx_arguments
         self.input_files = input_files
         self.output_files = output_files
         self.output_dir = output_dir
-        for i, arg in enumerate(self.gmx_arguments):
-            if arg in ["-ntomp", "-ntmpi", "-nt"]:
-                if int(self.gmx_arguments[i + 1]) != int(
-                    kwargs["executor_config"]["cpus_per_task"]
-                ):
-                    msg = f"Argument {arg} is '{self.gmx_arguments[i + 1]}', "
-                    msg += "but must be the same as executor_config['cpus_per_task']: "
-                    msg += f"'{kwargs['executor_config']['cpus_per_task']}'"
-                    raise ValueError(msg)
+        for arg in self.gmx_arguments:
+            if arg in ["-ntmpi", "-nt"]:
+                msg = f"{self.__class__.__name__} is designed for MPI versions of GROMACS and does not support {arg}\n"
+                msg += f"The number of OpenMP threads (flag '-ntomp') is managed by this operator and need not be set."
+                raise ValueError(msg)
+
         self.show_return_value_in_logs = show_return_value_in_logs
+
+    @cached_property
+    @providers_configuration_loaded
+    def allow_dispersed_cores(self) -> bool:
+        return conf.getboolean("hpc", "allow_dispersed_cores", fallback=True)
+
+    def check_add_args(self, arg: str, value: str):
+        for i, gmx_arg in enumerate(self.gmx_arguments):
+            if arg == gmx_arg:
+                if value != self.gmx_arguments[i + 1]:
+                    msg = f"Changing argument '{arg} {self.gmx_arguments[i + 1]}' to '{arg} {value}'."
+                    msg += f"The mdrun flag '{arg}' is managed by the operator and user input will be overridden."
+                    self.log.warning(msg)
+                    self.gmx_arguments[i + 1] = value
+                return
+        self.gmx_arguments.extend([arg, value])
 
     def execute(self, context: Context):
         if not os.path.exists(self.output_dir):
@@ -82,12 +107,36 @@ class ResourceGmxOperator(ResourceBashOperator):
         bash_path = shutil.which("bash") or "bash"
         env = self.get_env(context)
 
+        if isinstance(self.gmx_arguments, (str, bytes)):
+            self.gmx_arguments = [self.gmx_arguments]
+        if self.gmx_arguments[0] in ["mdrun", "mdrun_mpi"]:
+            self.check_add_args("-ntomp", str(self.executor_config["cpus_per_task"]))
+            ranks_id = self.core_ids.split(",")
+            if not self.allow_dispersed_cores:
+                self.check_add_args("-pin", "on")
+                self.check_add_args("-pinoffset", ranks_id[0])
+            elif self.allow_dispersed_cores and all(
+                x <= y for x, y in zip(ranks_id, ranks_id[1:])
+            ):
+                self.check_add_args("-pin", "on")
+                self.check_add_args("-pinoffset", ranks_id[0])
+            else:
+                self.log.error(
+                    f"mdrun pinning only works with sequential rank ids, try setting allow_dispersed_cores to False"
+                )
+                raise AirflowException(f"Could not pin cores for mdrun")
+        if "warn" in self.__dict__ and self.warn:
+            self.log.warning(self.warn)
+        if self.gpu_ids:
+            self.gmx_arguments.extend(["-gpu_id", ",".join(map(str, self.gpu_ids))])
+
         self.log.info(f"mpi_executable: {self.mpi_executable}")
         self.log.info(f"mpi_ranks: {self.mpi_ranks}")
         self.log.info(f"gmx_executable: {self.gmx_executable}")
         self.log.info(f"gmx_arguments: {self.gmx_arguments}")
         self.log.info(f"input_files: {self.input_files}")
         self.log.info(f"output_files: {output_files_paths}")
+        self.log.info(f"core_ids: {self.core_ids}")
         self.log.info(f"gpu_ids: {self.gpu_ids}")
         self.log.info(f"hostname: {self.hostname}")
 
@@ -143,20 +192,16 @@ class ResourceGmxOperator(ResourceBashOperator):
         if output_files is None:
             output_files = {}
 
-        if isinstance(gmx_arguments, (str, bytes)):
-            gmx_arguments = [gmx_arguments]
-        if self.gpu_ids:
-            gmx_arguments.extend(["-gpu_id", ",".join(map(str, self.gpu_ids))])
-
         call = list()
         call.append(mpi_executable)
         call.extend([self.num_ranks_flag, str(mpi_ranks)])
+        call.extend(["--cpu-set", self.core_ids])
         if self.hostname:
             if "srun" in mpi_executable:
                 host_flag = "--nodelist"
             else:
                 host_flag = "-host"
-            call.extend([host_flag, self.hostname])
+            call.extend([host_flag, f"{self.hostname}:{self.mpi_ranks}"])
         call.append(gmx_executable)
         call.extend(gmx_arguments)
         call.extend(self.flatten_dict(input_files))
