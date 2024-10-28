@@ -6,6 +6,7 @@ from airflowHPC.dags.tasks import (
     prepare_gmx_input,
     update_gmx_input,
     unpack_mdp_options,
+    dataset_from_xcom_dicts,
 )
 from airflowHPC.operators import ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -40,7 +41,7 @@ with DAG(
         "output_dir": "npt_equil",
         "expected_output": "npt.gro",
         "mdp_options": [{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}],
-        "step_number": 0,
+        "output_dataset_structure": {},
     },
 ) as npt_equil:
     npt_equil.doc = """NPT equilibration."""
@@ -76,7 +77,6 @@ with DAG(
         output_files={"-o": "npt.tpr"},
         output_path_parts=[
             "{{ params.output_dir }}",
-            "iteration_{{ params.step_number }}",
             "sim_",
         ],
         num_simulations="{{ params.mdp_options | length }}",
@@ -115,3 +115,10 @@ with DAG(
         },
         gmx_executable="gmx_mpi",
     ).expand(input_data=mdrun_input)
+    dataset = dataset_from_xcom_dicts.override(task_id="make_dataset")(
+        output_dir="{{ params.output_dir }}",
+        output_fn="npt.json",
+        list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun_npt', key='return_value')}}",
+        dataset_structure="{{ params.output_dataset_structure }}",
+    )
+    grompp_npt >> mdrun_result >> dataset

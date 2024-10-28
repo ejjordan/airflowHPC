@@ -60,6 +60,25 @@ def get_file(
     return file_to_get
 
 
+@task(trigger_rule="none_failed")
+def verify_files(input_dir, filename, mdp_options, step_number: int | None = None):
+    """Workaround for steps where multiple files are expected."""
+    import logging, os
+
+    if step_number is not None:
+        step_str = f"iteration_{step_number}/"
+    else:
+        step_str = ""
+    input_files = [
+        f"{input_dir}/{step_str}sim_{i}/{filename}" for i in range(len(mdp_options))
+    ]
+    for file in input_files:
+        logging.info(f"Checking if {file} exists: {os.path.exists(file)}")
+        if not os.path.exists(file):
+            return False
+    return True
+
+
 def _run_gmxapi(
     args: list, input_files: dict, output_files: dict, output_dir: str, stdin=None
 ):
@@ -294,7 +313,7 @@ def dataset_from_xcom_dicts(
     return dataset
 
 
-@task
+@task(trigger_rule="none_failed")
 def dict_from_xcom_dicts(list_of_dicts, dict_structure):
     import os
 
@@ -328,7 +347,7 @@ def dict_from_xcom_dicts(list_of_dicts, dict_structure):
     return output_data
 
 
-@task
+@task(trigger_rule="none_failed")
 def json_from_dataset_path(dataset_path: str):
     import json
 

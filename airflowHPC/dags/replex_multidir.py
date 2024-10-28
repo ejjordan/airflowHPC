@@ -1,24 +1,6 @@
-import os
 from airflow import DAG
-from airflow.decorators import task
 from airflow.utils import timezone
-from airflowHPC.dags.tasks import run_if_needed, run_if_false
-
-
-@task(trigger_rule="none_failed")
-def verify_files(input_dir, filename, mdp_options, step_number):
-    """Workaround for steps where multiple files are expected."""
-    import logging
-
-    input_files = [
-        f"{input_dir}/iteration_{step_number}/sim_{i}/{filename}"
-        for i in range(len(mdp_options))
-    ]
-    for file in input_files:
-        logging.info(f"Checking if {file} exists: {os.path.exists(file)}")
-        if not os.path.exists(file):
-            return False
-    return True
+from airflowHPC.dags.tasks import run_if_needed, run_if_false, verify_files
 
 
 with DAG(
@@ -97,7 +79,6 @@ with DAG(
             },
         },
         "mdp_options": "{{ params.mdp_options }}",
-        "step_number": 0,
         "output_dir": "{{ params.output_dir }}/npt_equil",
         "expected_output": "npt.gro",
     }
@@ -105,7 +86,6 @@ with DAG(
         input_dir="{{ params.output_dir }}/npt_equil",
         filename="npt.gro",
         mdp_options="{{ params.mdp_options }}",
-        step_number=0,
     )
     npt_equil = run_if_false.override(group_id="npt_equil")(
         dag_id="npt_equil",
@@ -131,7 +111,6 @@ with DAG(
             },
         },
         "mdp_options": "{{ params.mdp_options }}",
-        "step_number": 0,
         "output_dir": "{{ params.output_dir }}/sim",
         "expected_output": "sim.gro",
     }
@@ -139,7 +118,6 @@ with DAG(
         input_dir="{{ params.output_dir }}/sim",
         filename="sim.gro",
         mdp_options="{{ params.mdp_options }}",
-        step_number=0,
     )
     simulate = run_if_false.override(group_id="simulate")(
         dag_id="simulate", dag_params=sim_params, truth_value=sim_has_run

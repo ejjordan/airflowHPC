@@ -25,16 +25,13 @@ def unpack_gro_inputs(**context):
     It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
     Thus, this task prepares gro input files for grompp.
     """
-    temps_range = range(
+    mdp_opts_range = range(
         len(context["task"].render_template("{{ params.mdp_options | list}}", context))
     )
     gro_input_dir = context["task"].render_template(
         "{{ params.inputs.gro.directory }}", context
     )
-    step_number = context["task"].render_template("{{ params.step_number }}", context)
-    input_dir = [
-        f"{gro_input_dir}/iteration_{step_number}/sim_{i}" for i in temps_range
-    ]
+    input_dir = [f"{gro_input_dir}/sim_{i}" for i in mdp_opts_range]
     return input_dir
 
 
@@ -44,14 +41,13 @@ def unpack_cpt_inputs(**context):
     It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
     Thus, this task prepares cpt input files for grompp.
     """
-    temps_range = range(
+    mdp_opts_range = range(
         len(context["task"].render_template("{{ params.mdp_options | list}}", context))
     )
     cpt_input_dir = context["task"].render_template(
         "{{ params.inputs.cpt.directory }}", context
     )
-    num_steps = context["task"].render_template("{{ params.step_number }}", context)
-    input_dir = [f"{cpt_input_dir}/iteration_{num_steps}/sim_{i}" for i in temps_range]
+    input_dir = [f"{cpt_input_dir}/sim_{i}" for i in mdp_opts_range]
     return input_dir
 
 
@@ -83,7 +79,6 @@ with DAG(
             section="inputs",
         ),
         "mdp_options": [{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}],
-        "step_number": 0,
         "output_dir": "sim",
         "expected_output": "sim.gro",
     },
@@ -130,7 +125,6 @@ with DAG(
         output_files={"-o": "sim.tpr"},
         output_path_parts=[
             "{{ params.output_dir }}",
-            "iteration_{{ params.step_number }}",
             "sim_",
         ],
         num_simulations="{{ params.mdp_options | length }}",
@@ -149,7 +143,7 @@ with DAG(
     mdrun_sim = ResourceBashOperator(
         task_id="mdrun_sim",
         bash_command=f"{gmx_executable} mdrun -replex 100 -multidir "
-        + "{{ params.output_dir }}/iteration_{{ params.step_number }}/sim_[0123] -s sim.tpr -deffnm sim",
+        + "{{ params.output_dir }}/sim_[0123] -s sim.tpr -deffnm sim",
         executor_config={
             "mpi_ranks": 4,
             "cpus_per_task": 2,
