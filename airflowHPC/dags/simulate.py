@@ -20,35 +20,16 @@ except:
 
 
 @task
-def unpack_gro_inputs(**context):
+def unpack_inputs(param_string: str = "{{ params.inputs.gro.directory }}", **context):
     """
     It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
-    Thus, this task prepares gro input files for grompp.
+    Thus, this task prepares input files for grompp.
     """
     mdp_opts_range = range(
         len(context["task"].render_template("{{ params.mdp_options | list}}", context))
     )
-    gro_input_dir = context["task"].render_template(
-        "{{ params.inputs.gro.directory }}", context
-    )
-    input_dir = [f"{gro_input_dir}/sim_{i}" for i in mdp_opts_range]
-    return input_dir
-
-
-@task
-def unpack_cpt_inputs(**context):
-    """
-    It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
-    Thus, this task prepares cpt input files for grompp.
-    """
-    mdp_opts_range = range(
-        len(context["task"].render_template("{{ params.mdp_options | list}}", context))
-    )
-    cpt_input_dir = context["task"].render_template(
-        "{{ params.inputs.cpt.directory }}", context
-    )
-    input_dir = [f"{cpt_input_dir}/sim_{i}" for i in mdp_opts_range]
-    return input_dir
+    input_dir = context["task"].render_template(param_string, context)
+    return [f"{input_dir}/sim_{i}" for i in mdp_opts_range]
 
 
 with DAG(
@@ -86,8 +67,12 @@ with DAG(
     simulate.doc = """Simulation of a system with replica exchange handled by mdrun -multidir option."""
 
     mdp_options = unpack_mdp_options()
-    gro_input_dirs = unpack_gro_inputs()
-    cpt_input_dirs = unpack_cpt_inputs()
+    gro_input_dirs = unpack_inputs.override(task_id="unpack_gro_inputs")(
+        param_string="{{ params.inputs.gro.directory }}"
+    )
+    cpt_input_dirs = unpack_inputs.override(task_id="unpack_cpt_inputs")(
+        param_string="{{ params.inputs.cpt.directory }}"
+    )
 
     top_sim = get_file.override(task_id="get_sim_top")(
         input_dir="{{ params.inputs.top.directory }}",
