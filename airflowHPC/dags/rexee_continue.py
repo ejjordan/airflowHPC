@@ -63,7 +63,6 @@ with DAG(
     # Update MDP files for the next iteration (Note that here we update the counter first.)
     expand_args = prepare_args_for_mdp_functions(
         counter="{{ params.last_iteration_num }}",
-        mode="update",
         num_simulations="{{ params.num_simulations }}",
         output_dir="{{ params.output_dir }}",
     )
@@ -113,7 +112,7 @@ with DAG(
             "parent_dag_id": dag.dag_id,
         },
         "num_simulations": "{{ params.num_simulations }}",
-        "output_name": "rexee_init",
+        "output_name": "rexee_continue",
         "output_dir": "{{ params.output_dir }}",
         "output_dataset_structure": {
             "simulation_id": "simulation_id",
@@ -123,14 +122,14 @@ with DAG(
         "counter": "{{ params.last_iteration_num }}",
     }
     rexee_continue_dag = TriggerDagRunOperator(
-        task_id="rexee_init_dag",
+        task_id="rexee_continue_dag",
         trigger_dag_id="grompp_mdrun",
         poke_interval=1,
         conf=rexee_continue_grompp_mdrun_params,
         wait_for_completion=True,
     )
     dhdl = json_from_dataset_path.override(task_id="dhdl_results")(
-        dataset_path="{{ params.output_dir }}/"
+        dataset_path="{{ params.output_dir }}/iteration_{{ params.last_iteration_num }}/"
         + f"{rexee_continue_grompp_mdrun_params['output_name']}.json",
     )
     dhdl_results = extract_final_dhdl_info.partial(
