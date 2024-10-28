@@ -20,6 +20,7 @@ __all__ = (
     "evaluate_template_truth",
     "run_if_needed",
     "run_if_false",
+    "unpack_inputs",
 )
 
 
@@ -386,6 +387,19 @@ def unpack_mdp_options(param_name: str = "{{ params.mdp_options | list}}", **con
     mdp_options = context["task"].render_template(param_name, context)
     mdp_options_parsed = [ast.literal_eval(option) for option in mdp_options]
     return mdp_options_parsed
+
+
+@task
+def unpack_inputs(param_string: str = "{{ params.inputs.gro.directory }}", **context):
+    """
+    It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
+    Thus, this task prepares input files for grompp.
+    """
+    mdp_opts_range = range(
+        len(context["task"].render_template("{{ params.mdp_options | list}}", context))
+    )
+    input_dir = context["task"].render_template(param_string, context)
+    return [f"{input_dir}/sim_{i}" for i in mdp_opts_range]
 
 
 @task_group

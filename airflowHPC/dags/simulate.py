@@ -1,12 +1,12 @@
 import os
 from airflow import DAG
-from airflow.decorators import task
 from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
     get_file,
     prepare_gmx_input,
     unpack_mdp_options,
+    unpack_inputs,
 )
 from airflowHPC.operators import ResourceBashOperator, ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -17,19 +17,6 @@ try:
     gmx_executable = cli_executable()
 except:
     gmx_executable = "gmx_mpi"
-
-
-@task
-def unpack_inputs(param_string: str = "{{ params.inputs.gro.directory }}", **context):
-    """
-    It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
-    Thus, this task prepares input files for grompp.
-    """
-    mdp_opts_range = range(
-        len(context["task"].render_template("{{ params.mdp_options | list}}", context))
-    )
-    input_dir = context["task"].render_template(param_string, context)
-    return [f"{input_dir}/sim_{i}" for i in mdp_opts_range]
 
 
 with DAG(

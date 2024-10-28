@@ -228,7 +228,7 @@ with DAG(
 
 
 with DAG(
-    dag_id="coordinate",
+    dag_id="remd_demo",
     start_date=timezone.utcnow(),
     schedule=None,
     catchup=False,
@@ -332,7 +332,7 @@ with DAG(
         step_number=None,
     )
     npt_equil = run_if_false.override(group_id="npt_equil")(
-        dag_id="npt_equil",
+        dag_id="simulate_expand",
         dag_params=npt_params,
         truth_value=npt_equil_has_run,
         wait_for_completion=True,

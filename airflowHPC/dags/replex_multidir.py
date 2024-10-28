@@ -88,7 +88,7 @@ with DAG(
         mdp_options="{{ params.mdp_options }}",
     )
     npt_equil = run_if_false.override(group_id="npt_equil")(
-        dag_id="npt_equil",
+        dag_id="simulate_expand",
         dag_params=npt_params,
         truth_value=npt_equil_has_run,
         dag_display_name="npt_equil",
