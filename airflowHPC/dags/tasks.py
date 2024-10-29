@@ -445,7 +445,7 @@ def run_if_false(
         task_id=f"trigger_{dag_display_name}",
         trigger_dag_id=dag_id,
         wait_for_completion=wait_for_completion,
-        poke_interval=10,
+        poke_interval=2,
         trigger_rule="none_failed",
         conf=dag_params,
     )

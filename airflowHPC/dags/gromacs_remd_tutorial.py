@@ -1,12 +1,9 @@
 from airflow import DAG
 from airflow.decorators import task, task_group
-from airflow.operators.empty import EmptyOperator
-from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
     get_file,
-    branch_task,
     run_if_needed,
     verify_files,
     run_if_false,
@@ -38,20 +35,64 @@ def plot_hist_from_edr(edr_data, output_dir, output_file):
     potential_energies_list >> hist
 
 
+@task_group
+def plot_rama():
+    get_final_tprs = (
+        get_file.override(task_id="get_final_tprs")
+        .partial(
+            file_name="sim.tpr",
+            use_ref_data=False,
+        )
+        .expand(
+            input_dir=[
+                "{{ params.output_dir }}/{{ params.simulate_dir }}/sim_" + str(i)
+                for i in range(NUM_SIMULATIONS)
+            ]
+        )
+    )
+    tprs = get_final_tprs.map(lambda x: x)
+
+    get_final_xtcs = (
+        get_file.override(task_id="get_final_xtcs")
+        .partial(
+            file_name="sim.xtc",
+            use_ref_data=False,
+        )
+        .expand(
+            input_dir=[
+                "{{ params.output_dir }}/{{ params.simulate_dir }}/sim_" + str(i)
+                for i in range(NUM_SIMULATIONS)
+            ]
+        )
+    )
+    xtcs = get_final_xtcs.map(lambda x: x)
+    tpr_xtcs = xtcs.zip(tprs)
+    plot_ramachandran = plot_ramachandran_residue.override(task_id="plot_ramachandran")(
+        zipped_xtc_tpr=tpr_xtcs,
+        resnum=2,
+        output_file="{{ params.output_dir }}/{{ params.simulate_dir }}/ramaPhiPsiALA2.png",
+    )
+
+
 @task(trigger_rule="none_failed")
-def plot_ramachandran_residue(tpr_file, xtc_file, resnum, output_file):
+def plot_ramachandran_residue(zipped_xtc_tpr, resnum, output_file):
     import matplotlib.pyplot as plt
     import os
+    import logging
     from airflowHPC.data import data_dir
     from MDAnalysis import Universe
-
-    u = Universe(tpr_file, xtc_file)
-    selected_residues = u.select_atoms(f"resid {resnum}")
-
     from MDAnalysis.analysis.dihedrals import Ramachandran
 
-    phi_psi_angles = Ramachandran(selected_residues).run()
-    phi_angles, psi_angles = phi_psi_angles.angles.T
+    phi_angles = []
+    psi_angles = []
+    for xtc, tpr in zipped_xtc_tpr:
+        logging.info(f"xtc: {xtc}, tpr: {tpr}")
+        u = Universe(tpr, xtc)
+        selected_residues = u.select_atoms(f"resid {resnum}")
+        phi_psi_angles = Ramachandran(selected_residues).run()
+        phi, psi = phi_psi_angles.results["angles"].T
+        phi_angles.extend(phi.flatten().tolist())
+        psi_angles.extend(psi.flatten().tolist())
 
     plt.figure(figsize=(8, 8))
     plt.scatter(phi_angles, psi_angles, alpha=0.7)
@@ -262,19 +303,12 @@ with DAG(
         use_ref_data=False,
         check_exists=True,
     )
-    trigger_sim = TriggerDagRunOperator(
-        task_id="trigger_sim",
-        trigger_dag_id="simulate_multidir",
-        wait_for_completion=True,
-        poke_interval=10,
-        trigger_rule="none_failed",
-        conf=sim_params,
-    )
-    sim_done = EmptyOperator(task_id="sim_done", trigger_rule="none_failed")
-    sim_done_branch = branch_task.override(task_id="sim_done_branch")(
+    simulate = run_if_false.override(group_id="simulate")(
+        dag_id="simulate_multidir",
+        dag_params=sim_params,
         truth_value=is_sim_done,
-        task_if_true=sim_done.task_id,
-        task_if_false=trigger_sim.task_id,
+        wait_for_completion=True,
+        dag_display_name="simulate",
     )
 
     edr_list = (
@@ -296,25 +330,9 @@ with DAG(
         output_dir="{{ params.output_dir }}/{{ params.simulate_dir }}",
         output_file="potential_energy_histogram_sim.png",
     )
-    trigger_sim >> edr_list >> plot_sim
+    simulate >> edr_list >> plot_sim
 
-    get_final_tpr = get_file.override(task_id="get_final_tpr")(
-        input_dir="{{ params.output_dir }}/{{ params.simulate_dir }}/sim_0",
-        file_name="sim.tpr",
-        use_ref_data=False,
-    )
-    get_final_xtc = get_file.override(task_id="get_final_xtc")(
-        input_dir="{{ params.output_dir }}/{{ params.simulate_dir }}/sim_0",
-        file_name="sim.xtc",
-        use_ref_data=False,
-    )
-    plot_ramachandran = plot_ramachandran_residue.override(task_id="plot_ramachandran")(
-        tpr_file=get_final_tpr,
-        xtc_file=get_final_xtc,
-        resnum=2,
-        output_file="{{ params.output_dir }}/{{ params.simulate_dir }}/ramaPhiPsiALA2.png",
-    )
+    rama = plot_rama()
 
     setup >> minimize >> nvt_equil >> npt_equil_has_run >> npt_equil
-    npt_equil >> is_sim_done >> sim_done_branch >> [trigger_sim, sim_done]
-    trigger_sim >> [get_final_tpr, get_final_xtc]
+    npt_equil >> is_sim_done >> simulate >> rama
