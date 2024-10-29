@@ -59,13 +59,13 @@ def plot_ramachandran_residue(tpr_file, xtc_file, resnum, output_file):
     bg_image = plt.imread(
         fname=os.path.join(plot_dir, "Ramachandran_plot_original_outlines.jpg")
     )
-    imgplot = plt.imshow(bg_image, aspect="auto", extent=(-209, 195, -207, 190))
+    plt.imshow(bg_image, aspect="auto", extent=(-209, 195, -207, 190))
 
     plt.show()
     plt.savefig(output_file)
 
 
-@task
+@task(trigger_rule="none_failed")
 def extract_edr_info(edr_file, field):
     import pyedr
 
@@ -104,127 +104,6 @@ def plot_histograms(data_list, labels, hatch_list, xlabel, title, output_file):
     plt.legend()
     plt.savefig(output_file)
     logging.info(f"Saved histogram to {output_file}")
-
-
-with DAG(
-    dag_id="simulate_ala",
-    start_date=timezone.utcnow(),
-    schedule=None,
-    catchup=False,
-    render_template_as_native_obj=True,
-    max_active_runs=1,
-    params={
-        "output_dir": "remd",
-        "step_dir": "sim",
-    },
-) as simulate_ala:
-    simulate_ala.doc = """Simulation of a system for replica exchange."""
-
-    gro_sim = (
-        get_file.override(task_id="get_sim_gro")
-        .partial(file_name="npt.gro", use_ref_data=False)
-        .expand(
-            input_dir=[
-                "{{ params.output_dir }}" + f"/npt_equil/sim_{i}"
-                for i in range(NUM_SIMULATIONS)
-            ]
-        )
-    )
-    top_sim = get_file.override(task_id="get_sim_top")(
-        input_dir="{{ params.output_dir }}/prep",
-        file_name="system_prepared.top",
-        use_ref_data=False,
-    )
-    cpt_sim = (
-        get_file.override(task_id="get_sim_cpt")
-        .partial(file_name="npt.cpt", use_ref_data=False)
-        .expand(
-            input_dir=[
-                "{{ params.output_dir }}" + f"/npt_equil/sim_{i}"
-                for i in range(NUM_SIMULATIONS)
-            ]
-        )
-    )
-    mdp_json_sim = get_file.override(task_id="get_sim_mdp_json")(
-        input_dir="mdp", file_name="sim.json"
-    )
-    mdp_sim = update_write_mdp_json_as_mdp_from_file.partial(
-        mdp_json_file_path=mdp_json_sim
-    ).expand(
-        update_dict=[{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}]
-    )
-    grompp_input_list_sim = prepare_gmx_input(
-        args=["grompp"],
-        input_files={
-            "-f": mdp_sim,
-            "-c": gro_sim,
-            "-r": gro_sim,
-            "-p": top_sim,
-            "-t": cpt_sim,
-        },
-        output_files={"-o": "sim.tpr"},
-        output_path_parts=["{{ params.output_dir }}", "{{ params.step_dir }}", "sim_"],
-        num_simulations=NUM_SIMULATIONS,
-    )
-    grompp_sim = ResourceGmxOperatorDataclass.partial(
-        task_id="grompp_sim",
-        executor_config={
-            "mpi_ranks": 1,
-            "cpus_per_task": 2,
-            "gpus": 0,
-            "gpu_type": None,
-        },
-        gmx_executable="gmx_mpi",
-    ).expand(input_data=grompp_input_list_sim)
-    # This could be ResourceGmxOperator, but this shows how ResourceBashOperator can be equivalent
-    mdrun_sim = ResourceBashOperator(
-        task_id="mdrun_sim",
-        bash_command=f"{gmx_executable} mdrun -replex 100 -multidir "
-        + "{{ params.output_dir }}/{{ params.step_dir }}/sim_[0123] -s sim.tpr -deffnm sim",
-        executor_config={
-            "mpi_ranks": 4,
-            "cpus_per_task": 2,
-            "gpus": 0,
-            "gpu_type": None,
-        },
-        cwd=os.path.curdir,
-    )
-    potential_energy_list_sim = (
-        extract_edr_info.override(task_id="gmx_ener_sim")
-        .partial(field="Potential")
-        .expand(
-            edr_file=[
-                "{{ params.output_dir }}/{{ params.step_dir }}/" + f"sim_{i}/sim.edr"
-                for i in range(NUM_SIMULATIONS)
-            ]
-        )
-    )
-    hist_sim = plot_histograms.override(task_id="plot_histograms_sim")(
-        data_list=potential_energy_list_sim,
-        labels=["300K", "310K", "320K", "330K"],
-        hatch_list=["/", ".", "\\", "o"],
-        output_file="{{ params.output_dir }}/{{ params.step_dir }}/potential_energy_histogram_sim.png",
-        xlabel="Potential Energy (kJ/mol)",
-        title="Potential Energy Histogram",
-    )
-    get_final_tpr = get_file.override(task_id="get_final_tpr")(
-        input_dir="{{ params.output_dir }}/{{ params.step_dir }}/sim_0",
-        file_name="sim.tpr",
-        use_ref_data=False,
-    )
-    get_final_xtc = get_file.override(task_id="get_final_xtc")(
-        input_dir="{{ params.output_dir }}/{{ params.step_dir }}/sim_0",
-        file_name="sim.xtc",
-        use_ref_data=False,
-    )
-    plot_ramachandran = plot_ramachandran_residue.override(task_id="plot_ramachandran")(
-        tpr_file=get_final_tpr,
-        xtc_file=get_final_xtc,
-        resnum=2,
-        output_file="{{ params.output_dir }}/{{ params.step_dir }}/ramaPhiPsiALA2.png",
-    )
-    grompp_sim >> mdrun_sim >> potential_energy_list_sim >> hist_sim
-    mdrun_sim >> (get_final_tpr, get_final_xtc) >> plot_ramachandran
 
 
 with DAG(
@@ -356,6 +235,27 @@ with DAG(
         title="Potential Energy Histogram",
     )
 
+    sim_params = {
+        "inputs": {
+            "mdp": {"directory": "mdp", "filename": "sim.json"},
+            "gro": {
+                "directory": "{{ params.output_dir }}/{{ params.npt_equil_dir }}",
+                "filename": "npt.gro",
+            },
+            "cpt": {
+                "directory": "{{ params.output_dir }}/{{ params.npt_equil_dir }}",
+                "filename": "npt.cpt",
+            },
+            "top": {
+                "directory": "{{ params.output_dir }}/{{ params.setup_dir }}",
+                "filename": "system_prepared.top",
+            },
+        },
+        "mdp_options": "{{ params.mdp_options }}",
+        "output_dir": "{{ params.output_dir }}/{{ params.simulate_dir }}",
+        "expected_output": "sim.gro",
+    }
+
     is_sim_done = get_file.override(task_id="is_sim_done")(
         input_dir="{{ params.output_dir }}/{{ params.simulate_dir }}/sim_0",
         file_name="sim.tpr",
@@ -364,14 +264,11 @@ with DAG(
     )
     trigger_sim = TriggerDagRunOperator(
         task_id="trigger_sim",
-        trigger_dag_id="simulate_ala",
+        trigger_dag_id="simulate_multidir",
         wait_for_completion=True,
         poke_interval=10,
         trigger_rule="none_failed",
-        conf={
-            "output_dir": "{{ params.output_dir }}",
-            "step_dir": "{{ params.simulate_dir }}",
-        },
+        conf=sim_params,
     )
     sim_done = EmptyOperator(task_id="sim_done", trigger_rule="none_failed")
     sim_done_branch = branch_task.override(task_id="sim_done_branch")(
@@ -380,5 +277,43 @@ with DAG(
         task_if_false=trigger_sim.task_id,
     )
 
+    potential_energy_list_sim = (
+        extract_edr_info.override(task_id="gmx_ener_sim")
+        .partial(field="Potential")
+        .expand(
+            edr_file=[
+                "{{ params.output_dir }}/{{ params.simulate_dir }}/"
+                + f"sim_{i}/sim.edr"
+                for i in range(NUM_SIMULATIONS)
+            ]
+        )
+    )
+    hist_sim = plot_histograms.override(task_id="plot_histograms_sim")(
+        data_list=potential_energy_list_sim,
+        labels=["300K", "310K", "320K", "330K"],
+        hatch_list=["/", ".", "\\", "o"],
+        output_file="{{ params.output_dir }}/{{ params.simulate_dir }}/potential_energy_histogram_sim.png",
+        xlabel="Potential Energy (kJ/mol)",
+        title="Potential Energy Histogram",
+    )
+    get_final_tpr = get_file.override(task_id="get_final_tpr")(
+        input_dir="{{ params.output_dir }}/{{ params.simulate_dir }}/sim_0",
+        file_name="sim.tpr",
+        use_ref_data=False,
+    )
+    get_final_xtc = get_file.override(task_id="get_final_xtc")(
+        input_dir="{{ params.output_dir }}/{{ params.simulate_dir }}/sim_0",
+        file_name="sim.xtc",
+        use_ref_data=False,
+    )
+    plot_ramachandran = plot_ramachandran_residue.override(task_id="plot_ramachandran")(
+        tpr_file=get_final_tpr,
+        xtc_file=get_final_xtc,
+        resnum=2,
+        output_file="{{ params.output_dir }}/{{ params.simulate_dir }}/ramaPhiPsiALA2.png",
+    )
+
     setup >> minimize >> nvt_equil >> npt_equil_has_run >> npt_equil
     npt_equil >> is_sim_done >> sim_done_branch >> [trigger_sim, sim_done]
+    trigger_sim >> potential_energy_list_sim
+    trigger_sim >> [get_final_tpr, get_final_xtc]

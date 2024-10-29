@@ -20,7 +20,7 @@ except:
 
 
 with DAG(
-    dag_id="simulate",
+    dag_id="simulate_multidir",
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,

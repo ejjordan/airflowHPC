@@ -120,7 +120,10 @@ with DAG(
         mdp_options="{{ params.mdp_options }}",
     )
     simulate = run_if_false.override(group_id="simulate")(
-        dag_id="simulate", dag_params=sim_params, truth_value=sim_has_run
+        dag_id="simulate_multidir",
+        dag_params=sim_params,
+        truth_value=sim_has_run,
+        dag_display_name="simulate",
     )
 
     (
