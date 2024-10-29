@@ -416,7 +416,7 @@ def run_if_needed(dag_id: str, dag_params: dict, dag_display_name: str = None):
         task_id=f"trigger_{dag_display_name}",
         trigger_dag_id=dag_id,
         wait_for_completion=True,
-        poke_interval=10,
+        poke_interval=2,
         trigger_rule="none_failed",
         conf=dag_params,
     )

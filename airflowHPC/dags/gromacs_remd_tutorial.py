@@ -1,16 +1,12 @@
-import os
 from airflow import DAG
-from airflow.decorators import task
+from airflow.decorators import task, task_group
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 
-from airflowHPC.operators import ResourceGmxOperatorDataclass, ResourceBashOperator
-from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflowHPC.dags.tasks import (
     get_file,
     branch_task,
-    prepare_gmx_input,
     run_if_needed,
     verify_files,
     run_if_false,
@@ -24,6 +20,22 @@ except:
     gmx_executable = "gmx_mpi"
 
 NUM_SIMULATIONS = 4
+
+
+@task_group
+def plot_hist_from_edr(edr_data, output_dir, output_file):
+    potential_energies_list = extract_edr_data.override(task_id="gmx_ener")(
+        field="Potential", edr_dataset=edr_data
+    )
+    hist = plot_histograms.override(task_id="plot_histograms")(
+        data_list=potential_energies_list,
+        labels=["300K", "310K", "320K", "330K"],
+        hatch_list=["/", ".", "\\", "o"],
+        output_file=f"{output_dir}/{output_file}",
+        xlabel="Potential Energy (kJ/mol)",
+        title="Potential Energy Histogram",
+    )
+    potential_energies_list >> hist
 
 
 @task(trigger_rule="none_failed")
@@ -65,12 +77,8 @@ def plot_ramachandran_residue(tpr_file, xtc_file, resnum, output_file):
     plt.savefig(output_file)
 
 
-@task(trigger_rule="none_failed")
-def extract_edr_info(edr_file, field):
-    import pyedr
-
-    edr = pyedr.edr_to_dict(edr_file)
-    return edr[field].tolist()
+def map_edr_files(edr_file):
+    return {"edr": edr_file}
 
 
 @task(trigger_rule="none_failed")
@@ -109,7 +117,6 @@ def plot_histograms(data_list, labels, hatch_list, xlabel, title, output_file):
 with DAG(
     dag_id="remd_demo",
     start_date=timezone.utcnow(),
-    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
@@ -221,19 +228,12 @@ with DAG(
     edr_data = json_from_dataset_path.override(task_id="edr_data")(
         dataset_path="{{ params.output_dir }}/{{ params.npt_equil_dir }}/npt.json",
     )
-    npt_equil >> edr_data
-
-    potential_energies_list_equil = extract_edr_data.override(task_id="gmx_ener_equil")(
-        field="Potential", edr_dataset=edr_data
+    plot_equil = plot_hist_from_edr.override(group_id="plot_hist_equil")(
+        edr_data=edr_data,
+        output_dir="{{ params.output_dir }}/{{ params.npt_equil_dir }}",
+        output_file="potential_energy_histogram_equil.png",
     )
-    hist_equil = plot_histograms.override(task_id="plot_histograms_equil")(
-        data_list=potential_energies_list_equil,
-        labels=["300K", "310K", "320K", "330K"],
-        hatch_list=["/", ".", "\\", "o"],
-        output_file="{{ params.output_dir }}/{{ params.npt_equil_dir }}/potential_energy_histogram_equil.png",
-        xlabel="Potential Energy (kJ/mol)",
-        title="Potential Energy Histogram",
-    )
+    npt_equil >> edr_data >> plot_equil
 
     sim_params = {
         "inputs": {
@@ -277,25 +277,27 @@ with DAG(
         task_if_false=trigger_sim.task_id,
     )
 
-    potential_energy_list_sim = (
-        extract_edr_info.override(task_id="gmx_ener_sim")
-        .partial(field="Potential")
+    edr_list = (
+        get_file.override(task_id="get_edrs")
+        .partial(
+            file_name="sim.edr",
+            use_ref_data=False,
+        )
         .expand(
-            edr_file=[
-                "{{ params.output_dir }}/{{ params.simulate_dir }}/"
-                + f"sim_{i}/sim.edr"
+            input_dir=[
+                "{{ params.output_dir }}/{{ params.simulate_dir }}/" + f"sim_{i}/"
                 for i in range(NUM_SIMULATIONS)
             ]
         )
     )
-    hist_sim = plot_histograms.override(task_id="plot_histograms_sim")(
-        data_list=potential_energy_list_sim,
-        labels=["300K", "310K", "320K", "330K"],
-        hatch_list=["/", ".", "\\", "o"],
-        output_file="{{ params.output_dir }}/{{ params.simulate_dir }}/potential_energy_histogram_sim.png",
-        xlabel="Potential Energy (kJ/mol)",
-        title="Potential Energy Histogram",
+    edr_files = edr_list.map(map_edr_files)
+    plot_sim = plot_hist_from_edr.override(group_id="plot_hist_sim")(
+        edr_data=edr_files,
+        output_dir="{{ params.output_dir }}/{{ params.simulate_dir }}",
+        output_file="potential_energy_histogram_sim.png",
     )
+    trigger_sim >> edr_list >> plot_sim
+
     get_final_tpr = get_file.override(task_id="get_final_tpr")(
         input_dir="{{ params.output_dir }}/{{ params.simulate_dir }}/sim_0",
         file_name="sim.tpr",
@@ -315,5 +317,4 @@ with DAG(
 
     setup >> minimize >> nvt_equil >> npt_equil_has_run >> npt_equil
     npt_equil >> is_sim_done >> sim_done_branch >> [trigger_sim, sim_done]
-    trigger_sim >> potential_energy_list_sim
     trigger_sim >> [get_final_tpr, get_final_xtc]
