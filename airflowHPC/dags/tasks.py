@@ -377,6 +377,11 @@ def xcom_lookup(dag_id, task_id, key, **context):
 
 
 @task
+def unpack_param(param_name: str, **context):
+    return context["task"].render_template(param_name, context)
+
+
+@task
 def unpack_mdp_options(param_name: str = "{{ params.mdp_options | list}}", **context):
     """
     It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
