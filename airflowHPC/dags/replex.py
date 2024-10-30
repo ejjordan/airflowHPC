@@ -66,21 +66,21 @@ def initialize_MDP(
 
 @task
 def prepare_args_for_mdp_functions(
-    counter: int, mode: str, num_simulations: int, output_dir: str
+    counter: int | str, num_simulations: int | str, output_dir: str
 ):
-    if mode == "initialize":
+    if counter == 0:
         # For initializing MDP files for the first iteration
         expand_args = [
-            {"simulation_id": i, "output_dir": f"{output_dir}/sim_{i}/iteration_0"}
+            {"simulation_id": i, "output_dir": f"{output_dir}/iteration_0/sim_{i}"}
             for i in range(num_simulations)
         ]
-    elif mode == "update":
+    elif counter > 0:
         # For updating MDP files for the next iteration
         expand_args = [
             {
                 "simulation_id": i,
-                "template": f"{output_dir}/sim_{i}/iteration_{counter-1}/expanded.mdp",
-                "output_dir": f"{output_dir}/sim_{i}/iteration_{counter}",
+                "template": f"{output_dir}/iteration_{counter-1}/sim_{i}/expanded.mdp",
+                "output_dir": f"{output_dir}/iteration_{counter}/sim_{i}",
             }
             for i in range(num_simulations)
         ]

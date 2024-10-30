@@ -20,6 +20,7 @@ __all__ = (
     "evaluate_template_truth",
     "run_if_needed",
     "run_if_false",
+    "unpack_inputs",
 )
 
 
@@ -58,6 +59,25 @@ def get_file(
     if not os.path.exists(file_to_get):
         raise FileNotFoundError(f"File {file_to_get} does not exist")
     return file_to_get
+
+
+@task(trigger_rule="none_failed")
+def verify_files(input_dir, filename, mdp_options, step_number: int | None = None):
+    """Workaround for steps where multiple files are expected."""
+    import logging, os
+
+    if step_number is not None:
+        step_str = f"iteration_{step_number}/"
+    else:
+        step_str = ""
+    input_files = [
+        f"{input_dir}/{step_str}sim_{i}/{filename}" for i in range(len(mdp_options))
+    ]
+    for file in input_files:
+        logging.info(f"Checking if {file} exists: {os.path.exists(file)}")
+        if not os.path.exists(file):
+            return False
+    return True
 
 
 def _run_gmxapi(
@@ -294,7 +314,7 @@ def dataset_from_xcom_dicts(
     return dataset
 
 
-@task
+@task(trigger_rule="none_failed")
 def dict_from_xcom_dicts(list_of_dicts, dict_structure):
     import os
 
@@ -328,7 +348,7 @@ def dict_from_xcom_dicts(list_of_dicts, dict_structure):
     return output_data
 
 
-@task
+@task(trigger_rule="none_failed")
 def json_from_dataset_path(dataset_path: str):
     import json
 
@@ -357,35 +377,55 @@ def xcom_lookup(dag_id, task_id, key, **context):
 
 
 @task
-def unpack_ref_t(**context):
+def unpack_mdp_options(param_name: str = "{{ params.mdp_options | list}}", **context):
     """
     It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
-    Thus, this task handles dynamic sizing of the ref_t_list.
+    Thus, this task handles dynamic sizing of mdp options.
     """
-    temps_list = context["task"].render_template(
-        "{{ params.ref_t_list | list}}", context
+    import ast
+
+    mdp_options = context["task"].render_template(param_name, context)
+    mdp_options_parsed = [
+        ast.literal_eval(opt) if type(opt) is str else opt for opt in mdp_options
+    ]
+    return mdp_options_parsed
+
+
+@task
+def unpack_inputs(param_string: str = "{{ params.inputs.gro.directory }}", **context):
+    """
+    It is not possible to use templating for mapped operators (e.g. calls to op.expand()).
+    Thus, this task prepares input files for grompp.
+    """
+    mdp_opts_range = range(
+        len(context["task"].render_template("{{ params.mdp_options | list}}", context))
     )
-    return list([{"ref_t": ref_t} for ref_t in temps_list])
+    input_dir = context["task"].render_template(param_string, context)
+    return [f"{input_dir}/sim_{i}" for i in mdp_opts_range]
 
 
 @task_group
-def run_if_needed(dag_id, dag_params):
-    is_dag_done = get_file.override(task_id=f"is_{dag_id}_done")(
+def run_if_needed(dag_id: str, dag_params: dict, dag_display_name: str = None):
+    if dag_display_name is None:
+        dag_display_name = dag_id
+    is_dag_done = get_file.override(task_id=f"is_{dag_display_name}_done")(
         input_dir=dag_params["output_dir"],
         file_name=dag_params["expected_output"],
         use_ref_data=False,
         check_exists=True,
     )
     trigger_dag = TriggerDagRunOperator(
-        task_id=f"trigger_{dag_id}",
+        task_id=f"trigger_{dag_display_name}",
         trigger_dag_id=dag_id,
         wait_for_completion=True,
-        poke_interval=10,
+        poke_interval=2,
         trigger_rule="none_failed",
         conf=dag_params,
     )
-    dag_done = EmptyOperator(task_id=f"{dag_id}_done", trigger_rule="none_failed")
-    dag_done_branch = branch_task.override(task_id=f"{dag_id}_done_branch")(
+    dag_done = EmptyOperator(
+        task_id=f"{dag_display_name}_done", trigger_rule="none_failed"
+    )
+    dag_done_branch = branch_task.override(task_id=f"{dag_display_name}_done_branch")(
         truth_value=is_dag_done,
         task_if_true=dag_done.task_id,
         task_if_false=trigger_dag.task_id,
@@ -395,19 +435,27 @@ def run_if_needed(dag_id, dag_params):
 
 @task_group
 def run_if_false(
-    dag_id, dag_params, truth_value: bool, wait_for_completion: bool = True
+    dag_id,
+    dag_params,
+    truth_value: bool,
+    wait_for_completion: bool = True,
+    dag_display_name: str = None,
 ):
+    if dag_display_name is None:
+        dag_display_name = dag_id
     trigger_dag = TriggerDagRunOperator(
-        task_id=f"trigger_{dag_id}",
+        task_id=f"trigger_{dag_display_name}",
         trigger_dag_id=dag_id,
         wait_for_completion=wait_for_completion,
-        poke_interval=10,
+        poke_interval=2,
         trigger_rule="none_failed",
         conf=dag_params,
     )
-    dag_done = EmptyOperator(task_id=f"{dag_id}_done", trigger_rule="none_failed")
+    dag_done = EmptyOperator(
+        task_id=f"{dag_display_name}_done", trigger_rule="none_failed"
+    )
     dag_done_branch = branch_task.override(
-        task_id=f"{dag_id}_done_branch", trigger_rule="none_failed"
+        task_id=f"{dag_display_name}_done_branch", trigger_rule="none_failed"
     )(
         truth_value=truth_value,
         task_if_true=dag_done.task_id,

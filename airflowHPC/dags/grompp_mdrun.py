@@ -69,7 +69,11 @@ with DAG(
         args=["grompp"],
         input_files={"-f": mdp, "-c": gro, "-p": top},
         output_files={"-o": "{{ params.output_name }}.tpr"},
-        output_path_parts=["{{ params.output_dir }}", "sim_"],
+        output_path_parts=[
+            "{{ params.output_dir }}",
+            "iteration_{{ params.counter }}",
+            "sim_",
+        ],
         num_simulations="{{ params.num_simulations }}",
     )
 
@@ -105,7 +109,7 @@ with DAG(
         gmx_executable="gmx_mpi",
     ).expand(input_data=mdrun_input_list)
     dataset = dataset_from_xcom_dicts.override(task_id="make_dataset")(
-        output_dir="{{ params.output_dir }}",
+        output_dir="{{ params.output_dir }}/iteration_{{ params.counter }}",
         output_fn="{{ params.output_name }}.json",
         list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun', key='return_value')}}",
         dataset_structure="{{ params.output_dataset_structure }}",
