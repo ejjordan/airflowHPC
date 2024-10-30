@@ -116,10 +116,6 @@ def plot_ramachandran_residue(zipped_xtc_tpr, resnum, output_file):
     plt.savefig(output_file)
 
 
-def map_edr_files(edr_file):
-    return {"edr": edr_file}
-
-
 @task(trigger_rule="none_failed")
 def extract_edr_data(edr_dataset, field):
     import pyedr
@@ -341,7 +337,7 @@ with DAG(
             ]
         )
     )
-    edr_files = edr_list.map(map_edr_files)
+    edr_files = edr_list.map(lambda x: {"edr": x})
     plot_sim = plot_hist_from_edr.override(group_id="plot_hist_sim")(
         edr_data=edr_files,
         output_dir="{{ params.output_dir }}/{{ params.simulate_dir }}",
