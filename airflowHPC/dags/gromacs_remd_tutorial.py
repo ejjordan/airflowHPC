@@ -1,30 +1,28 @@
 from airflow import DAG
 from airflow.decorators import task, task_group
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
     get_file,
     run_if_needed,
     verify_files,
-    run_if_false,
     json_from_dataset_path,
+    branch_task,
 )
-from gmxapi.commandline import cli_executable
 
-try:
-    gmx_executable = cli_executable()
-except:
-    gmx_executable = "gmx_mpi"
 
 NUM_SIMULATIONS = 4
 
 
 @task_group
 def plot_hist_from_edr(edr_data, output_dir, output_file):
-    potential_energies_list = extract_edr_data.override(task_id="gmx_ener")(
-        field="Potential", edr_dataset=edr_data
-    )
-    hist = plot_histograms.override(task_id="plot_histograms")(
+    potential_energies_list = extract_edr_data.override(
+        task_id="gmx_ener", trigger_rule="none_skipped"
+    )(field="Potential", edr_dataset=edr_data)
+    hist = plot_histograms.override(
+        task_id="plot_histograms", trigger_rule="none_skipped"
+    )(
         data_list=potential_energies_list,
         labels=["300K", "310K", "320K", "330K"],
         hatch_list=["/", ".", "\\", "o"],
@@ -155,6 +153,11 @@ def plot_histograms(data_list, labels, hatch_list, xlabel, title, output_file):
     logging.info(f"Saved histogram to {output_file}")
 
 
+@task.short_circuit(ignore_downstream_trigger_rules=True)
+def reverse_condition(condition):
+    return not condition
+
+
 with DAG(
     dag_id="remd_demo",
     start_date=timezone.utcnow(),
@@ -258,15 +261,10 @@ with DAG(
         mdp_options="{{ params.mdp_options }}",
         step_number=None,
     )
-    npt_equil = run_if_false.override(group_id="npt_equil")(
-        dag_id="simulate_expand",
-        dag_params=npt_params,
-        truth_value=npt_equil_has_run,
-        wait_for_completion=True,
-        dag_display_name="npt_equil",
-    )
 
-    edr_data = json_from_dataset_path.override(task_id="edr_data")(
+    edr_data = json_from_dataset_path.override(
+        task_id="edr_data", trigger_rule="none_skipped"
+    )(
         dataset_path="{{ params.output_dir }}/{{ params.npt_equil_dir }}/npt.json",
     )
     plot_equil = plot_hist_from_edr.override(group_id="plot_hist_equil")(
@@ -274,7 +272,13 @@ with DAG(
         output_dir="{{ params.output_dir }}/{{ params.npt_equil_dir }}",
         output_file="potential_energy_histogram_equil.png",
     )
-    npt_equil >> edr_data >> plot_equil
+    trigger_npt_equil = TriggerDagRunOperator(
+        task_id="trigger_npt_equil",
+        trigger_dag_id="simulate_expand",
+        poke_interval=2,
+        conf=npt_params,
+        wait_for_completion=True,
+    )
 
     sim_params = {
         "inputs": {
@@ -303,12 +307,25 @@ with DAG(
         use_ref_data=False,
         check_exists=True,
     )
-    simulate = run_if_false.override(group_id="simulate")(
-        dag_id="simulate_multidir",
-        dag_params=sim_params,
-        truth_value=is_sim_done,
+
+    npt_equil_done_branch = branch_task.override(task_id="npt_equil_done_branch")(
+        truth_value=npt_equil_has_run,
+        task_if_true="is_sim_done",
+        task_if_false="trigger_npt_equil",
+    )
+
+    npt_equil_done_branch >> is_sim_done
+    npt_equil_done_branch >> trigger_npt_equil >> edr_data >> plot_equil >> is_sim_done
+    short_sim = reverse_condition.override(task_id="short_simulate")(
+        condition=is_sim_done
+    )
+    simulate = TriggerDagRunOperator(
+        task_id=f"trigger_simulate",
+        trigger_dag_id="simulate_multidir",
         wait_for_completion=True,
-        dag_display_name="simulate",
+        poke_interval=2,
+        trigger_rule="none_failed",
+        conf=sim_params,
     )
 
     edr_list = (
@@ -334,5 +351,5 @@ with DAG(
 
     rama = plot_rama()
 
-    setup >> minimize >> nvt_equil >> npt_equil_has_run >> npt_equil
-    npt_equil >> is_sim_done >> simulate >> rama
+    setup >> minimize >> nvt_equil >> npt_equil_has_run
+    is_sim_done >> short_sim >> simulate >> rama

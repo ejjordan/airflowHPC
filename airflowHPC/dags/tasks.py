@@ -385,7 +385,9 @@ def unpack_mdp_options(param_name: str = "{{ params.mdp_options | list}}", **con
     import ast
 
     mdp_options = context["task"].render_template(param_name, context)
-    mdp_options_parsed = [ast.literal_eval(option) for option in mdp_options]
+    mdp_options_parsed = [
+        ast.literal_eval(opt) if type(opt) is str else opt for opt in mdp_options
+    ]
     return mdp_options_parsed
 
 
