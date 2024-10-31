@@ -221,6 +221,61 @@ def prepare_gmx_input(
     return inputHolderList
 
 
+@task
+def prepare_gmx_input_named(
+    args: list,
+    input_files: dict,
+    output_files: dict,
+    output_path_parts: list,
+    names: list,
+):
+    """
+    Prepare a list of GmxapiInputHolder objects for running multiple simulations.
+
+    Parameters
+    ----------
+    args : list
+        The arguments to pass to the gmxapi command.
+    input_files : dict
+        The input files to pass to the gmxapi command.
+    output_files : dict
+        The output files to pass to the gmxapi command.
+    output_path_parts : list
+        The parts of the output path to join together.
+        Allows for flexible naming of output directories.
+    names : list
+        The names to append to the output directory.
+    """
+    import os
+    from dataclasses import asdict
+    from copy import deepcopy
+    from collections.abc import Iterable
+
+    inputHolderList = []
+    output_dir = "/".join(output_path_parts)
+
+    for i, name in enumerate(names):
+        inputs = deepcopy(input_files)
+        for key, value in input_files.items():
+            if isinstance(value, str) and os.path.exists(value):
+                continue
+            if isinstance(value, Iterable):
+                inputs[key] = value[i]
+        inputHolderList.append(
+            asdict(
+                GmxInputHolder(
+                    args=args,
+                    input_files=inputs,
+                    output_files=output_files,
+                    output_dir=f"{output_dir}/{name}",
+                    simulation_id=i,
+                )
+            )
+        )
+
+    return inputHolderList
+
+
 @task.branch
 def branch_task(
     truth_value: bool | list[bool], task_if_true: str, task_if_false: str
@@ -349,12 +404,15 @@ def dict_from_xcom_dicts(list_of_dicts, dict_structure):
 
 
 @task(trigger_rule="none_failed")
-def json_from_dataset_path(dataset_path: str):
+def json_from_dataset_path(dataset_path: str, key: str = None):
     import json
 
     with open(dataset_path, "r") as f:
         data = json.load(f)
-    return data
+    if not key:
+        return data
+    else:
+        return [d[key] for d in data]
 
 
 @task
