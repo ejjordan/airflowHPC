@@ -46,8 +46,7 @@ with DAG(
         input_dir="ensemble_md", file_name="expanded.mdp"
     )
     expand_args = prepare_args_for_mdp_functions(
-        counter=0,  # does not matter if mode=="initialize", as iteration_0 will be used anyway
-        mode="initialize",
+        counter=0,
         num_simulations="{{ params.num_simulations }}",
         output_dir="{{ params.output_dir }}",
     )
@@ -102,7 +101,7 @@ with DAG(
     mdp_inputs_list >> rexee_init_dag
 
     dhdl = json_from_dataset_path.override(task_id="dhdl_results")(
-        dataset_path="{{ params.output_dir }}/"
+        dataset_path="{{ params.output_dir }}/iteration_0/"
         + f"{rexee_init_grompp_mdrun_params['output_name']}.json",
     )
     rexee_init_dag >> dhdl

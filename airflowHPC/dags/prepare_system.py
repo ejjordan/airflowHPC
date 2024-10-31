@@ -26,7 +26,11 @@ with DAG(
             section="inputs",
         ),
         "output_dir": "prep",
-        "box_size": 4,
+        "box_size": Param(
+            4,
+            type="number",
+            title="Box size",
+        ),
         "force_field": "amber99sb-ildn",
         "water_model": "tip3p",
         "ion_concentration": Param(
