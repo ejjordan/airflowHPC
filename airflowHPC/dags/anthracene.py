@@ -1,4 +1,5 @@
 from airflow import DAG
+from airflow.decorators import task
 from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
@@ -7,10 +8,92 @@ from airflowHPC.dags.tasks import (
     unpack_mdp_options,
     update_gmx_input,
     unpack_param,
+    dict_from_xcom_dicts,
 )
 from airflowHPC.operators import ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflow.models.param import Param
+
+
+@task
+def process_dhdl_files(
+    dhdl_files, output_dir, temp: float = 300.0, equil_index: str = "10"
+):
+    import logging, os
+    from alchemlyb.parsing.gmx import extract_dHdl, extract_u_nk
+    from alchemlyb.preprocessing import subsampling
+    from alchemlyb import concat as alchemlyb_concat
+    from alchemlyb.estimators import TI, MBAR
+    from alchemlyb.visualisation import plot_mbar_overlap_matrix, plot_ti_dhdl
+
+    # Preprocessing data for dhdl and u_nk
+    preprocessed_dhdl_data = []
+    preprocessed_u_nk_data = []
+    for file in dhdl_files:
+        dhdl_data = extract_dHdl(file, T=temp)
+        dhdl_data_sliced = subsampling.slicing(
+            dhdl_data, lower=equil_index, upper=None, step=1, force=True
+        )
+        decorr_dhdl = subsampling.decorrelate_dhdl(
+            dhdl_data_sliced, drop_duplicates=True, sort=True, remove_burnin=False
+        )
+        preprocessed_dhdl_data.append(decorr_dhdl)
+
+        # u_nk
+        u_nk_data = extract_u_nk(file, T=temp)
+        u_nk_data_sliced = subsampling.slicing(
+            u_nk_data, lower=equil_index, upper=None, step=1, force=True
+        )
+        decorr_u_nk = subsampling.decorrelate_u_nk(
+            u_nk_data_sliced,
+            method="all",
+            drop_duplicates=True,
+            sort=True,
+            remove_burnin=False,
+        )
+        preprocessed_u_nk_data.append(decorr_u_nk)
+
+    if not preprocessed_dhdl_data:
+        raise ValueError(
+            "No dhdl data was processed. Check if .xvg files are read correctly."
+        )
+
+    if not preprocessed_u_nk_data:
+        raise ValueError(
+            "No u_nk data was processed. Check if .xvg files are read correctly."
+        )
+
+    combined_dhdl_data = alchemlyb_concat(preprocessed_dhdl_data)
+    combined_u_nk_data = alchemlyb_concat(preprocessed_u_nk_data)
+
+    # Perform analysis
+    # TI
+    ti = TI().fit(combined_dhdl_data)
+    logging.info(
+        f"FE differences in units of Kb_T between each lambda window (TI): {ti.delta_f_}"
+    )
+    logging.info(f"Endpoint differences (TI): {ti.delta_f_.loc[0.0, 1.0]}")
+    logging.info(f"TI error: {ti.d_delta_f_}")
+    logging.info(f"TI error endpoint difference: {ti.d_delta_f_.loc[0.0, 1.0]}")
+
+    # MBAR
+    mbar = MBAR(initial_f_k=None).fit(combined_u_nk_data)
+    logging.info(
+        f"FE differences in units of Kb_T between each lambda window (MBAR): {mbar.delta_f_}"
+    )
+    logging.info(f"Endpoint differences (MBAR): {mbar.delta_f_.loc[0.0, 1.0]}")
+    logging.info(f"MBAR error: {mbar.d_delta_f_}")
+    logging.info(f"MBAR error endpoint difference: {mbar.d_delta_f_.loc[0.0, 1.0]}")
+
+    # MBAR overlap
+    ax = plot_mbar_overlap_matrix(mbar.overlap_matrix)
+    ax.figure.savefig(
+        os.path.join(output_dir, "O_MBAR.pdf"), bbox_inches="tight", pad_inches=0.0
+    )
+
+    # dhdl plot of the TI
+    ax = plot_ti_dhdl(ti, labels=["VDW"], colors="r")
+    ax.figure.savefig(os.path.join(output_dir, "dhdl_TI.pdf"))
 
 
 with DAG(
@@ -141,3 +224,12 @@ with DAG(
         },
         gmx_executable="gmx_mpi",
     ).expand(input_data=mdrun_input_list)
+    get_dhdls = dict_from_xcom_dicts.override(task_id="get_dhdls")(
+        list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun')}}",
+        dict_structure={
+            "dhdl": "-dhdl",
+        },
+    )
+    mdrun >> get_dhdls
+    dhdl_files = get_dhdls.map(lambda x: x["dhdl"])
+    process_dhdl_files(dhdl_files, "{{ params.output_dir }}")
