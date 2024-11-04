@@ -1,3 +1,4 @@
+from typing import Literal
 from airflow import DAG
 from airflow.decorators import task
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
@@ -191,6 +192,11 @@ def TI(
     equil_index: int = 10,
     states: list = None,
 ):
+    """
+    Perform TI analysis on a list of dhdl files.
+
+    returns max and min uncertainty states and their values, unless the min is the first state.
+    """
     import logging, os
     from alchemlyb.parsing.gmx import extract_dHdl
     from alchemlyb.preprocessing import subsampling
@@ -235,11 +241,12 @@ def TI(
         )
         state_uncertainties.append((state, states[i + 1], neighbor_uncertainty))
     max_uncertainty = max(state_uncertainties, key=lambda x: x[2])
+    min_uncertainty = min(state_uncertainties[1:], key=lambda x: x[2])
 
     # Plotting
     ax = plot_ti_dhdl(ti, labels=["VDW"], colors="r")
     ax.figure.savefig(os.path.join(output_dir, "dhdl_TI.png"))
-    return max_uncertainty
+    return {"max": max_uncertainty, "min": min_uncertainty}
 
 
 @task
@@ -250,6 +257,11 @@ def MBAR(
     equil_index: int = 10,
     states: list = None,
 ):
+    """
+    Perform MBAR analysis on a list of dhdl files.
+
+    returns max and min uncertainty states and their values, unless the min is the first state.
+    """
     import logging, os
     from alchemlyb.parsing.gmx import extract_u_nk
     from alchemlyb.preprocessing import subsampling
@@ -298,13 +310,14 @@ def MBAR(
         )
         state_uncertainties.append((state, states[i + 1], neighbor_uncertainty))
     max_uncertainty = max(state_uncertainties, key=lambda x: x[2])
+    min_uncertainty = min(state_uncertainties[1:], key=lambda x: x[2])
 
     # Plotting
     ax = plot_mbar_overlap_matrix(mbar.overlap_matrix)
     ax.figure.savefig(
         os.path.join(output_dir, "O_MBAR.png"), bbox_inches="tight", pad_inches=0.0
     )
-    return max_uncertainty
+    return {"max": max_uncertainty, "min": min_uncertainty}
 
 
 @task(multiple_outputs=True)
@@ -329,95 +342,77 @@ def generate_lambda_states(num_states: int):
 
 
 @task
-def get_new_state_ti(ti_results, lambda_states, **context):
+def get_new_state(results, lambda_states, method: Literal["TI", "MBAR"], **context):
     import logging
     import random
-    import ast
 
-    ti_state_idx1 = lambda_states["state_to_idx"][ti_results[0]]
-    ti_state_idx2 = lambda_states["state_to_idx"][ti_results[1]]
-    assert ti_state_idx1 < ti_state_idx2
-    new_ti_state_idx = random.randrange(int(ti_state_idx1) + 1, int(ti_state_idx2) - 1)
+    min_state1 = results["min"][0]
+    min_state2 = results["min"][1]
+    min_uncertainty = results["min"][2]
+    removal_state_idx = int(lambda_states["state_to_idx"][min_state1])
+    assert float(min_state1) > 0
+
+    logging.info(
+        f"{method} min uncertainty between states {min_state1} and {min_state2}: {min_uncertainty}"
+    )
+    logging.info(f"Will remove state: {removal_state_idx}")
+
+    max_state1 = results["max"][0]
+    max_state2 = results["max"][1]
+    max_uncertainty = results["max"][2]
+    max_state_idx1 = lambda_states["state_to_idx"][max_state1]
+    max_state_idx2 = lambda_states["state_to_idx"][max_state2]
+    assert max_state_idx1 < max_state_idx2
+    new_state_idx = random.randrange(int(max_state_idx1) + 1, int(max_state_idx2) - 1)
 
     params = context["params"]
     logging.info(
-        f"TI max uncertainty between states {ti_results[0]} and {ti_results[1]}: {ti_results[2]}"
+        f"{method} max uncertainty between states {max_state1} and {max_state2}: {max_uncertainty}"
     )
     logging.info(
-        f"TI max uncertainty state indices: {ti_state_idx1} and {ti_state_idx2}"
+        f"{method} max uncertainty state indices: {max_state_idx1} and {max_state_idx2}"
     )
     logging.info(
-        f"new ti state: {new_ti_state_idx}: {lambda_states['idx_to_state'][str(new_ti_state_idx)]}"
+        f"new {method} state: {new_state_idx}: {lambda_states['idx_to_state'][str(new_state_idx)]}"
     )
 
-    new_mdp_options = [
-        ast.literal_eval(opt) if type(opt) is str else opt
-        for opt in params["mdp_options"]
-    ]
-    # Add new ti state to mdp_options and sort
-    new_mdp_options.append({"init-lambda-state": new_ti_state_idx})
-    new_mdp_options = sorted(new_mdp_options, key=lambda x: x["init-lambda-state"])
-
-    # Add new ti state to gro files. Pick the gro file with the closest lambda value to the new state, without going over
+    # Add new state to gro files. Pick the gro file with the closest lambda value to the new state, without going over
     gro_files = params["inputs"]["gro"]["filename"]
     for i, gro in enumerate(gro_files):
-        if float(new_ti_state_idx) < float(gro[3:6]):
+        if float(new_state_idx) < float(gro[3:6]):
             gro_to_copy = gro_files[i - 1]
             break
     logging.info(f"gro file to copy: {gro_to_copy}")
     return {
-        "mdp_options": new_mdp_options,
         "gro_to_copy": gro_to_copy,
-        "new_gro_idx": new_ti_state_idx,
-        "new_gro_fn": f"lam{new_ti_state_idx:03d}.gro",
+        "new_gro_idx": new_state_idx,
+        "new_gro_fn": f"lam{new_state_idx:03d}.gro",
+        "gro_to_remove": f"lam{removal_state_idx:03d}.gro",
+        "gro_to_remove_idx": removal_state_idx,
     }
 
 
 @task
-def get_new_state_mbar(mbar_results, lambda_states, **context):
-    import logging
-    import random
+def next_step_mdp_options(next_step_info, **context):
+    """
+    Remove the state with the lowest uncertainty and add a new state between the states with the highest uncertainty.
+    """
     import ast
 
-    mbar_state_idx1 = lambda_states["state_to_idx"][mbar_results[0]]
-    mbar_state_idx2 = lambda_states["state_to_idx"][mbar_results[1]]
-    assert mbar_state_idx1 < mbar_state_idx2
-    new_mbar_state_idx = random.randrange(
-        int(mbar_state_idx1) + 1, int(mbar_state_idx2) - 1
-    )
-
     params = context["params"]
-    logging.info(
-        f"MBAR max uncertainty between states {mbar_results[0]} and {mbar_results[1]}: {mbar_results[2]}"
-    )
-    logging.info(
-        f"MBAR max uncertainty state indices: {mbar_state_idx1} and {mbar_state_idx2}"
-    )
-    logging.info(
-        f"new mbar state: {new_mbar_state_idx}: {lambda_states['idx_to_state'][str(new_mbar_state_idx)]}"
-    )
-
     new_mdp_options = [
         ast.literal_eval(opt) if type(opt) is str else opt
         for opt in params["mdp_options"]
     ]
-    # Add new mbar state to mdp_options and sort
-    new_mdp_options.append({"init-lambda-state": new_mbar_state_idx})
-    new_mdp_options = sorted(new_mdp_options, key=lambda x: x["init-lambda-state"])
 
-    # Add new mbar state to gro files. Pick the gro file with the closest lambda value to the new state, without going over
-    gro_files = params["inputs"]["gro"]["filename"]
-    for i, gro in enumerate(gro_files):
-        if float(new_mbar_state_idx) < float(gro[3:6]):
-            gro_to_copy = gro_files[i - 1]
-            break
-    logging.info(f"gro file to copy: {gro_to_copy}")
-    return {
-        "mdp_options": new_mdp_options,
-        "gro_to_copy": gro_to_copy,
-        "new_gro_idx": new_mbar_state_idx,
-        "new_gro_fn": f"lam{new_mbar_state_idx:03d}.gro",
-    }
+    new_mdp_options = [
+        opt
+        for opt in new_mdp_options
+        if opt["init-lambda-state"] != next_step_info["gro_to_remove_idx"]
+    ]
+    new_mdp_options.append({"init-lambda-state": next_step_info["new_gro_idx"]})
+    new_mdp_options = sorted(new_mdp_options, key=lambda x: x["init-lambda-state"])
+    return new_mdp_options
 
 
 with DAG(
@@ -473,11 +468,21 @@ with DAG(
         states=lambda_vals,
     )
     get_states = generate_lambda_states(101)
-    ti_results = get_new_state_ti(ti_results=ti, lambda_states=get_states)
-    mbar_results = get_new_state_mbar(mbar_results=mbar, lambda_states=get_states)
+    mbar_results = get_new_state.override(task_id="get_mbar_states")(
+        results=mbar, lambda_states=get_states, method="MBAR"
+    )
+    ti_results = get_new_state.override(task_id="get_ti_states")(
+        results=ti, lambda_states=get_states, method="TI"
+    )
+    ti_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_ti")(
+        next_step_info=ti_results
+    )
+    mbar_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_mbar")(
+        next_step_info=mbar_results
+    )
 
     is_anthracene_done >> anthracene_done_branch >> [trigger_anthracene, get_dhdl_files]
     trigger_anthracene >> get_dhdl_files
     get_dhdl_files >> [ti, mbar]
-    ti >> ti_results
-    mbar >> mbar_results
+    ti >> ti_results >> ti_next_step_mdp
+    mbar >> mbar_results >> mbar_next_step_mdp
