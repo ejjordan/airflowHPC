@@ -13,6 +13,7 @@ from airflowHPC.dags.tasks import (
     dataset_from_xcom_dicts,
     branch_task,
     json_from_dataset_path,
+    branch_task_template,
 )
 from airflowHPC.operators import ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -73,6 +74,7 @@ dagrun_params = {
     "iteration": 0,
     "output_dataset_structure": {
         "dhdl": "-dhdl",
+        "gro": "-c",
     },
 }
 
@@ -94,12 +96,30 @@ def get_lambdas_from_mdp(
     return [f"{prefix}{lambda_vals[i]}" for i in opt_keys]
 
 
+@task
+def add_lambdas_to_dataset(dataset_path: str, keys_list: list):
+    import json
+
+    with open(dataset_path, "r") as dataset_file:
+        dataset = json.load(dataset_file)
+    seen_keys = []
+    for key in keys_list:
+        for i, data in enumerate(dataset):
+            if key in data["gro"]:
+                dataset[i]["lambda_state"] = key
+                seen_keys.append(key)
+                break
+    assert len(seen_keys) == len(keys_list)
+    with open(dataset_path, "w") as dataset_file:
+        json.dump(dataset, dataset_file, indent=2, separators=(",", ": "))
+    return dataset
+
+
 with DAG(
     dag_id="anthracene",
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
-    max_active_runs=1,
     params=dagrun_params,
 ) as anthracene:
     mdp_options = unpack_mdp_options()
@@ -181,7 +201,11 @@ with DAG(
         list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun', key='return_value')}}",
         dataset_structure="{{ params.output_dataset_structure }}",
     )
-    mdrun >> dataset
+    update_data = add_lambdas_to_dataset.override(task_id="update_data")(
+        dataset_path="{{ params.output_dir }}/iteration_{{ params.iteration }}/{{ params.expected_output }}",
+        keys_list=lambda_dirs,
+    )
+    mdrun >> dataset >> update_data
 
 
 @task
@@ -385,6 +409,7 @@ def get_new_state(results, lambda_states, method: Literal["TI", "MBAR"], **conte
     logging.info(f"gro file to copy: {gro_to_copy}")
     return {
         "gro_to_copy": gro_to_copy,
+        "gro_to_copy_idx": int(gro_to_copy[3:6]),
         "new_gro_idx": new_state_idx,
         "new_gro_fn": f"lam{new_state_idx:03d}.gro",
         "gro_to_remove": f"lam{removal_state_idx:03d}.gro",
@@ -415,12 +440,143 @@ def next_step_mdp_options(next_step_info, **context):
     return new_mdp_options
 
 
+@task
+def copy_gro_files(gro_files, output_dir):
+    import logging, os, shutil
+
+    assert isinstance(output_dir, str)
+    if not os.path.isabs(output_dir):
+        output_dir = os.path.abspath(output_dir)
+    logging.info(f"Copying gro files to {output_dir}")
+    logging.info(f"gro_files: {[gro for gro in gro_files]}")
+    output_dirs_list = [output_dir] * len(gro_files)
+    for gro_file, dir in zip(gro_files, output_dirs_list):
+        logging.info(f"Copying {gro_file} to {dir}")
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+        shutil.copy(gro_file, dir)
+    return {
+        "gro_dir": output_dir,
+        "gro_files": [os.path.basename(f) for f in gro_files],
+    }
+
+
+@task
+def new_gro_paths(gro_updates, new_gro_dir, dataset_dict):
+    import os, shutil, logging
+
+    gro_paths = []
+    for item in dataset_dict:
+        gro_path = item["gro"]
+        lambda_state = item["lambda_state"]
+        lambda_state = "".join(lambda_state.strip("lambda_").split("."))
+        if int(lambda_state) == (gro_updates["gro_to_remove_idx"]):
+            continue
+        elif int(lambda_state) == int(gro_updates["gro_to_copy_idx"]):
+            gro_paths.append(
+                (gro_path, os.path.join(new_gro_dir, f"lam{lambda_state}.gro"))
+            )
+            gro_paths.append(
+                (gro_path, os.path.join(new_gro_dir, gro_updates["new_gro_fn"]))
+            )
+        else:
+            gro_paths.append(
+                (gro_path, os.path.join(new_gro_dir, f"lam{lambda_state}.gro"))
+            )
+    for path in gro_paths:
+        logging.info(f"Copying {path[0]} to {path[1]}")
+        if not os.path.exists(new_gro_dir):
+            os.makedirs(new_gro_dir)
+        shutil.copy(path[0], path[1])
+    return {
+        "gro_dir": new_gro_dir,
+        "gro_files": [os.path.basename(f[1]) for f in gro_paths],
+    }
+
+
+@task(trigger_rule="none_failed_min_one_success")
+def update_params(params_update_init, params_update_continue, **context):
+    params = context["params"]
+    if params_update_init:
+        params_update = params_update_init
+    elif params_update_continue:
+        params_update = params_update_continue
+    else:
+        raise ValueError("No parameters to update")
+    params["inputs"]["gro"]["directory"] = params_update["gro_dir"]
+    params["inputs"]["gro"]["filename"] = params_update["gro_files"]
+
+    return params
+
+
+from copy import deepcopy
+
+fh_params = deepcopy(dagrun_params)
+fh_params["iteration"] = 0
+gro_updates = {
+    "gro_to_copy": "lam070.gro",
+    "gro_to_copy_idx": 70,
+    "new_gro_idx": 76,
+    "new_gro_fn": "lam076.gro",
+    "gro_to_remove": "lam020.gro",
+    "gro_to_remove_idx": 20,
+}
+with DAG(
+    dag_id="anthracene_files",
+    start_date=timezone.utcnow(),
+    catchup=False,
+    render_template_as_native_obj=True,
+    params=fh_params,
+) as anthacene_files:
+    gro_files_list_init = unpack_param.override(task_id="get_gro_files_list_init")(
+        "{{ params.inputs.gro.filename }}"
+    )
+    gro_files_init = (
+        get_file.override(task_id="get_gro_files_init")
+        .partial(input_dir="{{ params.inputs.gro.directory }}", use_ref_data=True)
+        .expand(file_name=gro_files_list_init)
+    )
+    mapped_gro_files_init = gro_files_init.map(lambda x: x)
+    copy_gro_init = copy_gro_files.override(task_id="copy_gro_files_init")(
+        gro_files=mapped_gro_files_init,
+        output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
+    )
+
+    prev_iter_dataset = get_file.override(task_id="get_dataset")(
+        input_dir="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
+        file_name="{{ params.expected_output }}",
+        use_ref_data=False,
+        check_exists=False,
+    )
+    prev_iter_data = json_from_dataset_path.override(
+        task_id="get_data", trigger_rule="all_success"
+    )(
+        dataset_path="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}/{{ params.expected_output }}",
+    )
+    copy_gro_continue = new_gro_paths.override(task_id="copy_gro_files_continue")(
+        gro_updates=gro_updates,
+        new_gro_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
+        dataset_dict=prev_iter_data,
+    )
+    prev_iter_dataset >> prev_iter_data
+
+    gro_branch_task = branch_task_template.override(task_id="gro_branch")(
+        statement="{{ params.iteration }} == 0",
+        task_if_true="get_gro_files_list_init",
+        task_if_false="get_dataset",
+    )
+    gro_branch_task >> [gro_files_list_init, prev_iter_dataset]
+
+    new_params = update_params.override(task_id="update_params")(
+        params_update_init=copy_gro_init, params_update_continue=copy_gro_continue
+    )
+
+
 with DAG(
     dag_id="anthracene_runner",
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
-    max_active_runs=1,
     params=dagrun_params,
 ) as run_anthacene:
     is_anthracene_done = get_file.override(task_id="is_anthracene_done")(
@@ -469,16 +625,21 @@ with DAG(
     )
     get_states = generate_lambda_states(101)
     mbar_results = get_new_state.override(task_id="get_mbar_states")(
-        results=mbar, lambda_states=get_states, method="MBAR"
-    )
-    ti_results = get_new_state.override(task_id="get_ti_states")(
-        results=ti, lambda_states=get_states, method="TI"
-    )
-    ti_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_ti")(
-        next_step_info=ti_results
+        results=mbar,
+        lambda_states=get_states,
+        method="MBAR",
     )
     mbar_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_mbar")(
         next_step_info=mbar_results
+    )
+
+    ti_results = get_new_state.override(task_id="get_ti_states")(
+        results=ti,
+        lambda_states=get_states,
+        method="TI",
+    )
+    ti_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_ti")(
+        next_step_info=ti_results
     )
 
     is_anthracene_done >> anthracene_done_branch >> [trigger_anthracene, get_dhdl_files]
