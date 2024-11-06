@@ -547,25 +547,12 @@ with DAG(
     )
 
     prev_iter_dataset >> prev_iter_data
+    get_states = generate_lambda_states(101)
 
     ti = TI.override(task_id="TI")(
         dhdl_data=prev_iter_data,
         output_dir="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
     )
-    mbar = MBAR.override(task_id="MBAR")(
-        dhdl_data=prev_iter_data,
-        output_dir="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
-    )
-    get_states = generate_lambda_states(101)
-    mbar_results = get_new_state.override(task_id="get_mbar_states")(
-        results=mbar,
-        lambda_states=get_states,
-        method="MBAR",
-    )
-    mbar_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_mbar")(
-        next_step_info=mbar_results
-    )
-
     ti_results = get_new_state.override(task_id="get_ti_states")(
         results=ti,
         lambda_states=get_states,
@@ -575,13 +562,26 @@ with DAG(
         next_step_info=ti_results
     )
 
+    mbar = MBAR.override(task_id="MBAR")(
+        dhdl_data=prev_iter_data,
+        output_dir="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
+    )
+    mbar_results = get_new_state.override(task_id="get_mbar_states")(
+        results=mbar,
+        lambda_states=get_states,
+        method="MBAR",
+    )
+    mbar_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_mbar")(
+        next_step_info=mbar_results
+    )
+
     gro_branch_task = branch_task_template.override(task_id="gro_branch")(
         statement="{{ params.iteration }} == 0",
         task_if_true="get_gro_files_list_init",
         task_if_false="get_dataset",
     )
     gro_branch_task >> [gro_files_list_init, prev_iter_dataset]
-    prev_iter_dataset >> get_states
+    prev_iter_data >> get_states
 
     copy_gro_continue = new_gro_paths.override(task_id="copy_gro_files_continue")(
         gro_updates=mbar_results,
