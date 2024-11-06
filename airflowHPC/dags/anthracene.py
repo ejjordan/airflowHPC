@@ -28,17 +28,17 @@ dagrun_params = {
             "gro": {
                 "directory": "anthracene/gro",
                 "filename": [
-                    "lam000.gro",
-                    "lam010.gro",
-                    "lam020.gro",
-                    "lam030.gro",
-                    "lam040.gro",
-                    "lam050.gro",
-                    "lam060.gro",
-                    "lam070.gro",
-                    "lam080.gro",
-                    "lam090.gro",
-                    "lam100.gro",
+                    "lambda_0.00.gro",
+                    "lambda_0.10.gro",
+                    "lambda_0.20.gro",
+                    "lambda_0.30.gro",
+                    "lambda_0.40.gro",
+                    "lambda_0.50.gro",
+                    "lambda_0.60.gro",
+                    "lambda_0.70.gro",
+                    "lambda_0.80.gro",
+                    "lambda_0.90.gro",
+                    "lambda_1.00.gro",
                 ],
             },
             "top": {"directory": "anthracene", "filename": "anthracene.top"},
@@ -369,7 +369,7 @@ def generate_lambda_states(num_states: int):
 
 
 @task
-def get_new_state(results, lambda_states, method: Literal["TI", "MBAR"], **context):
+def get_new_state(results, state_data, lambda_states, method: Literal["TI", "MBAR"]):
     import logging
     import random
 
@@ -377,12 +377,13 @@ def get_new_state(results, lambda_states, method: Literal["TI", "MBAR"], **conte
     min_state2 = results["min"][1]
     min_uncertainty = results["min"][2]
     removal_state_idx = int(lambda_states["state_to_idx"][min_state1])
+    removal_state = lambda_states["idx_to_state"][str(removal_state_idx)]
     assert float(min_state1) > 0
 
     logging.info(
         f"{method} min uncertainty between states {min_state1} and {min_state2}: {min_uncertainty}"
     )
-    logging.info(f"Will remove state: {removal_state_idx}")
+    logging.info(f"Will remove state: {removal_state_idx}: {removal_state}")
 
     max_state1 = results["max"][0]
     max_state2 = results["max"][1]
@@ -397,24 +398,18 @@ def get_new_state(results, lambda_states, method: Literal["TI", "MBAR"], **conte
     )
     assert max_state_idx1 < max_state_idx2
     new_state_idx = random.randrange(max_state_idx1 + 1, max_state_idx2 - 1)
-    logging.info(
-        f"new {method} state: {new_state_idx}: {lambda_states['idx_to_state'][str(new_state_idx)]}"
-    )
+    new_state = lambda_states["idx_to_state"][str(new_state_idx)]
+    logging.info(f"new {method} state: {new_state_idx}: {new_state}")
 
     # Add new state to gro files. Pick the gro file with the closest lambda value to the new state, without going over
-    params = context["params"]
-    gro_files = params["inputs"]["gro"]["filename"]
-    for i, gro in enumerate(gro_files):
-        if float(new_state_idx) < float(gro[3:6]):
-            gro_to_copy = gro_files[i - 1]
-            break
-    logging.info(f"gro file to copy: {gro_to_copy}")
+    gro_states_dict = {data["lambda_state"]: data["gro"] for data in state_data}
+    gro_to_copy = gro_states_dict[max_state1]
     return {
         "gro_to_copy": gro_to_copy,
-        "gro_to_copy_idx": int(gro_to_copy[3:6]),
+        "gro_to_copy_idx": max_state_idx1,
         "new_gro_idx": new_state_idx,
-        "new_gro_fn": f"lam{new_state_idx:03d}.gro",
-        "gro_to_remove": f"lam{removal_state_idx:03d}.gro",
+        "new_gro_fn": f"lambda_{new_state}.gro",
+        "gro_to_remove": f"lambda_{removal_state}.gro",
         "gro_to_remove_idx": removal_state_idx,
     }
 
@@ -534,19 +529,9 @@ with DAG(
         output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
     )
 
-    prev_iter_dataset = get_file.override(task_id="get_dataset")(
-        input_dir="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
-        file_name="{{ params.expected_output }}",
-        use_ref_data=False,
-        check_exists=False,
-    )
-    prev_iter_data = json_from_dataset_path.override(
-        task_id="get_data", trigger_rule="all_success"
-    )(
+    prev_iter_data = json_from_dataset_path.override(task_id="get_data")(
         dataset_path="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}/{{ params.expected_output }}",
     )
-
-    prev_iter_dataset >> prev_iter_data
     get_states = generate_lambda_states(101)
 
     ti = TI.override(task_id="TI")(
@@ -555,6 +540,7 @@ with DAG(
     )
     ti_results = get_new_state.override(task_id="get_ti_states")(
         results=ti,
+        state_data=prev_iter_data,
         lambda_states=get_states,
         method="TI",
     )
@@ -568,6 +554,7 @@ with DAG(
     )
     mbar_results = get_new_state.override(task_id="get_mbar_states")(
         results=mbar,
+        state_data=prev_iter_data,
         lambda_states=get_states,
         method="MBAR",
     )
@@ -578,9 +565,9 @@ with DAG(
     gro_branch_task = branch_task_template.override(task_id="gro_branch")(
         statement="{{ params.iteration }} == 0",
         task_if_true="get_gro_files_list_init",
-        task_if_false="get_dataset",
+        task_if_false="get_data",
     )
-    gro_branch_task >> [gro_files_list_init, prev_iter_dataset]
+    gro_branch_task >> [gro_files_list_init, prev_iter_data]
     prev_iter_data >> get_states
 
     copy_gro_continue = new_gro_paths.override(task_id="copy_gro_files_continue")(
@@ -669,6 +656,7 @@ with DAG(
     get_states = generate_lambda_states(101)
     mbar_results = get_new_state.override(task_id="get_mbar_states")(
         results=mbar,
+        state_data=get_dhdl_files,
         lambda_states=get_states,
         method="MBAR",
     )
@@ -678,6 +666,7 @@ with DAG(
 
     ti_results = get_new_state.override(task_id="get_ti_states")(
         results=ti,
+        state_data=get_dhdl_files,
         lambda_states=get_states,
         method="TI",
     )
