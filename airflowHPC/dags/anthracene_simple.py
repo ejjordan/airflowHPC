@@ -5,7 +5,6 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
 
-from airflowHPC.dags.anthracene import num_steps
 from airflowHPC.dags.tasks import (
     get_file,
     unpack_mdp_options,
@@ -28,19 +27,7 @@ dagrun_params = {
             "mdp": {"directory": "anthracene", "filename": "dg_mdp.json"},
             "gro": {
                 "directory": "anthracene/gro",
-                "filename": [
-                    "lambda_0.00.gro",
-                    # "lambda_0.10.gro",
-                    "lambda_0.20.gro",
-                    # "lambda_0.30.gro",
-                    "lambda_0.40.gro",
-                    # "lambda_0.50.gro",
-                    "lambda_0.60.gro",
-                    # "lambda_0.70.gro",
-                    "lambda_0.80.gro",
-                    # "lambda_0.90.gro",
-                    "lambda_1.00.gro",
-                ],
+                "filename": "lambda_0.00.gro",
             },
             "top": {"directory": "anthracene", "filename": "anthracene.top"},
         },
@@ -57,19 +44,7 @@ dagrun_params = {
         },
         section="inputs",
     ),
-    "mdp_options": [
-        # {"init-lambda-state": 0, "nsteps": num_steps},
-        # {"init-lambda-state": 10, "nsteps": num_steps},
-        # {"init-lambda-state": 20, "nsteps": num_steps},
-        # {"init-lambda-state": 30, "nsteps": num_steps},
-        # {"init-lambda-state": 40, "nsteps": num_steps},
-        # {"init-lambda-state": 50, "nsteps": num_steps},
-        # {"init-lambda-state": 60, "nsteps": num_steps},
-        # {"init-lambda-state": 70, "nsteps": num_steps},
-        # {"init-lambda-state": 80, "nsteps": num_steps},
-        # {"init-lambda-state": 90, "nsteps": num_steps},
-        # {"init-lambda-state": 100, "nsteps": num_steps},
-    ],
+    "mdp_options": [],
     "num_steps": 10000,
     "output_dir": "anthracene_simple",
     "output_name": "anthra",
@@ -81,23 +56,6 @@ dagrun_params = {
     },
     "num_lambda_states": 6,
 }
-
-
-@task
-def get_lambdas_from_mdp(
-    mdp_json_path: dict,
-    mdp_json_key: str,
-    mdp_options: list,
-    mdp_options_key: str,
-    prefix: str = "",
-):
-    import json
-
-    opt_keys = [d[mdp_options_key] for d in mdp_options]
-    with open(mdp_json_path, "r") as mdp_file:
-        mdp_json = json.load(mdp_file)
-    lambda_vals = mdp_json[mdp_json_key].split()
-    return [f"{prefix}{lambda_vals[i]}" for i in opt_keys]
 
 
 @task
@@ -155,11 +113,6 @@ with DAG(
         .partial(mdp_json_file_path=mdp_json)
         .expand(update_dict=mdp_options)
     )
-    """
-    lambda_dirs = get_lambdas_from_mdp.override(task_id="get_lambda_dirs")(
-        mdp_json, "vdw_lambdas", mdp_options, "init-lambda-state", prefix="lambda_"
-    )
-    """
     lambda_dirs = get_lambda_dirs()
     grompp_input_list = prepare_gmx_input_named(
         args=["grompp"],
@@ -367,7 +320,7 @@ def MBAR(
 
 
 @task(multiple_outputs=True)
-def generate_lambda_states(num_states: int):
+def generate_lambda_states(num_states: int | str):
     """
     Generates a dictionary of lambda states for a given number of states.
     The keys are the state index and the values are the lambda value.
@@ -461,23 +414,26 @@ def next_step_mdp_options(next_step_info, **context):
 
 
 @task
-def copy_gro_files(gro_files, output_dir):
+def copy_gro_files(gro_fn, output_dir, states_dict):
     import logging, os, shutil
 
     assert isinstance(output_dir, str)
     if not os.path.isabs(output_dir):
         output_dir = os.path.abspath(output_dir)
     logging.info(f"Copying gro files to {output_dir}")
-    logging.info(f"gro_files: {[gro for gro in gro_files]}")
-    output_dirs_list = [output_dir] * len(gro_files)
-    for gro_file, dir in zip(gro_files, output_dirs_list):
-        logging.info(f"Copying {gro_file} to {dir}")
-        if not os.path.exists(dir):
-            os.makedirs(dir)
-        shutil.copy(gro_file, dir)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    logging.info(f"gro_files: {[gro for gro in gro_fn]}")
+    states = list(states_dict.values())
+    logging.info(f"states: {states}")
+
+    for state in states:
+        logging.info(f"Copying {gro_fn} to {output_dir} with state {state}")
+        new_gro_path = os.path.join(output_dir, f"lambda_{state}.gro")
+        shutil.copy(gro_fn, new_gro_path)
     return {
         "gro_dir": output_dir,
-        "gro_files": [os.path.basename(f) for f in gro_files],
+        "gro_files": [f"lambda_{state}.gro" for state in states],
     }
 
 
@@ -621,18 +577,16 @@ with DAG(
     render_template_as_native_obj=True,
     params=dagrun_params,
 ) as anthacene_files:
-    gro_files_list_init = unpack_param.override(task_id="get_gro_files_list_init")(
-        "{{ params.inputs.gro.filename }}"
+    get_states = generate_lambda_states("{{ params.num_lambda_states }}")
+    gro_init = get_file.override(task_id="get_gro_init")(
+        input_dir="{{ params.inputs.gro.directory }}",
+        use_ref_data=True,
+        file_name="{{ params.inputs.gro.filename }}",
     )
-    gro_files_init = (
-        get_file.override(task_id="get_gro_files_init")
-        .partial(input_dir="{{ params.inputs.gro.directory }}", use_ref_data=True)
-        .expand(file_name=gro_files_list_init)
-    )
-    mapped_gro_files_init = gro_files_init.map(lambda x: x)
     copy_gro_init = copy_gro_files.override(task_id="copy_gro_files_init")(
-        gro_files=mapped_gro_files_init,
+        gro_fn=gro_init,
         output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
+        states_dict=get_states["idx_to_state"],
     )
 
     prev_iter_datasets = collect_iteration_data.override(
@@ -644,7 +598,6 @@ with DAG(
     dhdl_data = prev_iter_data.map(map_dhdls)
     gro_data = prev_iter_data.map(map_gros)
     prev_iter_datasets >> prev_iter_data
-    get_states = generate_lambda_states("{{ params.num_lambda_states }}")
 
     do_TI(
         dhdl_data,
@@ -661,10 +614,10 @@ with DAG(
 
     gro_branch_task = branch_task_template.override(task_id="gro_branch")(
         statement="{{ params.iteration }} == 0",
-        task_if_true="get_gro_files_list_init",
+        task_if_true="get_gro_init",
         task_if_false="collect_iteration_data",
     )
-    gro_branch_task >> [gro_files_list_init, prev_iter_datasets]
+    gro_branch_task >> [gro_init, prev_iter_datasets]
 
     copy_gro_continue = new_gro_paths.override(task_id="copy_gro_files_continue")(
         gro_updates=mbar_results,
