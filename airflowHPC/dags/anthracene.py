@@ -1,6 +1,6 @@
 from typing import Literal
 from airflow import DAG
-from airflow.decorators import task
+from airflow.decorators import task, task_group
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.utils import timezone
@@ -20,7 +20,7 @@ from airflowHPC.operators import ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflow.models.param import Param
 
-
+num_steps = 10000
 dagrun_params = {
     "inputs": Param(
         {
@@ -57,17 +57,17 @@ dagrun_params = {
         section="inputs",
     ),
     "mdp_options": [
-        {"init-lambda-state": 0, "nsteps": 10000},
-        {"init-lambda-state": 10},
-        {"init-lambda-state": 20},
-        {"init-lambda-state": 30},
-        {"init-lambda-state": 40},
-        {"init-lambda-state": 50},
-        {"init-lambda-state": 60},
-        {"init-lambda-state": 70},
-        {"init-lambda-state": 80},
-        {"init-lambda-state": 90},
-        {"init-lambda-state": 100, "nsteps": 10000},
+        {"init-lambda-state": 0, "nsteps": num_steps},
+        {"init-lambda-state": 10, "nsteps": num_steps},
+        {"init-lambda-state": 20, "nsteps": num_steps},
+        {"init-lambda-state": 30, "nsteps": num_steps},
+        {"init-lambda-state": 40, "nsteps": num_steps},
+        {"init-lambda-state": 50, "nsteps": num_steps},
+        {"init-lambda-state": 60, "nsteps": num_steps},
+        {"init-lambda-state": 70, "nsteps": num_steps},
+        {"init-lambda-state": 80, "nsteps": num_steps},
+        {"init-lambda-state": 90, "nsteps": num_steps},
+        {"init-lambda-state": 100, "nsteps": num_steps},
     ],
     "output_dir": "anthracene",
     "output_name": "anthra",
@@ -77,6 +77,7 @@ dagrun_params = {
         "dhdl": "-dhdl",
         "gro": "-c",
     },
+    "num_lambda_states": 101,
 }
 
 
@@ -228,8 +229,10 @@ def TI(
     from alchemlyb.estimators import TI
     from alchemlyb.visualisation import plot_ti_dhdl
 
-    dhdl_files = [data["dhdl"] for data in dhdl_data]
-    states = [data["lambda_state"] for data in dhdl_data]
+    dhdl_files = [item[1] for sublist in dhdl_data for item in sublist]
+    states = [item[0] for sublist in dhdl_data for item in sublist]
+    logging.info(f"Performing TI analysis on {dhdl_files}")
+    logging.info(f"States: {states}")
     # Preprocessing
     preprocessed_dhdl_data = []
     for file in dhdl_files:
@@ -260,7 +263,9 @@ def TI(
 
     logging.info(f"lambda values: {states}")
     state_uncertainties = []
-    for i, state in enumerate(states[:-1]):
+    for i, state in enumerate(states):
+        if state == "1.00":
+            continue
         neighbor_uncertainty = ti.d_delta_f_.loc[float(state), float(states[i + 1])]
         logging.info(
             f"Uncertainty between lambda {state} and lambda {states[i + 1]}: {neighbor_uncertainty}"
@@ -294,8 +299,10 @@ def MBAR(
     from alchemlyb.estimators import MBAR
     from alchemlyb.visualisation import plot_mbar_overlap_matrix
 
-    dhdl_files = [data["dhdl"] for data in dhdl_data]
-    states = [data["lambda_state"] for data in dhdl_data]
+    dhdl_files = [item[1] for sublist in dhdl_data for item in sublist]
+    states = [item[0] for sublist in dhdl_data for item in sublist]
+    logging.info(f"Performing MBAR analysis on files {dhdl_files}")
+    logging.info(f"States: {states}")
     # Preprocessing
     preprocessed_u_nk_data = []
     for file in dhdl_files:
@@ -330,7 +337,9 @@ def MBAR(
 
     logging.info(f"lambda values: {states}")
     state_uncertainties = []
-    for i, state in enumerate(states[:-1]):
+    for i, state in enumerate(states):
+        if state == "1.00":
+            continue
         neighbor_uncertainty = mbar.d_delta_f_.loc[float(state), float(states[i + 1])]
         logging.info(
             f"Uncertainty between lambda {state} and lambda {states[i+1]}: {neighbor_uncertainty}"
@@ -369,7 +378,9 @@ def generate_lambda_states(num_states: int):
 
 
 @task
-def get_new_state(results, state_data, lambda_states, method: Literal["TI", "MBAR"]):
+def get_new_state(
+    results, gro_states_dict, lambda_states, method: Literal["TI", "MBAR"]
+):
     import logging
     import random
 
@@ -402,15 +413,17 @@ def get_new_state(results, state_data, lambda_states, method: Literal["TI", "MBA
     logging.info(f"new {method} state: {new_state_idx}: {new_state}")
 
     # Add new state to gro files. Pick the gro file with the closest lambda value to the new state, without going over
-    gro_states_dict = {data["lambda_state"]: data["gro"] for data in state_data}
-    gro_to_copy = gro_states_dict[max_state1]
+    gro_states = [gro for gro in gro_states_dict]
+    gro_to_copy = gro_states[-1][max_state1]
     return {
         "gro_to_copy": gro_to_copy,
         "gro_to_copy_idx": max_state_idx1,
+        "gro_to_copy_state": max_state1,
         "new_gro_idx": new_state_idx,
         "new_gro_fn": f"lambda_{new_state}.gro",
         "gro_to_remove": f"lambda_{removal_state}.gro",
         "gro_to_remove_idx": removal_state_idx,
+        "gro_to_remove_state": removal_state,
     }
 
 
@@ -462,23 +475,21 @@ def copy_gro_files(gro_files, output_dir):
 def new_gro_paths(gro_updates, new_gro_dir, dataset_dict):
     import os, shutil, logging
 
+    gro_states = [gro for gro in dataset_dict]
     gro_paths = []
-    for item in dataset_dict:
-        gro_path = item["gro"]
-        lambda_state = item["lambda_state"]
-        lambda_state = "".join(lambda_state.strip("lambda_").split("."))
-        if int(lambda_state) == (gro_updates["gro_to_remove_idx"]):
+    for lambda_state, gro_path in gro_states[-1].items():
+        if lambda_state == gro_updates["gro_to_remove_state"]:
             continue
-        elif int(lambda_state) == int(gro_updates["gro_to_copy_idx"]):
+        elif lambda_state == gro_updates["gro_to_copy_state"]:
             gro_paths.append(
-                (gro_path, os.path.join(new_gro_dir, f"lam{lambda_state}.gro"))
+                (gro_path, os.path.join(new_gro_dir, f"lambda_{lambda_state}.gro"))
             )
             gro_paths.append(
                 (gro_path, os.path.join(new_gro_dir, gro_updates["new_gro_fn"]))
             )
         else:
             gro_paths.append(
-                (gro_path, os.path.join(new_gro_dir, f"lam{lambda_state}.gro"))
+                (gro_path, os.path.join(new_gro_dir, f"lambda_{lambda_state}.gro"))
             )
     for path in gro_paths:
         logging.info(f"Copying {path[0]} to {path[1]}")
@@ -508,6 +519,68 @@ def update_params(gro_update_init, gro_update_continue, mdp_params_continue, **c
     return params
 
 
+@task
+def collect_iteration_data(**context):
+    import os
+
+    iteration = context["params"]["iteration"]
+    output_dir = context["params"]["output_dir"]
+    expected_output = context["params"]["expected_output"]
+    previous_dataset_paths = [
+        os.path.join(output_dir, f"iteration_{i}", expected_output)
+        for i in range(iteration)
+    ]
+    assert [os.path.exists(path) for path in previous_dataset_paths]
+    return previous_dataset_paths
+
+
+def map_dhdls(dhdl_data):
+    return [(item["lambda_state"], item["dhdl"]) for item in dhdl_data]
+
+
+def map_gros(dhdl_data):
+    gro_dict = {}
+    for item in dhdl_data:
+        gro_dict[item["lambda_state"]] = item["gro"]
+    return gro_dict
+
+
+@task_group
+def do_TI(dhdl, gro, states, output_dir):
+    ti = TI.override(task_id="TI")(
+        dhdl_data=dhdl,
+        output_dir=output_dir,
+    )
+    ti_results = get_new_state.override(task_id="get_ti_states")(
+        results=ti,
+        gro_states_dict=gro,
+        lambda_states=states,
+        method="TI",
+    )
+    ti_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_ti")(
+        next_step_info=ti_results
+    )
+    return ti_results, ti_next_step_mdp
+
+
+@task_group
+def do_MBAR(dhdl, gro, states, output_dir):
+    mbar = MBAR.override(task_id="MBAR")(
+        dhdl_data=dhdl,
+        output_dir=output_dir,
+    )
+    mbar_results = get_new_state.override(task_id="get_mbar_states")(
+        results=mbar,
+        gro_states_dict=gro,
+        lambda_states=states,
+        method="MBAR",
+    )
+    mbar_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_mbar")(
+        next_step_info=mbar_results
+    )
+    return mbar_results, mbar_next_step_mdp
+
+
 with DAG(
     dag_id="anthracene_files",
     start_date=timezone.utcnow(),
@@ -529,51 +602,42 @@ with DAG(
         output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
     )
 
-    prev_iter_data = json_from_dataset_path.override(task_id="get_data")(
-        dataset_path="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}/{{ params.expected_output }}",
+    prev_iter_datasets = collect_iteration_data.override(
+        task_id="collect_iteration_data"
+    )()
+    prev_iter_data = json_from_dataset_path.override(task_id="get_data").expand(
+        dataset_path=prev_iter_datasets,
     )
-    get_states = generate_lambda_states(101)
+    dhdl_data = prev_iter_data.map(map_dhdls)
+    gro_data = prev_iter_data.map(map_gros)
+    prev_iter_datasets >> prev_iter_data
+    get_states = generate_lambda_states("{{ params.num_lambda_states }}")
 
-    ti = TI.override(task_id="TI")(
-        dhdl_data=prev_iter_data,
-        output_dir="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
+    do_TI(
+        dhdl_data,
+        gro_data,
+        get_states,
+        "{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
     )
-    ti_results = get_new_state.override(task_id="get_ti_states")(
-        results=ti,
-        state_data=prev_iter_data,
-        lambda_states=get_states,
-        method="TI",
-    )
-    ti_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_ti")(
-        next_step_info=ti_results
-    )
-
-    mbar = MBAR.override(task_id="MBAR")(
-        dhdl_data=prev_iter_data,
-        output_dir="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
-    )
-    mbar_results = get_new_state.override(task_id="get_mbar_states")(
-        results=mbar,
-        state_data=prev_iter_data,
-        lambda_states=get_states,
-        method="MBAR",
-    )
-    mbar_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_mbar")(
-        next_step_info=mbar_results
+    mbar_results, mbar_next_step_mdp = do_MBAR(
+        dhdl_data,
+        gro_data,
+        get_states,
+        "{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
     )
 
     gro_branch_task = branch_task_template.override(task_id="gro_branch")(
         statement="{{ params.iteration }} == 0",
         task_if_true="get_gro_files_list_init",
-        task_if_false="get_data",
+        task_if_false="collect_iteration_data",
     )
-    gro_branch_task >> [gro_files_list_init, prev_iter_data]
+    gro_branch_task >> [gro_files_list_init, prev_iter_datasets]
     prev_iter_data >> get_states
 
     copy_gro_continue = new_gro_paths.override(task_id="copy_gro_files_continue")(
         gro_updates=mbar_results,
         new_gro_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
-        dataset_dict=prev_iter_data,
+        dataset_dict=gro_data,
     )
 
     new_params = update_params.override(task_id="update_params")(
@@ -604,7 +668,7 @@ with DAG(
     )
     new_params >> anthracene_done_branch >> [trigger_anthracene, anthracene_done]
 
-
+"""
 with DAG(
     dag_id="anthracene_runner",
     start_date=timezone.utcnow(),
@@ -653,7 +717,7 @@ with DAG(
         dhdl_data=get_dhdl_files,
         output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}",
     )
-    get_states = generate_lambda_states(101)
+    get_states = generate_lambda_states("{{ params.num_lambda_states }}")
     mbar_results = get_new_state.override(task_id="get_mbar_states")(
         results=mbar,
         state_data=get_dhdl_files,
@@ -679,3 +743,4 @@ with DAG(
     get_dhdl_files >> [ti, mbar]
     ti >> ti_results >> ti_next_step_mdp
     mbar >> mbar_results >> mbar_next_step_mdp
+"""
