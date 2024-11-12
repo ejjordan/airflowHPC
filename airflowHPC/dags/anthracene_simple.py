@@ -224,6 +224,7 @@ def TI(
     logging.info(f"TI error: {ti.d_delta_f_}")
     logging.info(f"TI error endpoint difference: {ti.d_delta_f_.loc[0.0, 1.0]}")
 
+    states = sorted(states)
     logging.info(f"lambda values: {states}")
     state_uncertainties = []
     for i, state in enumerate(states):
@@ -296,6 +297,7 @@ def MBAR(
     logging.info(f"MBAR error: {mbar.d_delta_f_}")
     logging.info(f"MBAR error endpoint difference: {mbar.d_delta_f_.loc[0.0, 1.0]}")
 
+    states = sorted(states)
     logging.info(f"lambda values: {states}")
     state_uncertainties = []
     for i, state in enumerate(states):
@@ -338,7 +340,11 @@ def generate_lambda_states(num_states: int | str):
 
 @task
 def get_new_state(
-    results, gro_states_dict, lambda_states, method: Literal["TI", "MBAR"]
+    results,
+    gro_states_dict,
+    lambda_states,
+    states_per_step,
+    method: Literal["TI", "MBAR"],
 ):
     import logging
     import numpy as np
@@ -354,7 +360,7 @@ def get_new_state(
         )
 
     new_state_ranges = {}
-    for _ in range(len(uncertainties) + 1):
+    for _ in range(states_per_step):
         max_uncertainty = max(uncertainties, key=lambda x: x[2])
         max_uncertainty_idx = uncertainties.index(max_uncertainty)
         logging.debug(f"max uncertainty: {max_uncertainty}")
@@ -579,7 +585,7 @@ def map_gros(dhdl_data):
 
 
 @task_group
-def do_TI(dhdl, gro, states, output_dir):
+def do_TI(dhdl, gro, states, output_dir, states_per_step):
     ti = TI.override(task_id="TI")(
         dhdl_data=dhdl,
         output_dir=output_dir,
@@ -588,6 +594,7 @@ def do_TI(dhdl, gro, states, output_dir):
         results=ti,
         gro_states_dict=gro,
         lambda_states=states,
+        states_per_step=states_per_step,
         method="TI",
     )
     ti_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_ti")(
@@ -598,7 +605,7 @@ def do_TI(dhdl, gro, states, output_dir):
 
 
 @task_group
-def do_MBAR(dhdl, gro, states, output_dir):
+def do_MBAR(dhdl, gro, states, output_dir, states_per_step):
     mbar = MBAR.override(task_id="MBAR")(
         dhdl_data=dhdl,
         output_dir=output_dir,
@@ -607,6 +614,7 @@ def do_MBAR(dhdl, gro, states, output_dir):
         results=mbar,
         gro_states_dict=gro,
         lambda_states=states,
+        states_per_step=states_per_step,
         method="MBAR",
     )
     mbar_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_mbar")(
@@ -651,12 +659,14 @@ with DAG(
         gro_data,
         get_states,
         "{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
+        "{{ params.lambda_states_per_step }}",
     )
     mbar_results, mbar_next_step_mdp = do_MBAR(
         dhdl_data,
         gro_data,
         get_states,
         "{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
+        "{{ params.lambda_states_per_step }}",
     )
 
     gro_branch_task = branch_task_template.override(task_id="gro_branch")(
