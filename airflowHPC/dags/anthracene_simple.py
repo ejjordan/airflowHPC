@@ -20,7 +20,6 @@ from airflowHPC.operators import ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflow.models.param import Param
 
-# num_steps = 10000
 dagrun_params = {
     "inputs": Param(
         {
@@ -54,7 +53,8 @@ dagrun_params = {
         "dhdl": "-dhdl",
         "gro": "-c",
     },
-    "num_lambda_states": 6,
+    "lambda_states_per_step": 5,
+    "lambda_states_total": 51,
 }
 
 
@@ -234,13 +234,11 @@ def TI(
             f"Uncertainty between lambda {state} and lambda {states[i + 1]}: {neighbor_uncertainty}"
         )
         state_uncertainties.append((state, states[i + 1], neighbor_uncertainty))
-    max_uncertainty = max(state_uncertainties, key=lambda x: x[2])
-    # min_uncertainty = min(state_uncertainties[1:], key=lambda x: x[2])
 
     # Plotting
     ax = plot_ti_dhdl(ti, labels=["VDW"], colors="r")
     ax.figure.savefig(os.path.join(output_dir, "dhdl_TI.png"))
-    return {"max": max_uncertainty, "min": None}
+    return {"uncertainties": state_uncertainties}
 
 
 @task
@@ -308,15 +306,13 @@ def MBAR(
             f"Uncertainty between lambda {state} and lambda {states[i+1]}: {neighbor_uncertainty}"
         )
         state_uncertainties.append((state, states[i + 1], neighbor_uncertainty))
-    max_uncertainty = max(state_uncertainties, key=lambda x: x[2])
-    # min_uncertainty = min(state_uncertainties[1:], key=lambda x: x[2])
 
     # Plotting
     ax = plot_mbar_overlap_matrix(mbar.overlap_matrix)
     ax.figure.savefig(
         os.path.join(output_dir, "O_MBAR.png"), bbox_inches="tight", pad_inches=0.0
     )
-    return {"max": max_uncertainty, "min": None}
+    return {"uncertainties": state_uncertainties}
 
 
 @task(multiple_outputs=True)
@@ -345,77 +341,112 @@ def get_new_state(
     results, gro_states_dict, lambda_states, method: Literal["TI", "MBAR"]
 ):
     import logging
-    import random
+    import numpy as np
 
-    min_state1 = results["min"][0]
-    min_state2 = results["min"][1]
-    min_uncertainty = results["min"][2]
-    removal_state_idx = int(lambda_states["state_to_idx"][min_state1])
-    removal_state = lambda_states["idx_to_state"][str(removal_state_idx)]
-    assert float(min_state1) > 0
-
-    logging.info(
-        f"{method} min uncertainty between states {min_state1} and {min_state2}: {min_uncertainty}"
-    )
-    logging.info(f"Will remove state: {removal_state_idx}: {removal_state}")
-
-    max_state1 = results["max"][0]
-    max_state2 = results["max"][1]
-    max_uncertainty = results["max"][2]
-    max_state_idx1 = int(lambda_states["state_to_idx"][max_state1])
-    max_state_idx2 = int(lambda_states["state_to_idx"][max_state2])
-    logging.info(
-        f"{method} max uncertainty between states {max_state1} and {max_state2}: {max_uncertainty}"
-    )
-    logging.info(
-        f"{method} max uncertainty state indices: {max_state_idx1} and {max_state_idx2}"
-    )
-    assert max_state_idx1 < max_state_idx2
-    new_state_idx = random.randrange(max_state_idx1 + 1, max_state_idx2 - 1)
-    new_state = lambda_states["idx_to_state"][str(new_state_idx)]
-    logging.info(f"new {method} state: {new_state_idx}: {new_state}")
-
-    # Add new state to gro files. Pick the gro file with the closest lambda value to the new state, without going over
     gro_states = [gro for gro in gro_states_dict]
-    gro_to_copy = gro_states[-1][max_state1]
-    return {
-        "gro_to_copy": gro_to_copy,
-        "gro_to_copy_idx": max_state_idx1,
-        "gro_to_copy_state": max_state1,
-        "new_gro_idx": new_state_idx,
-        "new_gro_fn": f"lambda_{new_state}.gro",
-        "gro_to_remove": f"lambda_{removal_state}.gro",
-        "gro_to_remove_idx": removal_state_idx,
-        "gro_to_remove_state": removal_state,
-    }
+    initial_states = [item for sublist in gro_states for item in sublist]
+    logging.info(f"initial states: {initial_states}")
+    max_states_in_range = int(len(initial_states) / 2)
+    uncertainties = results["uncertainties"]
+    for result in uncertainties:
+        logging.info(
+            f"uncertainty between states {result[0]} and {result[1]}: {result[2]}"
+        )
+
+    new_state_ranges = {}
+    for _ in range(len(uncertainties) + 1):
+        max_uncertainty = max(uncertainties, key=lambda x: x[2])
+        max_uncertainty_idx = uncertainties.index(max_uncertainty)
+        logging.debug(f"max uncertainty: {max_uncertainty}")
+
+        key = (max_uncertainty[0], max_uncertainty[1])
+        if key in new_state_ranges:
+            new_state_ranges[key] += 1
+        else:
+            new_state_ranges[key] = 1
+        if new_state_ranges[key] >= max_states_in_range:
+            uncertainties.pop(max_uncertainty_idx)
+        else:
+            uncertainties[max_uncertainty_idx][2] = max_uncertainty[2] / 2
+        logging.debug(f"new uncertainties: {uncertainties}")
+    logging.info(f"new state ranges: {new_state_ranges}")
+    # If a state range is full, then take all the states in that range, otherwise pick at random
+    new_states = []
+    for key, value in new_state_ranges.items():
+        start_range = int(lambda_states["state_to_idx"][key[0]])
+        end_range = int(lambda_states["state_to_idx"][key[1]])
+        logging.debug(
+            f"start range: {start_range}: {key[0]}, end range: {end_range}: {key[1]}"
+        )
+
+        if value == 1:
+            # Take a state from the middle of the range
+            idx = str(int((end_range - start_range) / 2) + start_range)
+            next_state = lambda_states["idx_to_state"][idx]
+            logging.debug(f"idx: {idx}, next state: {next_state}")
+            new_states.append(next_state)
+        else:
+            # Take the values roughly evenly spaced in the range
+            splits = np.array_split(np.arange(start_range + 1, end_range), value + 1)
+            for i in range(value):
+                idx = str(splits[i][-1])
+                next_state = lambda_states["idx_to_state"][idx]
+                logging.debug(f"idx: {idx}, next state: {next_state}")
+                new_states.append(next_state)
+
+    gro_info = {}
+    for gro_dict in gro_states_dict:
+        for state, gro in gro_dict.items():
+            gro_info[state] = gro
+
+    new_gro_files = []
+    new_states_dict = {}
+    # Find the gro file with the closest lambda value to the new state without going over
+    for state in new_states:
+        state_idx = lambda_states["state_to_idx"][state]
+        new_states_dict[state_idx] = state
+        logging.info(f"state: {state}, state index: {state_idx}")
+        closest_state = max(
+            (s for s in gro_info.keys() if float(s) <= float(state)),
+            key=lambda x: float(x),
+        )
+        logging.info(f"closest state: {closest_state}")
+        new_gro_fn = f"lambda_{state}.gro"
+        new_gro_files.append({new_gro_fn: gro_info[closest_state]})
+    return {"gro_files": new_gro_files, "new_states": new_states_dict}
 
 
 @task
-def next_step_mdp_options(next_step_info, **context):
+def next_step_mdp_options(next_step_info, lambda_states, **context):
     """
     Remove the state with the lowest uncertainty and add a new state between the states with the highest uncertainty.
     """
-    import ast
+    import logging
 
+    logging.debug(f"next step info: {next_step_info}")
     params = context["params"]
-    new_mdp_options = [
-        ast.literal_eval(opt) if type(opt) is str else opt
-        for opt in params["mdp_options"]
+    num_steps = params["num_steps"]
+    lambda_dirs = [
+        f"lambda_{state}" for state in list(next_step_info["new_states"].values())
     ]
-
-    new_mdp_options = [
-        opt
-        for opt in new_mdp_options
-        if opt["init-lambda-state"] != next_step_info["gro_to_remove_idx"]
-    ]
-    new_mdp_options.append({"init-lambda-state": next_step_info["new_gro_idx"]})
-    new_mdp_options = sorted(new_mdp_options, key=lambda x: x["init-lambda-state"])
+    logging.info(f"lambda dirs: {lambda_dirs}")
+    new_mdp_options = []
+    for idx, state in next_step_info["new_states"].items():
+        logging.info(f"Adding state {state} with index {idx} to mdp options")
+        new_mdp_options.append(
+            {
+                "init-lambda-state": idx,
+                "nsteps": num_steps,
+                "vdw_lambdas": lambda_states["states"],
+            }
+        )
     return new_mdp_options
 
 
 @task
-def copy_gro_files(gro_fn, output_dir, states_dict):
+def copy_gro_files(gro_fn, output_dir, states_dict, lambda_states_per_step):
     import logging, os, shutil
+    import numpy as np
 
     assert isinstance(output_dir, str)
     if not os.path.isabs(output_dir):
@@ -423,9 +454,20 @@ def copy_gro_files(gro_fn, output_dir, states_dict):
     logging.info(f"Copying gro files to {output_dir}")
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    logging.info(f"gro_files: {[gro for gro in gro_fn]}")
-    states = list(states_dict.values())
-    logging.info(f"states: {states}")
+    assert lambda_states_per_step >= 2
+    states_arrays = np.array_split(
+        np.array(list(states_dict.items())), lambda_states_per_step - 1
+    )
+    state_idxs, states = [], []
+    for i, state in enumerate(states_arrays):
+        if i == 0:
+            state_idxs.append(state[0][0])
+            state_idxs.append(state[-1][0])
+            states.append(state[0][1])
+            states.append(state[-1][1])
+        else:
+            state_idxs.append(state[-1][0])
+            states.append(state[-1][1])
 
     for state in states:
         logging.info(f"Copying {gro_fn} to {output_dir} with state {state}")
@@ -434,6 +476,8 @@ def copy_gro_files(gro_fn, output_dir, states_dict):
     return {
         "gro_dir": output_dir,
         "gro_files": [f"lambda_{state}.gro" for state in states],
+        "states": states,
+        "state_idxs": state_idxs,
     }
 
 
@@ -441,30 +485,27 @@ def copy_gro_files(gro_fn, output_dir, states_dict):
 def new_gro_paths(gro_updates, new_gro_dir, dataset_dict):
     import os, shutil, logging
 
-    gro_states = [gro for gro in dataset_dict]
-    gro_paths = []
-    for lambda_state, gro_path in gro_states[-1].items():
-        if lambda_state == gro_updates["gro_to_remove_state"]:
-            continue
-        elif lambda_state == gro_updates["gro_to_copy_state"]:
-            gro_paths.append(
-                (gro_path, os.path.join(new_gro_dir, f"lambda_{lambda_state}.gro"))
-            )
-            gro_paths.append(
-                (gro_path, os.path.join(new_gro_dir, gro_updates["new_gro_fn"]))
-            )
-        else:
-            gro_paths.append(
-                (gro_path, os.path.join(new_gro_dir, f"lambda_{lambda_state}.gro"))
-            )
-    for path in gro_paths:
-        logging.info(f"Copying {path[0]} to {path[1]}")
-        if not os.path.exists(new_gro_dir):
-            os.makedirs(new_gro_dir)
-        shutil.copy(path[0], path[1])
+    # gro_states = [gro for gro in dataset_dict]
+    gro_paths = gro_updates["gro_files"]
+    logging.info(f"gro paths: {gro_paths}")
+    if not os.path.isabs(new_gro_dir):
+        new_gro_dir = os.path.abspath(new_gro_dir)
+    if not os.path.exists(new_gro_dir):
+        os.makedirs(new_gro_dir)
+
+    new_gro_paths = []
+    for item in gro_paths:
+        gro_fn = list(item.keys())[0]
+        gro_to_copy = list(item.values())[0]
+        gro_path = os.path.join(new_gro_dir, gro_fn)
+        logging.info(f"Copying {gro_to_copy} to {gro_path}")
+        shutil.copy(gro_to_copy, gro_path)
+        new_gro_paths.append(os.path.basename(gro_path))
     return {
         "gro_dir": new_gro_dir,
-        "gro_files": [os.path.basename(f[1]) for f in gro_paths],
+        "gro_files": new_gro_paths,
+        "state_idxs": list(gro_updates["new_states"].keys()),
+        "states": list(gro_updates["new_states"].values()),
     }
 
 
@@ -480,8 +521,10 @@ def update_params(
 
     params = context["params"]
     if gro_update_init:
+        logging.info(f"gro update init: {gro_update_init}")
         params_update = gro_update_init
     elif gro_update_continue:
+        logging.info(f"gro update continue: {gro_update_continue}")
         params_update = gro_update_continue
     else:
         raise ValueError("No parameters to update")
@@ -490,21 +533,22 @@ def update_params(
 
     num_steps = params["num_steps"]
     if mdp_params_continue:
-        params["mdp_options"] = mdp_params_continue
+        logging.info(f"mdp params continue: {mdp_params_continue}")
 
     params["mdp_options"] = []
     params["lambda_dirs"] = []
-    if vdw_lambda_states:
-        for idx, state in vdw_lambda_states.items():
-            logging.info(f"Adding state {state} with index {idx} to mdp options")
-            params["mdp_options"].append(
-                {
-                    "init-lambda-state": idx,
-                    "nsteps": num_steps,
-                    "vdw_lambdas": list(vdw_lambda_states.values()),
-                }
-            )
-            params["lambda_dirs"].append(f"lambda_{state}")
+    lambda_states_total = list(vdw_lambda_states.values())
+    for idx in params_update["state_idxs"]:
+        state = vdw_lambda_states[idx]
+        logging.info(f"Adding state {state} with index {idx} to mdp options")
+        params["mdp_options"].append(
+            {
+                "init-lambda-state": idx,
+                "nsteps": num_steps,
+                "vdw_lambdas": lambda_states_total,
+            }
+        )
+        params["lambda_dirs"].append(f"lambda_{state}")
     return params
 
 
@@ -547,7 +591,8 @@ def do_TI(dhdl, gro, states, output_dir):
         method="TI",
     )
     ti_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_ti")(
-        next_step_info=ti_results
+        next_step_info=ti_results,
+        lambda_states=states,
     )
     return ti_results, ti_next_step_mdp
 
@@ -565,7 +610,8 @@ def do_MBAR(dhdl, gro, states, output_dir):
         method="MBAR",
     )
     mbar_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_mbar")(
-        next_step_info=mbar_results
+        next_step_info=mbar_results,
+        lambda_states=states,
     )
     return mbar_results, mbar_next_step_mdp
 
@@ -577,7 +623,7 @@ with DAG(
     render_template_as_native_obj=True,
     params=dagrun_params,
 ) as anthacene_files:
-    get_states = generate_lambda_states("{{ params.num_lambda_states }}")
+    get_states = generate_lambda_states("{{ params.lambda_states_total }}")
     gro_init = get_file.override(task_id="get_gro_init")(
         input_dir="{{ params.inputs.gro.directory }}",
         use_ref_data=True,
@@ -587,6 +633,7 @@ with DAG(
         gro_fn=gro_init,
         output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
         states_dict=get_states["idx_to_state"],
+        lambda_states_per_step="{{ params.lambda_states_per_step }}",
     )
 
     prev_iter_datasets = collect_iteration_data.override(
