@@ -1,4 +1,3 @@
-from typing import Literal
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.operators.empty import EmptyOperator
@@ -347,7 +346,6 @@ def get_new_state(
     gro_states_dict,
     lambda_states,
     states_per_step,
-    method: Literal["TI", "MBAR"],
 ):
     import logging
     import numpy as np
@@ -491,10 +489,9 @@ def copy_gro_files(gro_fn, output_dir, states_dict, lambda_states_per_step):
 
 
 @task
-def new_gro_paths(gro_updates, new_gro_dir, dataset_dict):
+def new_gro_paths(gro_updates, new_gro_dir):
     import os, shutil, logging
 
-    # gro_states = [gro for gro in dataset_dict]
     gro_paths = gro_updates["gro_files"]
     logging.info(f"gro paths: {gro_paths}")
     if not os.path.isabs(new_gro_dir):
@@ -570,7 +567,7 @@ def collect_iteration_data(**context):
     expected_output = context["params"]["expected_output"]
     previous_dataset_paths = [
         os.path.join(output_dir, f"iteration_{i}", expected_output)
-        for i in range(iteration)
+        for i in range(1, iteration)
     ]
     assert [os.path.exists(path) for path in previous_dataset_paths]
     return previous_dataset_paths
@@ -598,7 +595,6 @@ def do_TI(dhdl, gro, states, output_dir, states_per_step):
         gro_states_dict=gro,
         lambda_states=states,
         states_per_step=states_per_step,
-        method="TI",
     )
     ti_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_ti")(
         next_step_info=ti_results,
@@ -618,13 +614,43 @@ def do_MBAR(dhdl, gro, states, output_dir, states_per_step):
         gro_states_dict=gro,
         lambda_states=states,
         states_per_step=states_per_step,
-        method="MBAR",
     )
     mbar_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_mbar")(
         next_step_info=mbar_results,
         lambda_states=states,
     )
     return mbar_results, mbar_next_step_mdp
+
+
+@task_group
+def dag_group(input_dir, file_name, dag_params, dag_id, display_name):
+    is_anthracene_done = get_file.override(task_id=f"is_{display_name}_done")(
+        input_dir=input_dir,
+        file_name=file_name,
+        use_ref_data=False,
+        check_exists=True,
+    )
+    trigger_anthracene = TriggerDagRunOperator(
+        task_id=f"trigger_{display_name}",
+        trigger_dag_id=dag_id,
+        wait_for_completion=True,
+        poke_interval=2,
+        trigger_rule="none_failed",
+        conf=dag_params,
+    )
+    anthracene_done = EmptyOperator(task_id="this_iteration_done")
+    anthracene_done_branch = branch_task.override(
+        task_id=f"{display_name}_done_branch"
+    )(
+        truth_value=is_anthracene_done,
+        task_if_true="dag_group.this_iteration_done",
+        task_if_false=f"dag_group.trigger_{display_name}",
+    )
+    (
+        is_anthracene_done
+        >> anthracene_done_branch
+        >> [anthracene_done, trigger_anthracene]
+    )
 
 
 with DAG(
@@ -673,7 +699,7 @@ with DAG(
     )
 
     gro_branch_task = branch_task_template.override(task_id="gro_branch")(
-        statement="{{ params.iteration }} == 0",
+        statement="{{ params.iteration }} == 1",
         task_if_true="get_gro_init",
         task_if_false="collect_iteration_data",
     )
@@ -682,7 +708,6 @@ with DAG(
     copy_gro_continue = new_gro_paths.override(task_id="copy_gro_files_continue")(
         gro_updates=mbar_results,
         new_gro_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
-        dataset_dict=gro_data,
     )
 
     new_params = update_params.override(task_id="update_params")(
@@ -691,27 +716,14 @@ with DAG(
         mdp_params_continue=mbar_next_step_mdp,
         vdw_lambda_states=get_states["idx_to_state"],
     )
-
-    is_anthracene_done = get_file.override(task_id="is_anthracene_done")(
+    is_done = dag_group(
         input_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}",
         file_name="{{ params.expected_output }}",
-        use_ref_data=False,
-        check_exists=True,
+        dag_params=new_params,
+        dag_id="anthracene_simple",
+        display_name="anthracene",
     )
-    trigger_anthracene = TriggerDagRunOperator(
-        task_id="trigger_anthracene",
-        trigger_dag_id="anthracene_simple",
-        wait_for_completion=True,
-        poke_interval=2,
-        trigger_rule="none_failed",
-        conf=new_params,
-    )
-    anthracene_done = EmptyOperator(task_id="this_iteration_done")
-    anthracene_done_branch = branch_task.override(task_id="anthracene_done_branch")(
-        truth_value=is_anthracene_done,
-        task_if_true="this_iteration_done",
-        task_if_false="trigger_anthracene",
-    )
+
     next_iteration_params = {
         "iteration": "{{ params.iteration + 1 }}",
         "output_dir": "{{ params.output_dir }}",
@@ -734,9 +746,4 @@ with DAG(
         truth_value=do_next_iteration,
         wait_for_completion=False,
     )
-    (
-        new_params
-        >> anthracene_done_branch
-        >> [trigger_anthracene, anthracene_done]
-        >> do_next_iteration
-    )
+    new_params >> is_done >> do_next_iteration
