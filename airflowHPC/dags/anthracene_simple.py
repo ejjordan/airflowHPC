@@ -15,6 +15,8 @@ from airflowHPC.dags.tasks import (
     branch_task,
     json_from_dataset_path,
     branch_task_template,
+    evaluate_template_truth,
+    run_if_false,
 )
 from airflowHPC.operators import ResourceGmxOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -48,7 +50,8 @@ dagrun_params = {
     "output_dir": "anthracene_simple",
     "output_name": "anthra",
     "expected_output": "anthra.json",
-    "iteration": 0,
+    "iteration": 1,
+    "max_iterations": 3,
     "output_dataset_structure": {
         "dhdl": "-dhdl",
         "gro": "-c",
@@ -703,10 +706,37 @@ with DAG(
         trigger_rule="none_failed",
         conf=new_params,
     )
-    anthracene_done = EmptyOperator(task_id="anthracene_done")
+    anthracene_done = EmptyOperator(task_id="this_iteration_done")
     anthracene_done_branch = branch_task.override(task_id="anthracene_done_branch")(
         truth_value=is_anthracene_done,
-        task_if_true="anthracene_done",
+        task_if_true="this_iteration_done",
         task_if_false="trigger_anthracene",
     )
-    new_params >> anthracene_done_branch >> [trigger_anthracene, anthracene_done]
+    next_iteration_params = {
+        "iteration": "{{ params.iteration + 1 }}",
+        "output_dir": "{{ params.output_dir }}",
+        "output_name": "{{ params.output_name }}",
+        "expected_output": "{{ params.expected_output }}",
+        "num_steps": "{{ params.num_steps }}",
+        "max_iterations": "{{ params.max_iterations }}",
+        "output_dataset_structure": "{{ params.output_dataset_structure }}",
+        "lambda_states_per_step": "{{ params.lambda_states_per_step }}",
+        "lambda_states_total": "{{ params.lambda_states_total }}",
+    }
+    do_next_iteration = evaluate_template_truth.override(
+        task_id="do_next_iteration", trigger_rule="none_failed_min_one_success"
+    )(
+        statement="{{ params.iteration }} >= {{ params.max_iterations }}",
+    )
+    next_iteration = run_if_false.override(group_id="next_iteration")(
+        dag_id="anthracene_files_simple",
+        dag_params=next_iteration_params,
+        truth_value=do_next_iteration,
+        wait_for_completion=False,
+    )
+    (
+        new_params
+        >> anthracene_done_branch
+        >> [trigger_anthracene, anthracene_done]
+        >> do_next_iteration
+    )
