@@ -84,6 +84,32 @@ def get_lambda_dirs(**context):
     return context["params"]["lambda_dirs"]
 
 
+@task_group
+def get_mdp(input_dir, filename):
+    mdp_options = unpack_mdp_options()
+    mdp_json = get_file.override(task_id="get_mdp_json")(
+        input_dir=input_dir,
+        file_name=filename,
+    )
+    mdp = (
+        update_write_mdp_json_as_mdp_from_file.override(task_id="write_mdp")
+        .partial(mdp_json_file_path=mdp_json)
+        .expand(update_dict=mdp_options)
+    )
+    return mdp
+
+
+@task_group
+def get_gro(param_name, input_dir):
+    gro_files = unpack_param.override(task_id="get_gro_files")(param_name)
+    gro = (
+        get_file.override(task_id="get_gro")
+        .partial(input_dir=input_dir, use_ref_data=False)
+        .expand(file_name=gro_files)
+    )
+    return gro
+
+
 with DAG(
     dag_id="anthracene_simple",
     start_date=timezone.utcnow(),
@@ -91,29 +117,18 @@ with DAG(
     render_template_as_native_obj=True,
     params=dagrun_params,
 ) as anthracene:
-    mdp_options = unpack_mdp_options()
-    gro_files = unpack_param.override(task_id="get_gro_files")(
-        "{{ params.inputs.gro.filename }}"
+    gro = get_gro.override(group_id="get_gro")(
+        param_name="{{ params.inputs.gro.filename }}",
+        input_dir="{{ params.inputs.gro.directory }}",
     )
-
+    mdp = get_mdp.override(group_id="get_mdp")(
+        input_dir="{{ params.inputs.mdp.directory }}",
+        filename="{{ params.inputs.mdp.filename }}",
+    )
     top = get_file.override(task_id="get_top")(
         input_dir="{{ params.inputs.top.directory }}",
         file_name="{{ params.inputs.top.filename }}",
         use_ref_data=True,
-    )
-    gro = (
-        get_file.override(task_id="get_gro")
-        .partial(input_dir="{{ params.inputs.gro.directory }}", use_ref_data=False)
-        .expand(file_name=gro_files)
-    )
-    mdp_json = get_file.override(task_id="get_mdp_json")(
-        input_dir="{{ params.inputs.mdp.directory }}",
-        file_name="{{ params.inputs.mdp.filename }}",
-    )
-    mdp = (
-        update_write_mdp_json_as_mdp_from_file.override(task_id="write_mdp")
-        .partial(mdp_json_file_path=mdp_json)
-        .expand(update_dict=mdp_options)
     )
     lambda_dirs = get_lambda_dirs()
     grompp_input_list = prepare_gmx_input_named(
@@ -653,26 +668,24 @@ def dag_group(input_dir, file_name, dag_params, dag_id, display_name):
     )
 
 
-with DAG(
-    dag_id="anthracene_files_simple",
-    start_date=timezone.utcnow(),
-    catchup=False,
-    render_template_as_native_obj=True,
-    params=dagrun_params,
-) as anthacene_files:
-    get_states = generate_lambda_states("{{ params.lambda_states_total }}")
+@task_group
+def first_step(input_dir, file_name, output_dir, idx_to_state, lambda_states_per_step):
     gro_init = get_file.override(task_id="get_gro_init")(
-        input_dir="{{ params.inputs.gro.directory }}",
+        input_dir=input_dir,
         use_ref_data=True,
-        file_name="{{ params.inputs.gro.filename }}",
+        file_name=file_name,
     )
     copy_gro_init = copy_gro_files.override(task_id="copy_gro_files_init")(
         gro_fn=gro_init,
-        output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
-        states_dict=get_states["idx_to_state"],
-        lambda_states_per_step="{{ params.lambda_states_per_step }}",
+        output_dir=output_dir,
+        states_dict=idx_to_state,
+        lambda_states_per_step=lambda_states_per_step,
     )
+    return gro_init, copy_gro_init
 
+
+@task_group
+def next_step(states, output_dir, states_per_step, new_gro_dir):
     prev_iter_datasets = collect_iteration_data.override(
         task_id="collect_iteration_data"
     )()
@@ -686,29 +699,52 @@ with DAG(
     do_TI(
         dhdl_data,
         gro_data,
-        get_states,
-        "{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
-        "{{ params.lambda_states_per_step }}",
+        states,
+        output_dir,
+        states_per_step,
     )
     mbar_results, mbar_next_step_mdp = do_MBAR(
         dhdl_data,
         gro_data,
+        states,
+        output_dir,
+        states_per_step,
+    )
+    copy_gro_continue = new_gro_paths.override(task_id="copy_gro_files_continue")(
+        gro_updates=mbar_results,
+        new_gro_dir=new_gro_dir,
+    )
+    return prev_iter_datasets, mbar_next_step_mdp, copy_gro_continue
+
+
+with DAG(
+    dag_id="anthracene_files_simple",
+    start_date=timezone.utcnow(),
+    catchup=False,
+    render_template_as_native_obj=True,
+    params=dagrun_params,
+) as anthacene_files:
+    get_states = generate_lambda_states("{{ params.lambda_states_total }}")
+    gro_init, copy_gro_init = first_step(
+        input_dir="{{ params.inputs.gro.directory }}",
+        file_name="{{ params.inputs.gro.filename }}",
+        output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
+        idx_to_state=get_states["idx_to_state"],
+        lambda_states_per_step="{{ params.lambda_states_per_step }}",
+    )
+    prev_iter_datasets, mbar_next_step_mdp, copy_gro_continue = next_step(
         get_states,
         "{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
         "{{ params.lambda_states_per_step }}",
+        "{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
     )
 
     gro_branch_task = branch_task_template.override(task_id="gro_branch")(
         statement="{{ params.iteration }} == 1",
-        task_if_true="get_gro_init",
-        task_if_false="collect_iteration_data",
+        task_if_true="first_step.get_gro_init",
+        task_if_false="next_step.collect_iteration_data",
     )
     gro_branch_task >> [gro_init, prev_iter_datasets]
-
-    copy_gro_continue = new_gro_paths.override(task_id="copy_gro_files_continue")(
-        gro_updates=mbar_results,
-        new_gro_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
-    )
 
     new_params = update_params.override(task_id="update_params")(
         gro_update_init=copy_gro_init,
