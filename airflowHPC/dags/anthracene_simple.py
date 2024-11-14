@@ -50,13 +50,13 @@ dagrun_params = {
     "output_name": "anthra",
     "expected_output": "anthra.json",
     "iteration": 1,
-    "max_iterations": 3,
+    "max_iterations": 10,
     "output_dataset_structure": {
         "dhdl": "-dhdl",
         "gro": "-c",
     },
-    "lambda_states_per_step": 5,
-    "lambda_states_total": 51,
+    "lambda_states_per_step": 11,
+    "lambda_states_total": 101,
 }
 
 
@@ -190,7 +190,7 @@ with DAG(
     mdrun >> dataset >> update_data
 
 
-@task
+@task(multiple_outputs=True)
 def TI(
     dhdl_data,
     output_dir,
@@ -245,7 +245,8 @@ def TI(
     )
     logging.info(f"Endpoint differences (TI): {ti.delta_f_.loc[0.0, 1.0]}")
     logging.info(f"TI error: {ti.d_delta_f_}")
-    logging.info(f"TI error endpoint difference: {ti.d_delta_f_.loc[0.0, 1.0]}")
+    ti_error = ti.d_delta_f_.loc[0.0, 1.0]
+    logging.info(f"TI error endpoint difference: {ti_error}")
 
     logging.info(f"lambda values: {states}")
     state_uncertainties = []
@@ -364,13 +365,19 @@ def TI(
         runlocs[i] = min_j
         runmins[i] = min_trial
 
-    logging.info(f"new lambdas to run at: {[lambda_states[i] for i in runlocs]}")
+    logging.info(
+        f"new lambdas to run at: {[round(lambda_states[i], 2) for i in runlocs]}"
+    )
     logging.debug(f"new minima: {runmins}")
 
-    return {"uncertainties": state_uncertainties, "new_states": runlocs.tolist()}
+    return {
+        "uncertainties": state_uncertainties,
+        "new_states": runlocs.tolist(),
+        "error": ti_error,
+    }
 
 
-@task
+@task(multiple_outputs=True)
 def MBAR(
     dhdl_data,
     output_dir,
@@ -423,13 +430,16 @@ def MBAR(
     )
     logging.info(f"Endpoint differences (MBAR): {mbar.delta_f_.loc[0.0, 1.0]}")
     logging.info(f"MBAR error: {mbar.d_delta_f_}")
-    logging.info(f"MBAR error endpoint difference: {mbar.d_delta_f_.loc[0.0, 1.0]}")
+    mbar_error = mbar.d_delta_f_.loc[0.0, 1.0]
+    logging.info(f"MBAR error endpoint difference: {mbar_error}")
 
     states = sorted(states)
     logging.info(f"lambda values: {states}")
     state_uncertainties = []
     for i, state in enumerate(states):
         if state == "1.00":
+            continue
+        if state == states[i + 1]:  # The same state can be sampled multiple times
             continue
         neighbor_uncertainty = mbar.d_delta_f_.loc[float(state), float(states[i + 1])]
         logging.info(
@@ -442,7 +452,7 @@ def MBAR(
     ax.figure.savefig(
         os.path.join(output_dir, "O_MBAR.png"), bbox_inches="tight", pad_inches=0.0
     )
-    return {"uncertainties": state_uncertainties}
+    return {"uncertainties": state_uncertainties, "error": mbar_error}
 
 
 @task(multiple_outputs=True)
@@ -768,7 +778,7 @@ def do_TI(dhdl, gro, states, output_dir, nsteps, states_per_step, total_states):
         next_step_info=ti_results,
         lambda_states=states,
     )
-    return ti_results, ti_next_step_mdp
+    return ti, ti_results, ti_next_step_mdp
 
 
 @task_group
@@ -787,7 +797,7 @@ def do_MBAR(dhdl, gro, states, output_dir, states_per_step):
         next_step_info=mbar_results,
         lambda_states=states,
     )
-    return mbar_results, mbar_next_step_mdp
+    return mbar, mbar_results, mbar_next_step_mdp
 
 
 @task_group
@@ -822,19 +832,37 @@ def dag_group(input_dir, file_name, dag_params, dag_id, display_name):
 
 
 @task_group
-def first_step(input_dir, file_name, output_dir, idx_to_state, lambda_states_per_step):
+def first_step(
+    input_dir, file_name, output_dir, idx_to_state, lambda_states_to_run: int = 11
+):
     gro_init = get_file.override(task_id="get_gro_init")(
         input_dir=input_dir,
         use_ref_data=True,
         file_name=file_name,
     )
+    # On the first step we need to sample rather uniformly for the TI interpolation algo to work
     copy_gro_init = copy_gro_files.override(task_id="copy_gro_files_init")(
         gro_fn=gro_init,
         output_dir=output_dir,
         states_dict=idx_to_state,
-        lambda_states_per_step=lambda_states_per_step,
+        lambda_states_per_step=lambda_states_to_run,
     )
     return gro_init, copy_gro_init
+
+
+@task
+def error_convergence(mbar_error, ti_error, threshold: float = 0.3):
+    import logging
+
+    logging.info(f"MBAR error: {mbar_error}, TI error: {ti_error}")
+    if mbar_error < threshold and ti_error < threshold:
+        return True
+    return False
+
+
+@task.short_circuit
+def short_circuit(converged: bool):
+    return not converged
 
 
 @task_group
@@ -849,7 +877,7 @@ def next_step(states, output_dir, states_per_step, total_states, nsteps, new_gro
     gro_data = prev_iter_data.map(map_gros)
     prev_iter_datasets >> prev_iter_data
 
-    ti_results, ti_next_step_mdp = do_TI(
+    ti, ti_results, ti_next_step_mdp = do_TI(
         dhdl=dhdl_data,
         gro=gro_data,
         states=states,
@@ -858,17 +886,20 @@ def next_step(states, output_dir, states_per_step, total_states, nsteps, new_gro
         states_per_step=states_per_step,
         total_states=total_states,
     )
-    mbar_results, mbar_next_step_mdp = do_MBAR(
+    mbar, mbar_results, mbar_next_step_mdp = do_MBAR(
         dhdl=dhdl_data,
         gro=gro_data,
         states=states,
         output_dir=output_dir,
         states_per_step=states_per_step,
     )
+    converged = error_convergence(mbar["error"], ti["error"])
+    short = short_circuit(converged)
     copy_gro_continue = new_gro_paths.override(task_id="copy_gro_files_continue")(
         gro_updates=ti_results,
         new_gro_dir=new_gro_dir,
     )
+    converged >> short >> copy_gro_continue
     return prev_iter_datasets, ti_next_step_mdp, copy_gro_continue
 
 
@@ -885,7 +916,6 @@ with DAG(
         file_name="{{ params.inputs.gro.filename }}",
         output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
         idx_to_state=get_states["idx_to_state"],
-        lambda_states_per_step="{{ params.lambda_states_per_step }}",
     )
     prev_iter_datasets, next_step_mdp, copy_gro_continue = next_step(
         states=get_states,
