@@ -194,6 +194,9 @@ with DAG(
 def TI(
     dhdl_data,
     output_dir,
+    states_per_step,
+    total_states,
+    nsteps,
     temp: float = 300.0,
     equil_index: int = 10,
 ):
@@ -208,9 +211,12 @@ def TI(
     from alchemlyb import concat as alchemlyb_concat
     from alchemlyb.estimators import TI
     from alchemlyb.visualisation import plot_ti_dhdl
+    import numpy as np
+    import scipy
+    import matplotlib.pyplot as plt
 
     dhdl_files = [item[1] for sublist in dhdl_data for item in sublist]
-    states = [item[0] for sublist in dhdl_data for item in sublist]
+    states = sorted([item[0] for sublist in dhdl_data for item in sublist])
     logging.info(f"Performing TI analysis on {dhdl_files}")
     logging.info(f"States: {states}")
     # Preprocessing
@@ -241,11 +247,12 @@ def TI(
     logging.info(f"TI error: {ti.d_delta_f_}")
     logging.info(f"TI error endpoint difference: {ti.d_delta_f_.loc[0.0, 1.0]}")
 
-    states = sorted(states)
     logging.info(f"lambda values: {states}")
     state_uncertainties = []
     for i, state in enumerate(states):
-        if state == "1.00":
+        if state == "1.00":  # Don't wrap around
+            continue
+        if state == states[i + 1]:  # The same state can be sampled multiple times
             continue
         neighbor_uncertainty = ti.d_delta_f_.loc[float(state), float(states[i + 1])]
         logging.info(
@@ -256,7 +263,111 @@ def TI(
     # Plotting
     ax = plot_ti_dhdl(ti, labels=["VDW"], colors="r")
     ax.figure.savefig(os.path.join(output_dir, "dhdl_TI.png"))
-    return {"uncertainties": state_uncertainties}
+
+    # Perform error analysis to choose new states:
+    dHdl = combined_dhdl_data
+    dHdl = dHdl.sort_index(level=dHdl.index.names[1:])
+    variances = np.square(dHdl.groupby(level=dHdl.index.names[1:]).sem())
+    logging.info(f"variances: {variances.values[:, 0]}")
+
+    state_samples = {}
+    for state in states:
+        if state in state_samples:
+            state_samples[state] += nsteps
+        else:
+            state_samples[state] = nsteps
+    logging.debug(f"state samples: {state_samples}")
+    lambda_points = np.array([float(state) for state in list(state_samples.keys())])
+    samples_per_point = np.array(list(state_samples.values()))
+
+    logging.info(f"visited lambda points: {lambda_points}")
+    logging.info(f"samples per lambda point: {samples_per_point}")
+
+    def expected_variance(nsamps, lambdas, varfunc, components=False):
+        nonzero_locs = nsamps != 0
+        dlambda = np.diff(lambdas[nonzero_locs])
+        wlambda = np.zeros(len(dlambda) + 1)
+        wlambda[1:] += dlambda
+        wlambda[:-1] += dlambda
+        wlambda *= 0.5
+        vals = varfunc(lambdas[nonzero_locs]) * (wlambda**2 / nsamps[nonzero_locs])
+        vsum = np.sum(vals)
+        # if any variances are negative, zero them out
+        if np.any(vals < 0):
+            logging.debug(f"varfunc: {varfunc(lambdas[nonzero_locs])}")
+            logging.debug(f"variances: {vals}")
+            logging.debug(f"expected variance: {vsum}")
+            vals[vals < 0] = 0
+            vsum = np.sum(vals)
+            logging.debug(f"corrected variances: {vals}")
+            logging.debug(f"corrected expected variance: {vsum}")
+
+        if components == False:
+            return vsum
+        else:
+            return vsum, vals
+
+    lambda_states = np.linspace(0, 1, total_states)
+    lambda_states_samples = np.zeros([total_states])
+    for i, lambda_val in enumerate(
+        [f"{lambda_state:.2f}" for lambda_state in lambda_states]
+    ):
+        if lambda_val in list(state_samples.keys()):
+            lambda_states_samples[i] = state_samples[lambda_val]
+
+    fit_var = scipy.interpolate.CubicSpline(
+        lambda_points, samples_per_point * variances.values[:, 0]
+    )
+    logging.info(
+        f"variance fitting function values: {fit_var(lambda_states[lambda_states_samples != 0])}"
+    )
+    # contribution to the uncertainty at each point. This is what we want to see reduced.
+    total_variance, var_components = expected_variance(
+        nsamps=lambda_states_samples,
+        lambdas=lambda_states,
+        varfunc=fit_var,
+        components=True,
+    )
+    logging.info(f"total variance: {total_variance}")
+    plt.clf()
+    plt.plot(lambda_states[lambda_states_samples != 0], var_components)
+    plt.ylabel("current variance")
+    plt.xlabel("lambda")
+    plt.savefig(os.path.join(output_dir, "variance.png"))
+
+    runlocs = np.zeros(states_per_step, dtype=int)
+    runmins = np.zeros(states_per_step)
+    seen_mins = []
+    for i in range(states_per_step):
+        expect_current = expected_variance(
+            nsamps=lambda_states_samples, lambdas=lambda_states, varfunc=fit_var
+        )
+        min_trial = expect_current
+        for j in range(total_states):
+            if j in seen_mins:
+                continue
+            ntrial = lambda_states_samples.copy()
+            ntrial[j] += nsteps
+            # if we add more samples here, how much does it improve the uncertainty
+            expect_trial = expected_variance(
+                nsamps=ntrial, lambdas=lambda_states, varfunc=fit_var
+            )
+            if expect_trial < min_trial:  # OK, this currently the lowest point
+                min_j = j
+                min_trial = expect_trial
+                logging.debug(
+                    f"new mininma found, current: {expect_current}, trial: {min_trial}, idx: {min_j}"
+                )
+        # OK we have found the location the minimizes the next place. Change nall
+        seen_mins.append(min_j)
+        lambda_states_samples[min_j] += nsteps
+        runlocs[i] = min_j
+        runmins[i] = min_trial
+
+    logging.info(f"new lambdas to run at: {[lambda_states[i] for i in runlocs]}")
+    logging.debug(f"new minima: {runmins}")
+
+    return {"uncertainties": state_uncertainties, "new_states": runlocs.tolist()}
 
 
 @task
@@ -356,6 +467,45 @@ def generate_lambda_states(num_states: int | str):
 
 
 @task
+def get_new_states_idx(
+    results,
+    gro_states_dict,
+    lambda_states,
+):
+    import logging
+
+    gro_states = [gro for gro in gro_states_dict]
+    initial_states = [item for sublist in gro_states for item in sublist]
+    logging.info(f"initial states: {initial_states}")
+    new_state_idxs = [str(idx) for idx in results["new_states"]]
+    logging.info(
+        f"new states: {[lambda_states['idx_to_state'][idx] for idx in new_state_idxs]}"
+    )
+
+    gro_info = {}
+    for gro_dict in gro_states_dict:
+        for state, gro in gro_dict.items():
+            gro_info[state] = gro
+
+    new_gro_files = []
+    new_states_dict = {}
+    # Find the gro file with the closest lambda value to the new state without going over
+    for state_idx in new_state_idxs:
+        state = lambda_states["idx_to_state"][state_idx]
+        new_states_dict[state_idx] = state
+        closest_state = max(
+            (s for s in gro_info.keys() if float(s) <= float(state)),
+            key=lambda x: float(x),
+        )
+        logging.info(
+            f"state: {state}, state index: {state_idx}, closest state: {closest_state}"
+        )
+        new_gro_fn = f"lambda_{state}.gro"
+        new_gro_files.append({new_gro_fn: gro_info[closest_state]})
+    return {"gro_files": new_gro_files, "new_states": new_states_dict}
+
+
+@task
 def get_new_state(
     results,
     gro_states_dict,
@@ -368,7 +518,8 @@ def get_new_state(
     gro_states = [gro for gro in gro_states_dict]
     initial_states = [item for sublist in gro_states for item in sublist]
     logging.info(f"initial states: {initial_states}")
-    max_states_in_range = int(len(initial_states) / 2)
+    # For 2 or 3 simulations per step we need at least 2 states in the range
+    max_states_in_range = max(2, int(len(initial_states) / 2))
     uncertainties = results["uncertainties"]
     for result in uncertainties:
         logging.info(
@@ -600,16 +751,18 @@ def map_gros(dhdl_data):
 
 
 @task_group
-def do_TI(dhdl, gro, states, output_dir, states_per_step):
+def do_TI(dhdl, gro, states, output_dir, nsteps, states_per_step, total_states):
     ti = TI.override(task_id="TI")(
         dhdl_data=dhdl,
         output_dir=output_dir,
+        states_per_step=states_per_step,
+        total_states=total_states,
+        nsteps=nsteps,
     )
-    ti_results = get_new_state.override(task_id="get_ti_states")(
+    ti_results = get_new_states_idx.override(task_id="get_ti_states")(
         results=ti,
         gro_states_dict=gro,
         lambda_states=states,
-        states_per_step=states_per_step,
     )
     ti_next_step_mdp = next_step_mdp_options.override(task_id="make_next_mdp_ti")(
         next_step_info=ti_results,
@@ -685,7 +838,7 @@ def first_step(input_dir, file_name, output_dir, idx_to_state, lambda_states_per
 
 
 @task_group
-def next_step(states, output_dir, states_per_step, new_gro_dir):
+def next_step(states, output_dir, states_per_step, total_states, nsteps, new_gro_dir):
     prev_iter_datasets = collect_iteration_data.override(
         task_id="collect_iteration_data"
     )()
@@ -696,25 +849,27 @@ def next_step(states, output_dir, states_per_step, new_gro_dir):
     gro_data = prev_iter_data.map(map_gros)
     prev_iter_datasets >> prev_iter_data
 
-    do_TI(
-        dhdl_data,
-        gro_data,
-        states,
-        output_dir,
-        states_per_step,
+    ti_results, ti_next_step_mdp = do_TI(
+        dhdl=dhdl_data,
+        gro=gro_data,
+        states=states,
+        output_dir=output_dir,
+        nsteps=nsteps,
+        states_per_step=states_per_step,
+        total_states=total_states,
     )
     mbar_results, mbar_next_step_mdp = do_MBAR(
-        dhdl_data,
-        gro_data,
-        states,
-        output_dir,
-        states_per_step,
+        dhdl=dhdl_data,
+        gro=gro_data,
+        states=states,
+        output_dir=output_dir,
+        states_per_step=states_per_step,
     )
     copy_gro_continue = new_gro_paths.override(task_id="copy_gro_files_continue")(
-        gro_updates=mbar_results,
+        gro_updates=ti_results,
         new_gro_dir=new_gro_dir,
     )
-    return prev_iter_datasets, mbar_next_step_mdp, copy_gro_continue
+    return prev_iter_datasets, ti_next_step_mdp, copy_gro_continue
 
 
 with DAG(
@@ -732,11 +887,13 @@ with DAG(
         idx_to_state=get_states["idx_to_state"],
         lambda_states_per_step="{{ params.lambda_states_per_step }}",
     )
-    prev_iter_datasets, mbar_next_step_mdp, copy_gro_continue = next_step(
-        get_states,
-        "{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
-        "{{ params.lambda_states_per_step }}",
-        "{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
+    prev_iter_datasets, next_step_mdp, copy_gro_continue = next_step(
+        states=get_states,
+        output_dir="{{ params.output_dir }}/iteration_{{ params.iteration - 1 }}",
+        states_per_step="{{ params.lambda_states_per_step }}",
+        total_states="{{ params.lambda_states_total }}",
+        nsteps="{{ params.num_steps }}",
+        new_gro_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
     )
 
     gro_branch_task = branch_task_template.override(task_id="gro_branch")(
@@ -749,7 +906,7 @@ with DAG(
     new_params = update_params.override(task_id="update_params")(
         gro_update_init=copy_gro_init,
         gro_update_continue=copy_gro_continue,
-        mdp_params_continue=mbar_next_step_mdp,
+        mdp_params_continue=next_step_mdp,
         vdw_lambda_states=get_states["idx_to_state"],
     )
     is_done = dag_group(
