@@ -85,7 +85,7 @@ def run_iteration(
 
 
 with DAG(
-    "gmx_rct_triggered",
+    "rct_gmx_triggered",
     start_date=timezone.utcnow(),
     render_template_as_native_obj=True,
     is_paused_upon_creation=False,
@@ -202,7 +202,7 @@ def get_execution_date(_, context):
 
 
 with DAG(
-    "gmx_rct_triggerer",
+    "rct_gmx_triggerer",
     start_date=timezone.utcnow(),
     render_template_as_native_obj=True,
     params={
@@ -232,13 +232,13 @@ with DAG(
     )
     run_steps = TriggerDagRunOperator.partial(
         task_id=f"triggering",
-        trigger_dag_id="gmx_rct_triggered",
+        trigger_dag_id="rct_gmx_triggered",
         poke_interval=2,
     ).expand(conf=configs_to_run)
 
     wait_for_data = ExternalTaskOutputSensor(
         task_id="wait_for_data_paths",
-        external_dag_id="gmx_rct_triggered",
+        external_dag_id="rct_gmx_triggered",
         external_task_id="run_iteration.make_dataset_dict",
         execution_date_fn=get_execution_date,
         mode="poke",
@@ -248,7 +248,7 @@ with DAG(
     )
     wait_for_run = ExternalTaskSensor(
         task_id="wait_for_mdrun",
-        external_dag_id="gmx_rct_triggered",
+        external_dag_id="rct_gmx_triggered",
         external_task_group_id="run_iteration",
         execution_date_fn=get_execution_date,
         mode="poke",

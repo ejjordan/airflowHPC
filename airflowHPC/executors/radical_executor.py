@@ -76,7 +76,7 @@ class RadicalExecutor(LocalExecutor):
         #       probably best to run within an allocation...
         pd = rp.PilotDescription({"resource": "local.localhost",
                                   "cores": self.parallelism,
-                                  "runtime": 30})
+                                  "runtime": 1440})
         pilot = self._rct_pmgr.submit_pilots(pd)
         self._rct_tmgr.add_pilots(pilot)
 

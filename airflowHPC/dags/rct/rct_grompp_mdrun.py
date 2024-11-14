@@ -11,7 +11,7 @@ from airflowHPC.operators.resource_rct_operator import ResourceRCTOperatorDatacl
 
 
 with DAG(
-    "grompp_mdrun_rct",
+    "rct_grompp_mdrun",
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
@@ -69,7 +69,11 @@ with DAG(
         args=["grompp"],
         input_files={"-f": mdp, "-c": gro, "-p": top},
         output_files={"-o": "{{ params.output_name }}.tpr"},
-        output_path_parts=["{{ params.output_dir }}", "sim_"],
+        output_path_parts=[
+            "{{ params.output_dir }}",
+            "iteration_{{ params.counter }}",
+            "sim_",
+        ],
         num_simulations="{{ params.num_simulations }}",
     )
 
@@ -88,7 +92,7 @@ with DAG(
     mdrun_input_list = (
         update_gmx_input.override(task_id="mdrun_input_list")
         .partial(
-            args=["mdrun", "-v", "-deffnm", "{{ params.output_name }}", "-ntomp", "2"],
+            args=["mdrun", "-v", "-deffnm", "{{ params.output_name }}"],
             input_files_keys={"-s": "-o"},
             output_files={"-c": "{{ params.output_name }}.gro", "-dhdl": "dhdl.xvg"},
         )
@@ -105,7 +109,7 @@ with DAG(
         gmx_executable="gmx_mpi",
     ).expand(input_data=mdrun_input_list)
     dataset = dataset_from_xcom_dicts.override(task_id="make_dataset")(
-        output_dir="{{ params.output_dir }}",
+        output_dir="{{ params.output_dir }}/iteration_{{ params.counter }}",
         output_fn="{{ params.output_name }}.json",
         list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun', key='return_value')}}",
         dataset_structure="{{ params.output_dataset_structure }}",
