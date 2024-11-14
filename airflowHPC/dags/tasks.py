@@ -155,7 +155,7 @@ def update_gmx_input(
     }
     # Ensure that we got all the requested input files
     assert all([key in input_files.keys() for key in input_files_keys.keys()])
-    # Create the updated GmxapiInputHolder
+    # Create the updated GmxInputHolder
     updated_input_holder = GmxInputHolder(
         args=args,
         input_files=input_files,
@@ -175,7 +175,7 @@ def prepare_gmx_input(
     num_simulations: Union[int, str],
 ):
     """
-    Prepare a list of GmxapiInputHolder objects for running multiple simulations.
+    Prepare a list of GmxInputHolder objects for running multiple simulations.
 
     Parameters
     ----------
