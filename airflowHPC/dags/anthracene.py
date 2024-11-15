@@ -202,8 +202,6 @@ def TI(
 ):
     """
     Perform TI analysis on a list of dhdl files.
-
-    returns max and min uncertainty states and their values, unless the min is the first state.
     """
     import logging, os
     from alchemlyb.parsing.gmx import extract_dHdl
@@ -319,7 +317,7 @@ def TI(
     fit_var = scipy.interpolate.CubicSpline(
         lambda_points, samples_per_point * variances.values[:, 0]
     )
-    logging.info(
+    logging.debug(
         f"variance fitting function values: {fit_var(lambda_states[lambda_states_samples != 0])}"
     )
     # contribution to the uncertainty at each point. This is what we want to see reduced.
@@ -437,7 +435,7 @@ def MBAR(
     logging.info(f"lambda values: {states}")
     state_uncertainties = []
     for i, state in enumerate(states):
-        if state == "1.00":
+        if state == "1.00":  # Don't wrap around
             continue
         if state == states[i + 1]:  # The same state can be sampled multiple times
             continue
@@ -462,6 +460,7 @@ def generate_lambda_states(num_states: int | str):
     The keys are the state index and the values are the lambda value.
     The lambda values are uniformly spaced between 0 and 1, rounded to 2 decimal places.
     """
+    assert 1 <= num_states <= 101
     idx_to_state = {
         str(i): f"{round(i / (num_states - 1), 2):.2f}" for i in range(num_states)
     }
@@ -602,7 +601,7 @@ def get_new_state(
 @task
 def next_step_mdp_options(next_step_info, lambda_states, **context):
     """
-    Remove the state with the lowest uncertainty and add a new state between the states with the highest uncertainty.
+    Prepare the next step mdp options based on the new states.
     """
     import logging
 
