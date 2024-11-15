@@ -31,16 +31,23 @@ def next_step_gro(distance_info):
     distance_info = [info for info in distance_info]
     for info in distance_info:
         logging.info(f"Distance: {info['distance']} in {info['gro']}")
-    min_dist_gro = min(distance_info, key=lambda x: x["distance"])["gro"]
-    max_dist_gro = max(distance_info, key=lambda x: x["distance"])["gro"]
-    return {"min": min_dist_gro, "max": max_dist_gro}
+    min_dist = min(distance_info, key=lambda x: x["distance"])
+    max_dist = max(distance_info, key=lambda x: x["distance"])
+    return {"min": min_dist, "max": max_dist}
 
 
 @task
 def next_step_params(gro, dag_params):
     import os
 
-    gro_path, gro_fn = os.path.split(gro)
+    distance = gro["distance"]
+    if dag_params["best_gro"] is None or distance < dag_params["best_gro"]["distance"]:
+        dag_params["best_gro"] = gro
+        next_gro = gro["gro"]
+    else:
+        next_gro = dag_params["best_gro"]["gro"]
+
+    gro_path, gro_fn = os.path.split(next_gro)
     dag_params["inputs"]["gro"]["directory"] = gro_path
     dag_params["inputs"]["gro"]["filename"] = gro_fn
     dag_params["iteration"] += 1
@@ -74,7 +81,8 @@ with DAG(
             {"nsteps": 5000},
         ],
         "iteration": 1,
-        "max_iterations": 20,
+        "max_iterations": 3,
+        "best_gro": None,
     },
 ) as swarms:
     swarm_params = {
