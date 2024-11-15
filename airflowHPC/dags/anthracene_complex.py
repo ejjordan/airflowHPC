@@ -118,7 +118,7 @@ def add_lambdas_to_dataset(dataset_path: str, keys_list: list):
 
 
 with DAG(
-    dag_id="anthracene",
+    dag_id="anthracene_complex",
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
@@ -582,7 +582,7 @@ def do_MBAR(dhdl, gro, states, output_dir):
 
 
 with DAG(
-    dag_id="anthracene_files",
+    dag_id="anthracene_files_complex",
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
