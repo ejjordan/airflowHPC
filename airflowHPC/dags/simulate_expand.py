@@ -21,8 +21,16 @@ with DAG(
         "inputs": Param(
             {
                 "mdp": {"directory": "mdp", "filename": "npt.json"},
-                "gro": {"directory": "nvt_equil", "filename": "nvt.gro"},
-                "top": {"directory": "prep", "filename": "system_prepared.top"},
+                "gro": {
+                    "directory": "nvt_equil",
+                    "filename": "nvt.gro",
+                    "ref_data": False,
+                },
+                "top": {
+                    "directory": "prep",
+                    "filename": "system_prepared.top",
+                    "ref_data": False,
+                },
             },
             type=["object", "null"],
             title="Inputs list",
@@ -58,12 +66,12 @@ with DAG(
     top = get_file.override(task_id="get_top")(
         input_dir="{{ params.inputs.top.directory }}",
         file_name="{{ params.inputs.top.filename }}",
-        use_ref_data=False,
+        use_ref_data="{{ params.inputs.top.ref_data }}",
     )
     gro = get_file.override(task_id="get_gro")(
         file_name="{{ params.inputs.gro.filename }}",
         input_dir="{{ params.inputs.gro.directory }}",
-        use_ref_data=False,
+        use_ref_data="{{ params.inputs.gro.ref_data }}",
     )
     grompp_input_list = prepare_gmx_input.override(task_id="grompp_input_list")(
         args=["grompp"],
@@ -105,8 +113,8 @@ with DAG(
     mdrun = ResourceGmxOperatorDataclass.partial(
         task_id="mdrun",
         executor_config={
-            "mpi_ranks": 2,
-            "cpus_per_task": 2,
+            "mpi_ranks": 1,
+            "cpus_per_task": 4,
             "gpus": 0,
             "gpu_type": None,
         },
