@@ -46,7 +46,7 @@ dagrun_params = {
     ),
     "mdp_options": [],
     "num_steps": 10000,
-    "output_dir": "anthracene_simple",
+    "output_dir": "anthracene",
     "output_name": "anthra",
     "expected_output": "anthra.json",
     "iteration": 1,
@@ -111,7 +111,7 @@ def get_gro(param_name, input_dir):
 
 
 with DAG(
-    dag_id="anthracene_simple",
+    dag_id="anthracene_simulation",
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
@@ -904,7 +904,7 @@ def next_step(states, output_dir, states_per_step, total_states, nsteps, new_gro
 
 
 with DAG(
-    dag_id="anthracene_files_simple",
+    dag_id="anthracene_runner",
     start_date=timezone.utcnow(),
     catchup=False,
     render_template_as_native_obj=True,
@@ -943,7 +943,7 @@ with DAG(
         input_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}",
         file_name="{{ params.expected_output }}",
         dag_params=new_params,
-        dag_id="anthracene_simple",
+        dag_id="anthracene_simulation",
         display_name="anthracene",
     )
 
@@ -964,7 +964,7 @@ with DAG(
         statement="{{ params.iteration }} >= {{ params.max_iterations }}",
     )
     next_iteration = run_if_false.override(group_id="next_iteration")(
-        dag_id="anthracene_files_simple",
+        dag_id="anthracene_runner",
         dag_params=next_iteration_params,
         truth_value=do_next_iteration,
         wait_for_completion=False,
