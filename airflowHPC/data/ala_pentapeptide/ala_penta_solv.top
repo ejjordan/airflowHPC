@@ -1,22 +1,3 @@
-;
-;	File '/home/joe/experiments/airflow-hpc/executor/setup_single/prep/topol.top' was generated
-;	By user: joe (1000)
-;	On host: paracelsus
-;	At date: Fri Nov 15 21:12:49 2024
-;
-;	This is a standalone topology file
-;
-;	Created by:
-;	                 :-) GROMACS - gmx pdb2gmx, 2024.3-spack (-:
-;	
-;	Executable:   /home/joe/libs/spack/opt/spack/linux-ubuntu23.10-zen4/gcc-13.2.0/gromacs-2024.3-alsek3dxuau2lminma7vdddegygfrzkc/bin/gmx_mpi
-;	Data prefix:  /home/joe/libs/spack/opt/spack/linux-ubuntu23.10-zen4/gcc-13.2.0/gromacs-2024.3-alsek3dxuau2lminma7vdddegygfrzkc
-;	Working dir:  /home/joe/experiments/airflow-hpc/executor/setup_single/prep/gmxapi.commandline.cli0_i0
-;	Command line:
-;	  gmx_mpi pdb2gmx -ff amber99sb-ildn -water tip3p -f /home/joe/dev/airflowHPC/airflowHPC/data/ala_pentapeptide/ala_pentapeptide.pdb -o /home/joe/experiments/airflow-hpc/executor/setup_single/prep/system_initial.gro -p /home/joe/experiments/airflow-hpc/executor/setup_single/prep/topol.top -i /home/joe/experiments/airflow-hpc/executor/setup_single/prep/posre.itp
-;	Force field was read from the standard GROMACS share directory.
-;
-
 ; Include forcefield parameters
 #include "amber99sb-ildn.ff/forcefield.itp"
 
