@@ -33,10 +33,10 @@ with DAG(
                     "filename": "ala_pentapeptide.pdb",
                 }
             },
-            "box_size": 3.2,
+            "box_size": 3.5,
             "force_field": "amber99sb-ildn",
             "water_model": "tip3p",
-            "ion_concentration": 0.15,
+            "ion_concentration": 0,
             "expected_output": "system_prepared",
             "output_dir": "prep",
         },
@@ -46,6 +46,7 @@ with DAG(
             },
             "expected_output": "em",
             "output_dir": "em",
+            "mdp_updates": {},
         },
         "nvt": {
             "inputs": {
@@ -53,6 +54,10 @@ with DAG(
             },
             "expected_output": "nvt",
             "output_dir": "nvt_equil",
+            "mdp_updates": {
+                "include": "-Isetup_single/prep/posre.itp",
+                "define": "-DPOSRES",
+            },
         },
         "npt": {
             "inputs": {
@@ -60,6 +65,10 @@ with DAG(
             },
             "expected_output": "npt",
             "output_dir": "npt_equil",
+            "mdp_updates": {
+                "include": "-Isetup_single/prep/posre.itp",
+                "define": "-DPOSRES",
+            },
         },
         "sim": {
             "inputs": {
@@ -67,6 +76,9 @@ with DAG(
             },
             "expected_output": "sim",
             "output_dir": "sim",
+            "mdp_updates": {
+                "comm-grps": ["Protein", "Non-Protein"],
+            },
         },
     },
 ) as setup_single:
@@ -99,6 +111,7 @@ with DAG(
         },
         "output_dir": "{{ params.output_dir }}/{{ params.minimize.output_dir }}",
         "expected_output": "{{ params.minimize.expected_output }}.gro",
+        "mdp_updates": "{{ params.minimize.mdp_updates }}",
     }
     minimize = run_if_needed.override(group_id="minimize")(
         dag_id="simulate_no_cpt",
@@ -120,6 +133,7 @@ with DAG(
         },
         "output_dir": "{{ params.output_dir }}/{{ params.nvt.output_dir }}",
         "expected_output": "{{ params.nvt.expected_output }}.gro",
+        "mdp_updates": "{{ params.nvt.mdp_updates }}",
     }
     nvt_equil = run_if_needed.override(group_id="nvt_equil")(
         dag_id="simulate_no_cpt", dag_params=nvt_params, dag_display_name="nvt_equil"
@@ -139,6 +153,7 @@ with DAG(
         },
         "output_dir": "{{ params.output_dir }}/{{ params.npt.output_dir }}",
         "expected_output": "{{ params.npt.expected_output }}.gro",
+        "mdp_updates": "{{ params.npt.mdp_updates }}",
     }
     npt_equil_has_run = verify_files.override(task_id="npt_equil_has_run")(
         input_dir="{{ params.output_dir }}/{{ params.npt.output_dir }}",
@@ -169,6 +184,7 @@ with DAG(
         },
         "output_dir": "{{ params.output_dir }}/{{ params.sim.output_dir }}",
         "expected_output": "{{ params.sim.expected_output }}.gro",
+        "mdp_updates": "{{ params.sim.mdp_updates }}",
     }
     sim_has_run = verify_files.override(task_id="sim_has_run")(
         input_dir="{{ params.output_dir }}/{{ params.sim.output_dir }}",
