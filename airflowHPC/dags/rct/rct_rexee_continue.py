@@ -10,7 +10,7 @@ from airflowHPC.dags.tasks import (
     run_if_false,
     json_from_dataset_path,
 )
-from airflowHPC.dags.rct_replex import (
+from airflowHPC.dags.rct.rct_replex import (
     increment_counter,
     prepare_args_for_mdp_functions,
     reduce_dhdl,

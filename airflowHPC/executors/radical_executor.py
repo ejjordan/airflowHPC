@@ -77,8 +77,8 @@ class RadicalExecutor(LocalExecutor):
         pd = rp.PilotDescription({"resource": "local.localhost",
                                   "cores": self.parallelism,
                                   "runtime": 1440})
-        pilot = self._rct_pmgr.submit_pilots(pd)
-        self._rct_tmgr.add_pilots(pilot)
+        self._pilot = self._rct_pmgr.submit_pilots(pd)
+        self._rct_tmgr.add_pilots(self._pilot)
 
         # keep track of used slots
         # NOTE: This considers only single-core tasks which do not use GPUs.
@@ -116,6 +116,15 @@ class RadicalExecutor(LocalExecutor):
         op_id = msg["op_id"]
         td = msg["td"]
         td["metadata"] = {"op_id": op_id}
+
+        # schedule the task and add GMX pinning parameters if needed
+        slots = self._pilot.nodelist.find_slots(rp.RankRequirements(n_cores=1,
+                                                ),
+                                          n_slots=2)
+
+
+
+
         task = self._rct_tmgr.submit_tasks(rp.TaskDescription(td))
         self.log.info("update: %s" % pprint.pformat(task))
         self._rct_pub.put("update", {"op_id": op_id, "task": task.as_dict()})
@@ -126,6 +135,73 @@ class RadicalExecutor(LocalExecutor):
         # )
 
     def trigger_tasks(self, open_slots: int) -> None:
+        """
+        Initiate async execution of the queued tasks, for the tasks which we can
+        place on the pilot resource
+
+        :param open_slots: Number of open slots
+        """
+        sorted_queue = self.order_queued_tasks_by_priority()
+        task_tuples = []
+
+        for _ in range(min((open_slots, len(self.queued_tasks)))):
+            key, (command, priority, queue, ti) = sorted_queue.pop(0)
+
+            # If a task makes it here but is still understood by the executor
+            # to be running, it generally means that the task has been killed
+            # externally and not yet been marked as failed.
+            #
+            # However, when a task is deferred, there is also a possibility of
+            # a race condition where a task might be scheduled again during
+            # trigger processing, even before we are able to register that the
+            # deferred task has completed. In this case and for this reason,
+            # we make a small number of attempts to see if the task has been
+            # removed from the running set in the meantime.
+            if key in self.running:
+                attempt = self.attempts[key]
+                if attempt.can_try_again():
+                    # if it hasn't been much time since first check, let it be checked again next time
+                    self.log.info(
+                        "queued but still running; attempt=%s task=%s",
+                        attempt.total_tries,
+                        key,
+                    )
+                    continue
+                # Otherwise, we give up and remove the task from the queue.
+                self.log.error(
+                    "could not queue task %s (still running after %d attempts)",
+                    key,
+                    attempt.total_tries,
+                )
+                del self.attempts[key]
+                del self.queued_tasks[key]
+            else:
+                try:
+                    if self._free_slots < 1:
+                        self.log.debug(f"No available resources for task: {key}.")
+                        sorted_queue.append(
+                            (key, (command, priority, queue, ti.executor_config))
+                        )
+                        break
+                except:
+                    self.log.error(f"No viable resource assignment for task: {key}.")
+                    del self.queued_tasks[key]
+                    self.change_state(
+                        key=key,
+                        state=TaskInstanceState.FAILED,
+                        info=f"No viable resource assignment for executor_config {ti.executor_config}",
+                    )
+                    break
+
+                if key in self.attempts:
+                    del self.attempts[key]
+                task_tuples.append((key, command, queue, ti))
+
+        if task_tuples:
+            self._process_tasks(task_tuples)
+
+
+    def orig_trigger_tasks(self, open_slots: int) -> None:
         """
         Initiate async execution of the queued tasks, up to the number of available slots.
 

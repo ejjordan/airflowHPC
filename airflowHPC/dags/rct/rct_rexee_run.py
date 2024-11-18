@@ -2,7 +2,7 @@ import os
 from airflow import DAG
 from airflow.utils import timezone
 
-from airflowHPC.dags.rct_replex import read_counter
+from airflowHPC.dags.rct.rct_replex import read_counter
 from airflowHPC.dags.tasks import run_if_false, get_file, evaluate_template_truth
 
 with DAG(

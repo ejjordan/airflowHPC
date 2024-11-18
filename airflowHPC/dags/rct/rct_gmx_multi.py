@@ -6,11 +6,11 @@ from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
 with DAG(
-    "rct_multi",
+    "rct_gmx_multi",
     start_date=timezone.utcnow(),
     catchup=False,
     params={
-        "output_dir": "rct_multi",
+        "output_dir": "rct_gmx_multi",
         "num_simulations": 4,
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "basic_md.json"},
@@ -18,7 +18,7 @@ with DAG(
             "top": {"directory": "ensemble_md", "filename": "sys.top"},
         },
     },
-) as rct_multi:
+) as rct_gmx_multi:
     input_gro = get_file.override(task_id="get_gro")(
         input_dir="{{ params.inputs.gro.directory }}",
         file_name="{{ params.inputs.gro.filename }}",

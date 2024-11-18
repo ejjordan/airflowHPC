@@ -7,7 +7,7 @@ from airflowHPC.dags.tasks import (
     list_from_xcom,
     json_from_dataset_path,
 )
-from airflowHPC.dags.rct_replex import (
+from airflowHPC.dags.rct.rct_replex import (
     prepare_args_for_mdp_functions,
     initialize_MDP,
     reduce_dhdl,
