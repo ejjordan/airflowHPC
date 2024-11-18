@@ -485,7 +485,7 @@ Protein_chain_A     3
 
 ; Include Position restraint file
 #ifdef POSRES
-#include "/home/joe/experiments/airflow-hpc/executor/setup_single/prep/posre.itp"
+#include "posre.itp"
 #endif
 
 ; Include water topology
@@ -508,4 +508,4 @@ Protein in water
 [ molecules ]
 ; Compound        #mols
 Protein_chain_A     1
-SOL              1362
+SOL              1035

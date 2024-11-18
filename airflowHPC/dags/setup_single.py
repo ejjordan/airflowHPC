@@ -33,7 +33,7 @@ with DAG(
                     "filename": "ala_pentapeptide.pdb",
                 }
             },
-            "box_size": 3.5,
+            "box_size": 3.2,
             "force_field": "amber99sb-ildn",
             "water_model": "tip3p",
             "ion_concentration": 0,
