@@ -281,7 +281,7 @@ with DAG(
         "branch_ps_wait_time": 1e9,  # Make sure that the branch does not launch more branches
     }
     separate_branch = run_if_false.override(group_id="separate_branch")(
-        dag_id="gmx_rct_triggerer",
+        dag_id="rct_gmx_triggerer",
         dag_params=separate_branch_params,
         truth_value=do_separate_branch,
         wait_for_completion=False,
@@ -309,7 +309,7 @@ with DAG(
         "branch_ps_wait_time": "{{ params.branch_ps_wait_time }}",
     }
     next_iteration = run_if_false.override(group_id="next_iteration")(
-        dag_id="gmx_rct_triggerer",
+        dag_id="rct_gmx_triggerer",
         dag_params=next_iteration_params,
         truth_value=do_next_iteration,
         wait_for_completion=False,

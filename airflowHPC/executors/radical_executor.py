@@ -74,18 +74,28 @@ class RadicalExecutor(LocalExecutor):
 
         # TODO: how to get pilot size and resource label from application level?
         #       probably best to run within an allocation...
+        with open('/tmp/test.txt', 'w') as f:
+            f.write("RadicalExecutor: %s\n" % os.getcwd())
+            f.flush()
+        n_nodes = os.environ.get("RCT_N_NODES")
         pd = rp.PilotDescription({"resource": "local.localhost",
-                                  "cores": self.parallelism,
+                                  "nodes": int(n_nodes),
                                   "runtime": 1440})
         self._pilot = self._rct_pmgr.submit_pilots(pd)
         self._rct_tmgr.add_pilots(self._pilot)
 
-        # keep track of used slots
-        # NOTE: This considers only single-core tasks which do not use GPUs.
-        #       Otherwise slot counting of this manner does not make much sense,
-        #       really, as a slot may have very different shapes for different
-        #       tasks...
-        self._free_slots = self.parallelism
+        # wait for the pilot to become active (but don't stall on errors)
+        self._pilot.wait(rp.FINAL + [rp.PMGR_ACTIVE])
+        assert self._pilot.state == rp.PMGR_ACTIVE
+
+        # we now have a nodelist and can schedule tasks.  Keep a map of Airflow
+        # task IDs to [rp.TaskDescription. rp.Task] tuples
+        self._tasks = dict()
+
+        # bookkeeping
+        self._free_cores = 0
+        for node in self._pilot.nodelist.nodes:
+            self._free_cores += len(node.cores)
 
         # rct is set up, zmq env is known - start the inherited local executor
         super().start()
@@ -99,12 +109,12 @@ class RadicalExecutor(LocalExecutor):
 
     def _rct_state_cb(self, task, state):
         tid = task.uid
-        op_id = task.metadata["op_id"]
+        op_id = task.metadata["airflow_op_id"]
         self.log.info(f"{tid}: {state}")
         self._rct_pub.put("update", {"op_id": op_id, "task": task.as_dict()})
 
         if state in rp.FINAL:
-            self._free_slots += 1
+            self._free_cores += 1
             # self.change_state(
             #     key=tid,
             #     state=TaskInstanceState.SUCCESS if state == rp.DONE else TaskInstanceState.FAILED,
@@ -114,21 +124,21 @@ class RadicalExecutor(LocalExecutor):
         import pprint
         self.log.info("request: %s" % pprint.pformat(msg))
         op_id = msg["op_id"]
-        td = msg["td"]
-        td["metadata"] = {"op_id": op_id}
 
-        # schedule the task and add GMX pinning parameters if needed
-        slots = self._pilot.nodelist.find_slots(rp.RankRequirements(n_cores=1,
-                                                ),
-                                          n_slots=2)
+        td = rp.TaskDescription(msg["td"])
 
+        if not td.metadata:
+            td.metadata = dict()
+        td.metadata["airflow_op_id"] = op_id
 
+        # gmx shenanigans: if 'gmx_mpi' is set as executable, add core pinning
+        # and gpu binding to the task description
 
+        task = self._rct_tmgr.submit_tasks(td)
 
-        task = self._rct_tmgr.submit_tasks(rp.TaskDescription(td))
         self.log.info("update: %s" % pprint.pformat(task))
         self._rct_pub.put("update", {"op_id": op_id, "task": task.as_dict()})
-        self._free_slots -= 1
+        self._free_cores -= 1
         # self.change_state(
         #     key=task.uid,
         #     state=TaskInstanceState.RUNNING,
@@ -177,7 +187,7 @@ class RadicalExecutor(LocalExecutor):
                 del self.queued_tasks[key]
             else:
                 try:
-                    if self._free_slots < 1:
+                    if self._free_cores < 1:
                         self.log.debug(f"No available resources for task: {key}.")
                         sorted_queue.append(
                             (key, (command, priority, queue, ti.executor_config))
@@ -243,7 +253,7 @@ class RadicalExecutor(LocalExecutor):
                 del self.queued_tasks[key]
             else:
                 try:
-                    if self._free_slots < 1:
+                    if self._free_cores < 1:
                         self.log.debug(f"No available resources for task: {key}.")
                         sorted_queue.append(
                             (key, (command, priority, queue, ti.executor_config))

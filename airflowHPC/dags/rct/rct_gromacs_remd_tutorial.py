@@ -207,7 +207,7 @@ with DAG(
         "expected_output": "em.gro",
     }
     minimize = run_if_needed.override(group_id="minimize")(
-        dag_id="simulate_no_cpt",
+        dag_id="rct_simulate_no_cpt",
         dag_params=minimize_params,
         dag_display_name="minimize",
     )
@@ -228,7 +228,7 @@ with DAG(
         "expected_output": "nvt.gro",
     }
     nvt_equil = run_if_needed.override(group_id="nvt_equil")(
-        dag_id="simulate_no_cpt", dag_params=nvt_params, dag_display_name="nvt_equil"
+        dag_id="rct_simulate_no_cpt", dag_params=nvt_params, dag_display_name="nvt_equil"
     )
 
     npt_params = {
@@ -270,7 +270,7 @@ with DAG(
     )
     trigger_npt_equil = TriggerDagRunOperator(
         task_id="trigger_npt_equil",
-        trigger_dag_id="simulate_expand",
+        trigger_dag_id="rct_simulate_expand",
         poke_interval=2,
         conf=npt_params,
         wait_for_completion=True,
@@ -317,7 +317,7 @@ with DAG(
     )
     simulate = TriggerDagRunOperator(
         task_id=f"trigger_simulate",
-        trigger_dag_id="simulate_multidir",
+        trigger_dag_id="rct_simulate_multidir",
         wait_for_completion=True,
         poke_interval=2,
         trigger_rule="none_failed",

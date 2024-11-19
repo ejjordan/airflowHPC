@@ -63,7 +63,7 @@ with DAG(
         "expected_output": "nvt.gro",
     }
     nvt_equil = run_if_needed.override(group_id="nvt_equil")(
-        dag_id="simulate_no_cpt", dag_params=nvt_params, dag_display_name="nvt_equil"
+        dag_id="rct_simulate_no_cpt", dag_params=nvt_params, dag_display_name="nvt_equil"
     )
 
     npt_params = {
@@ -88,7 +88,7 @@ with DAG(
         mdp_options="{{ params.mdp_options }}",
     )
     npt_equil = run_if_false.override(group_id="npt_equil")(
-        dag_id="simulate_expand",
+        dag_id="rct_simulate_expand",
         dag_params=npt_params,
         truth_value=npt_equil_has_run,
         dag_display_name="npt_equil",
@@ -120,7 +120,7 @@ with DAG(
         mdp_options="{{ params.mdp_options }}",
     )
     simulate = run_if_false.override(group_id="simulate")(
-        dag_id="simulate_multidir",
+        dag_id="rct_simulate_multidir",
         dag_params=sim_params,
         truth_value=sim_has_run,
         dag_display_name="simulate",
