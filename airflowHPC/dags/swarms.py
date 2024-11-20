@@ -1,6 +1,5 @@
 from airflow import DAG, Dataset
 from airflow.decorators import task
-from airflow.utils import timezone
 from airflowHPC.dags.tasks import (
     run_if_false,
     verify_files,
@@ -172,7 +171,7 @@ def add_to_dataset(
 
 with DAG(
     dag_id="swarms",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     params={
@@ -267,3 +266,4 @@ with DAG(
         truth_value=do_next_iteration,
         wait_for_completion=False,
     )
+    add_rama_info >> do_next_iteration >> next_iteration
