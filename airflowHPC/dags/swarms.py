@@ -1,4 +1,4 @@
-from airflow import DAG
+from airflow import DAG, Dataset
 from airflow.decorators import task
 from airflow.utils import timezone
 from airflowHPC.dags.tasks import (
@@ -137,6 +137,39 @@ def next_step_params_rama(rama_output, dag_params):
     return dag_params
 
 
+@task
+def add_to_dataset(
+    output_dir: str, output_fn: str, new_data: dict, new_data_keys: list[str]
+):
+    import os
+    import json
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    out_path = os.path.abspath(output_dir)
+    output_file = os.path.join(out_path, output_fn)
+    if os.path.exists(output_file):
+        with open(output_file, "r") as f:
+            data = json.load(f)
+    else:
+        data = {}
+
+    # Navigate through the nested keys
+    nested_data = data
+    for key in new_data_keys[:-1]:
+        if key not in nested_data:
+            nested_data[key] = {}
+        nested_data = nested_data[key]
+
+    # Assign the new data to the final key
+    nested_data[new_data_keys[-1]] = new_data
+
+    with open(output_file, "w") as f:
+        json.dump(data, f, indent=2, separators=(",", ": "))
+    dataset = Dataset(uri=output_file)
+    return dataset
+
+
 with DAG(
     dag_id="swarms",
     start_date=timezone.utcnow(),
@@ -158,12 +191,12 @@ with DAG(
         },
         "output_dir": "swarms",
         "mdp_options": [
-            {"nsteps": 5000, "nstxout-compressed": 1000},
-            {"nsteps": 5000, "nstxout-compressed": 1000},
-            {"nsteps": 5000, "nstxout-compressed": 1000},
+            {"nsteps": 500, "nstxout-compressed": 100},
+            {"nsteps": 500, "nstxout-compressed": 100},
+            {"nsteps": 500, "nstxout-compressed": 100},
         ],
         "iteration": 1,
-        "max_iterations": 3,
+        "max_iterations": 2,
         "best_gro": None,
     },
 ) as swarms:
@@ -196,12 +229,18 @@ with DAG(
     sim_info = json_from_dataset_path.override(task_id="extract_sim_info")(
         dataset_path="{{ params.output_dir }}/iteration_{{ params.iteration }}/result.json",
     )
-    distances = atoms_distance.expand(inputs=sim_info)
-    run_swarm >> sim_info
+    add_sim_info = add_to_dataset.override(task_id="add_sim_info")(
+        output_dir="{{ params.output_dir }}",
+        output_fn="swarms.json",
+        new_data=sim_info,
+        new_data_keys=["iteration_{{ params.iteration }}", "sims"],
+    )
+    run_swarm >> sim_info >> add_sim_info
 
-    distance_data = distances.map(lambda x: x)
-    next_dist_gro = next_step_gro(distance_data)
-    next_dist_params = next_step_params_dist(next_dist_gro["min"], "{{ params }}")
+    # distances = atoms_distance.expand(inputs=sim_info)
+    # distance_data = distances.map(lambda x: x)
+    # next_dist_gro = next_step_gro(distance_data)
+    # next_dist_params = next_step_params_dist(next_dist_gro["min"], "{{ params }}")
 
     rama = ramachandran_analysis(
         inputs=sim_info,
