@@ -249,6 +249,12 @@ with DAG(
         list_of_points=[[-50, -50]],
     )
     next_rama_params = next_step_params_rama(rama, "{{ params }}")
+    add_rama_info = add_to_dataset.override(task_id="add_rama_info")(
+        output_dir="{{ params.output_dir }}",
+        output_fn="swarms.json",
+        new_data=next_rama_params,
+        new_data_keys=["iteration_{{ params.iteration + 1 }}", "params"],
+    )
 
     do_next_iteration = evaluate_template_truth.override(
         task_id="do_next_iteration", trigger_rule="none_failed_min_one_success"
