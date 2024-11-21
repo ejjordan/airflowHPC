@@ -1,6 +1,7 @@
 from airflow import DAG, Dataset
 from airflow.decorators import task
 from airflow.exceptions import AirflowException
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from airflowHPC.dags.tasks import (
     run_if_false,
@@ -100,8 +101,13 @@ def next_step_gro(distance_info):
 def next_step_params_dist(gro, dag_params):
     import os
 
+    if "best_gro" not in dag_params:
+        dag_params["best_gro"] = {"gro": None, "distance": None}
     distance = gro["distance"]
-    if dag_params["best_gro"] is None or distance < dag_params["best_gro"]["distance"]:
+    if (
+        dag_params["best_gro"]["distance"] is None
+        or distance < dag_params["best_gro"]["distance"]
+    ):
         dag_params["best_gro"] = gro
         next_gro = gro["gro"]
     else:
@@ -115,14 +121,16 @@ def next_step_params_dist(gro, dag_params):
 
 
 @task
-def next_step_params_rama(rama_output, dag_params):
+def next_step_params_rama(rama_output, dag_params, output_dir):
     import os
 
+    if "best_gro" not in dag_params:
+        dag_params["best_gro"] = {"gro": None, "distance": None}
     for point, items in rama_output.items():
         gro = items["fn"]
         distance = items["distance"]
         if (
-            dag_params["best_gro"] is None
+            dag_params["best_gro"]["distance"] is None
             or distance < dag_params["best_gro"]["distance"]
         ):
             dag_params["best_gro"] = {"gro": gro, "distance": distance}
@@ -133,7 +141,8 @@ def next_step_params_rama(rama_output, dag_params):
         dag_params["inputs"]["gro"]["directory"] = gro_path
         dag_params["inputs"]["gro"]["filename"] = gro_fn
         dag_params["inputs"]["gro"]["ref_data"] = False
-        dag_params["iteration"] += 1
+    dag_params["iteration"] += 1
+    dag_params["output_dir"] = output_dir
     return dag_params
 
 
@@ -170,8 +179,8 @@ def add_to_dataset(
     return dataset
 
 
-@task(multiple_outputs=True)
-def iterations_completed(dataset_dict, max_iterations, this_iteration):
+@task
+def iterations_completed(dataset_dict, max_iterations):
     import logging
     import os
 
@@ -208,10 +217,7 @@ def iterations_completed(dataset_dict, max_iterations, this_iteration):
             logging.info(f"No data for iteration {iteration}")
             break
 
-    return {
-        "highest_completed_iteration": highest_completed_iteration,
-        "this_iteration_done": this_iteration <= highest_completed_iteration,
-    }
+    return highest_completed_iteration
 
 
 @task(multiple_outputs=True)
@@ -278,36 +284,18 @@ with DAG(
             {"nsteps": 500, "nstxout-compressed": 100},
             {"nsteps": 500, "nstxout-compressed": 100},
         ],
-        "iteration": 1,
+        "expected_output": "result.gro",
         "max_iterations": 2,
-        "best_gro": None,
     },
 ) as swarms:
-    swarm_params = {
-        "inputs": {
-            "mdp": "{{ params.inputs.mdp }}",
-            "gro": "{{ params.inputs.gro }}",
-            "top": "{{ params.inputs.top }}",
-        },
-        "mdp_options": "{{ params.mdp_options }}",
-        "output_dir": "{{ params.output_dir }}/iteration_{{ params.iteration }}",
-        "expected_output": "result.gro",
-        "output_dataset_structure": {
-            "simulation_id": "simulation_id",
-            "gro": "-c",
-            "tpr": "-s",
-            "xtc": "-x",
-        },
-    }
     prev_results = json_from_dataset_path.override(task_id="get_iteration_params")(
         dataset_path="{{ params.output_dir }}/swarms.json", allow_missing=True
     )
     num_completed_iters = iterations_completed(
-        prev_results, "{{ params.max_iterations }}", "{{ params.iteration }}"
+        prev_results, "{{ params.max_iterations }}"
     )
     this_iter_params = iteration_params(
-        completed_iterations=num_completed_iters["highest_completed_iteration"],
-        previous_results=prev_results,
+        completed_iterations=num_completed_iters, previous_results=prev_results
     )
     add_first_params = add_to_dataset.override(task_id="add_first_params")(
         output_dir="{{ params.output_dir }}",
@@ -319,23 +307,32 @@ with DAG(
         this_iter_params["is_first_iteration"]
     )
     do_first_params_add >> add_first_params
-
-    run_swarm = run_if_false.override(group_id="run_swarm")(
-        dag_id="simulate_expand",
-        dag_params=swarm_params,
-        truth_value=num_completed_iters["this_iteration_done"],
-        dag_display_name="run_swarm",
+    do_this_iteration = short_circuit.override(task_id="skip_this_iteration")(
+        this_iter_params["trigger_this_iteration"]
     )
+    trigger_run_swarm = TriggerDagRunOperator(
+        task_id=f"trigger_run_swarm",
+        trigger_dag_id="simulate_expand",
+        wait_for_completion=True,
+        poke_interval=2,
+        trigger_rule="none_failed",
+        conf=this_iter_params["params"],
+    )
+    do_this_iteration >> trigger_run_swarm
+
     sim_info = json_from_dataset_path.override(task_id="extract_sim_info")(
-        dataset_path="{{ params.output_dir }}/iteration_{{ params.iteration }}/result.json",
+        dataset_path="{{ task_instance.xcom_pull(task_ids='iteration_params', key='output_dir') }}/result.json",
     )
     add_sim_info = add_to_dataset.override(task_id="add_sim_info")(
         output_dir="{{ params.output_dir }}",
         output_fn="swarms.json",
         new_data=sim_info,
-        new_data_keys=["iteration_{{ params.iteration }}", "sims"],
+        new_data_keys=[
+            "iteration_{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration') }}",
+            "sims",
+        ],
     )
-    run_swarm >> sim_info >> add_sim_info
+    trigger_run_swarm >> sim_info
 
     # distances = atoms_distance.expand(inputs=sim_info)
     # distance_data = distances.map(lambda x: x)
@@ -345,21 +342,26 @@ with DAG(
     rama = ramachandran_analysis(
         inputs=sim_info,
         resnums="1-5",
-        output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}",
+        output_dir=this_iter_params["output_dir"],
         list_of_points=[[-50, -50]],
     )
-    next_rama_params = next_step_params_rama(rama, "{{ params }}")
+    next_rama_params = next_step_params_rama(
+        rama, this_iter_params["params"], "{{ params.output_dir }}"
+    )
     add_rama_info = add_to_dataset.override(task_id="add_rama_info")(
         output_dir="{{ params.output_dir }}",
         output_fn="swarms.json",
         new_data=next_rama_params,
-        new_data_keys=["iteration_{{ params.iteration + 1 }}", "params"],
+        new_data_keys=[
+            "iteration_{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration')  + 1 }}",
+            "params",
+        ],
     )
 
     do_next_iteration = evaluate_template_truth.override(
         task_id="do_next_iteration", trigger_rule="none_failed_min_one_success"
     )(
-        statement="{{ params.iteration }} >= {{ params.max_iterations }}",
+        statement="{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration') }} >= {{ params.max_iterations }}",
     )
     next_iteration = run_if_false.override(group_id="next_iteration")(
         dag_id="swarms",
