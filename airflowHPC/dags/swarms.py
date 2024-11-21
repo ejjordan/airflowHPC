@@ -1,8 +1,9 @@
 from airflow import DAG, Dataset
 from airflow.decorators import task
+from airflow.exceptions import AirflowException
+
 from airflowHPC.dags.tasks import (
     run_if_false,
-    verify_files,
     json_from_dataset_path,
     evaluate_template_truth,
 )
@@ -169,6 +170,50 @@ def add_to_dataset(
     return dataset
 
 
+@task(multiple_outputs=True)
+def iterations_completed(dataset_dict, max_iterations, this_iteration):
+    import logging
+    import os
+
+    highest_completed_iteration = 0
+    for iteration in range(1, max_iterations + 1):
+        iteration_name = f"iteration_{iteration}"
+        if iteration_name in dataset_dict:
+            iteration_data = dataset_dict[iteration_name]
+            logging.info(f"iteration_data: {iteration_data}")
+            if "sims" in iteration_data:
+                sims = iteration_data["sims"]
+                for sim in sims:
+                    if "gro" in sim:
+                        if "simulation_id" not in sim:
+                            logging.error(f"No simulation_id in {sim}.")
+                            raise AirflowException(f"No simulation_id in {sim}.")
+                        if not os.path.exists(sim["gro"]):
+                            logging.error(f"Missing gro file: {sim['gro']}")
+                            raise AirflowException(f"File {sim['gro']} not found.")
+                        logging.info(
+                            f"Iteration {iteration}, simulation {sim['simulation_id']} has gro file."
+                        )
+                    else:
+                        logging.info(
+                            f"No gro file in iteration {iteration}, simulation {sim['simulation_id']}"
+                        )
+                        break
+                highest_completed_iteration = iteration
+                logging.info(f"Iteration {iteration} has all gro files.")
+            else:
+                logging.info(f"No sims in iteration {iteration}")
+                break
+        else:
+            logging.info(f"No data for iteration {iteration}")
+            break
+
+    return {
+        "highest_completed_iteration": highest_completed_iteration,
+        "this_iteration_done": this_iteration <= highest_completed_iteration,
+    }
+
+
 with DAG(
     dag_id="swarms",
     schedule=None,
@@ -209,20 +254,22 @@ with DAG(
         "output_dir": "{{ params.output_dir }}/iteration_{{ params.iteration }}",
         "expected_output": "result.gro",
         "output_dataset_structure": {
+            "simulation_id": "simulation_id",
             "gro": "-c",
             "tpr": "-s",
             "xtc": "-x",
         },
     }
-    swarm_has_run = verify_files.override(task_id="swarm_has_run")(
-        input_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}",
-        filename="result.gro",
-        mdp_options="{{ params.mdp_options }}",
+    prev_results = json_from_dataset_path.override(task_id="get_iteration_params")(
+        dataset_path="{{ params.output_dir }}/swarms.json", allow_missing=True
+    )
+    num_completed_iters = iterations_completed(
+        prev_results, "{{ params.max_iterations }}", "{{ params.iteration }}"
     )
     run_swarm = run_if_false.override(group_id="run_swarm")(
         dag_id="simulate_expand",
         dag_params=swarm_params,
-        truth_value=swarm_has_run,
+        truth_value=num_completed_iters["this_iteration_done"],
         dag_display_name="run_swarm",
     )
     sim_info = json_from_dataset_path.override(task_id="extract_sim_info")(

@@ -1,5 +1,6 @@
 from airflow import Dataset
 from airflow.decorators import task, task_group
+from airflow.exceptions import AirflowSkipException, AirflowException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.operators.empty import EmptyOperator
 from dataclasses import dataclass
@@ -404,9 +405,16 @@ def dict_from_xcom_dicts(list_of_dicts, dict_structure):
 
 
 @task(trigger_rule="none_failed")
-def json_from_dataset_path(dataset_path: str, key: str = None):
-    import json
+def json_from_dataset_path(
+    dataset_path: str, key: str = None, allow_missing: bool = False
+):
+    import json, os
 
+    if not os.path.exists(dataset_path):
+        if allow_missing:
+            return {}
+        else:
+            raise AirflowException(f"Dataset path {dataset_path} does not exist")
     with open(dataset_path, "r") as f:
         data = json.load(f)
     if not key:
