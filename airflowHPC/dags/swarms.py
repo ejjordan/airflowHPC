@@ -214,6 +214,45 @@ def iterations_completed(dataset_dict, max_iterations, this_iteration):
     }
 
 
+@task(multiple_outputs=True)
+def iteration_params(completed_iterations, previous_results, **context):
+    import logging
+
+    iteration_to_run = completed_iterations + 1
+    iteration_to_run_name = f"iteration_{iteration_to_run}"
+    if iteration_to_run_name in previous_results:
+        iteration_data = previous_results[iteration_to_run_name]
+        if "params" in iteration_data:
+            dag_params = iteration_data["params"]
+            dag_params["max_iterations"] = context["params"]["max_iterations"]
+        else:
+            logging.error(f"No params in {iteration_to_run_name}")
+            raise AirflowException(f"No params in {iteration_to_run_name}")
+    else:
+        dag_params = context["params"]
+        dag_params["best_gro"] = {"gro": None, "distance": None}
+    dag_params["iteration"] = iteration_to_run
+    dag_params["output_dir"] = f"{dag_params['output_dir']}/{iteration_to_run_name}"
+    dag_params["output_dataset_structure"] = {
+        "simulation_id": "simulation_id",
+        "gro": "-c",
+        "tpr": "-s",
+        "xtc": "-x",
+    }
+    return {
+        "params": dag_params,
+        "iteration": iteration_to_run,
+        "is_first_iteration": iteration_to_run == 1,
+        "trigger_this_iteration": iteration_to_run <= dag_params["max_iterations"],
+        "output_dir": dag_params["output_dir"],
+    }
+
+
+@task.short_circuit
+def short_circuit(condition: bool):
+    return condition
+
+
 with DAG(
     dag_id="swarms",
     schedule=None,
@@ -266,6 +305,21 @@ with DAG(
     num_completed_iters = iterations_completed(
         prev_results, "{{ params.max_iterations }}", "{{ params.iteration }}"
     )
+    this_iter_params = iteration_params(
+        completed_iterations=num_completed_iters["highest_completed_iteration"],
+        previous_results=prev_results,
+    )
+    add_first_params = add_to_dataset.override(task_id="add_first_params")(
+        output_dir="{{ params.output_dir }}",
+        output_fn="swarms.json",
+        new_data=this_iter_params["params"],
+        new_data_keys=["iteration_1", "params"],
+    )
+    do_first_params_add = short_circuit.override(task_id="skip_add_first_params")(
+        this_iter_params["is_first_iteration"]
+    )
+    do_first_params_add >> add_first_params
+
     run_swarm = run_if_false.override(group_id="run_swarm")(
         dag_id="simulate_expand",
         dag_params=swarm_params,
