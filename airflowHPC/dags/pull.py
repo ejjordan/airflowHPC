@@ -99,23 +99,8 @@ def mdp_update_params(
     return mdp_updates
 
 
-@task(multiple_outputs=True)
-def trajectory_dihedral(tpr, xtc, output_dir, display=False):
-    import logging
-    from MDAnalysis import Universe
-    from MDAnalysis.analysis.dihedrals import Ramachandran
+def plot_dihedrals(phi_psi_angles, output_dir):
     import matplotlib.pyplot as plt
-
-    traj_means = []
-    u = Universe(tpr, xtc)
-    protein = u.select_atoms("protein")
-    rama = Ramachandran(protein).run()
-    phi_psi_angles = rama.results.angles
-    for i, frame in enumerate(phi_psi_angles):
-        means = frame.mean(axis=0)
-        logging.info(f"Frame {i} Phi/Psi angle means: {means}")
-        logging.info(f"Frame {i} Phi/Psi angles: {frame}")
-        traj_means.append(means.tolist())
 
     # Plot phi/psi angles as a time series
     fig, ax = plt.subplots(nrows=6, ncols=2)
@@ -134,10 +119,45 @@ def trajectory_dihedral(tpr, xtc, output_dir, display=False):
             ax[i + 1, j].axhline(y=-70, color="r", linestyle="--")
     fig.suptitle("Phi/Psi angles")
     plt.savefig(f"{output_dir}/phi_psi_angles.png")
-    if display:
-        plt.show()
     plt.close()
-    return {"means": traj_means}
+
+
+@task(multiple_outputs=True)
+def trajectory_dihedral(tpr, xtc, output_dir, phi_angle, psi_angle, plot=True):
+    import logging
+    from MDAnalysis import Universe
+    from MDAnalysis.analysis.dihedrals import Ramachandran
+    from math import dist
+
+    traj_means = []
+    distances = []
+    u = Universe(tpr, xtc)
+    protein = u.select_atoms("protein")
+    rama = Ramachandran(protein).run()
+    phi_psi_angles = rama.results.angles
+    for i, frame in enumerate(phi_psi_angles):
+        means = frame.mean(axis=0)
+        distance = dist(means, [float(phi_angle), float(psi_angle)])
+        logging.info(
+            f"Frame {i} Phi/Psi angle means: {means} is {distance} from target [{phi_angle}, {psi_angle}]"
+        )
+        logging.info(f"Frame {i} Phi/Psi angles: {frame}")
+        traj_means.append(means.tolist())
+        distances.append(distance)
+
+    if plot:
+        plot_dihedrals(phi_psi_angles, output_dir)
+
+    # Get frame closest to target angles
+    min_dist_idx = distances.index(min(distances))
+    u.trajectory[min_dist_idx]
+    output_frame = f"{output_dir}/closest_frame.gro"
+    u.atoms.write(output_frame)
+
+    return {
+        "closest_frame": output_frame,
+        "closest_frame_means": traj_means[min_dist_idx],
+    }
 
 
 with DAG(
@@ -161,8 +181,10 @@ with DAG(
         "output_fn": "result",
         "expected_output": "dihedrals.json",
         "index_fn": "dihedrals.ndx",
-        "force_constant": 500,
-        "mdp_updates": {"nsteps": 10000, "nstxout_compressed": 1000, "dt": 0.001},
+        "force_constant": 600,
+        "mdp_updates": {"nsteps": 5000, "nstxout_compressed": 1000, "dt": 0.001},
+        "phi_angle": -70,
+        "psi_angle": -70,
     },
 ) as dag:
     input_gro = get_file.override(task_id="get_gro")(
@@ -178,8 +200,8 @@ with DAG(
     mdp_updates = mdp_update_params.override(task_id="initial_mdp_updates")(
         dih_ndx,
         force_constant="{{ params.force_constant }}",
-        phi_angle=-70,
-        psi_angle=-70,
+        phi_angle="{{ params.phi_angle }}",
+        psi_angle="{{ params.psi_angle }}",
         extra_updates="{{ params.mdp_updates }}",
     )
     input_top = get_file.override(task_id="get_top")(
@@ -236,6 +258,8 @@ with DAG(
         tpr="{{ ti.xcom_pull(task_ids='grompp')['-o'] }}",
         xtc="{{ ti.xcom_pull(task_ids='mdrun')['-x'] }}",
         output_dir="{{ params.output_dir }}/{{ params.force_constant }}",
+        phi_angle="{{ params.phi_angle }}",
+        psi_angle="{{ params.psi_angle }}",
     )
     grompp >> mdrun >> traj_dihedrals
 
@@ -246,7 +270,8 @@ with DAG(
             "gro": "{{ ti.xcom_pull(task_ids='mdrun')['-c'] }}",
             "xtc": "{{ ti.xcom_pull(task_ids='mdrun')['-x'] }}",
             "tpr": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}",
-            "means": traj_dihedrals["means"],
+            "next_gro": traj_dihedrals["closest_frame"],
+            "next_gro_means": traj_dihedrals["closest_frame_means"],
         },
         new_data_keys=["{{ params.force_constant }}"],
     )
