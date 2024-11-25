@@ -1,5 +1,8 @@
 from airflow import DAG
-from airflowHPC.dags.tasks import get_file
+from airflowHPC.dags.tasks import (
+    get_file,
+    add_to_dataset,
+)
 from airflowHPC.operators import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflow.decorators import task
@@ -96,29 +99,14 @@ def mdp_update_params(
     return mdp_updates
 
 
-@task
-def calculate_dihedrals(init_gro, final_gro):
-    import logging
-    from MDAnalysis import Universe
-    from MDAnalysis.analysis.dihedrals import Ramachandran
-
-    for gro, title in [(init_gro, "Initial"), (final_gro, "Final")]:
-        u = Universe(gro)
-        protein = u.select_atoms("protein")
-        rama = Ramachandran(protein).run()
-        phi_psi_angles = rama.results.angles
-        means = phi_psi_angles.mean(axis=1)
-        logging.info(f"{title} Phi/Psi angle means: {means}")
-        logging.info(f"{title} Phi/Psi angles: {phi_psi_angles}")
-
-
-@task
-def trajectory_dihedral(tpr, xtc, output_dir):
+@task(multiple_outputs=True)
+def trajectory_dihedral(tpr, xtc, output_dir, display=False):
     import logging
     from MDAnalysis import Universe
     from MDAnalysis.analysis.dihedrals import Ramachandran
     import matplotlib.pyplot as plt
 
+    traj_means = []
     u = Universe(tpr, xtc)
     protein = u.select_atoms("protein")
     rama = Ramachandran(protein).run()
@@ -127,6 +115,7 @@ def trajectory_dihedral(tpr, xtc, output_dir):
         means = frame.mean(axis=0)
         logging.info(f"Frame {i} Phi/Psi angle means: {means}")
         logging.info(f"Frame {i} Phi/Psi angles: {frame}")
+        traj_means.append(means.tolist())
 
     # Plot phi/psi angles as a time series
     fig, ax = plt.subplots(nrows=6, ncols=2)
@@ -145,8 +134,10 @@ def trajectory_dihedral(tpr, xtc, output_dir):
             ax[i + 1, j].axhline(y=-70, color="r", linestyle="--")
     fig.suptitle("Phi/Psi angles")
     plt.savefig(f"{output_dir}/phi_psi_angles.png")
-    plt.show()
+    if display:
+        plt.show()
     plt.close()
+    return {"means": traj_means}
 
 
 with DAG(
@@ -168,6 +159,7 @@ with DAG(
         },
         "output_dir": "pulling",
         "output_fn": "result",
+        "expected_output": "dihedrals.json",
         "index_fn": "dihedrals.ndx",
         "force_constant": 500,
         "mdp_updates": {"nsteps": 10000, "nstxout_compressed": 1000, "dt": 0.001},
@@ -202,8 +194,7 @@ with DAG(
         mdp_json_file_path=input_mdp,
         update_dict=mdp_updates,
     )
-
-    grompp_result = ResourceGmxOperator(
+    grompp = ResourceGmxOperator(
         task_id="grompp",
         executor_config={
             "mpi_ranks": 1,
@@ -223,7 +214,7 @@ with DAG(
         output_dir="{{ params.output_dir }}/{{ params.force_constant }}",
     )
 
-    mdrun_result = ResourceGmxOperator(
+    mdrun = ResourceGmxOperator(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 1,
@@ -240,13 +231,23 @@ with DAG(
         },
         output_dir="{{ params.output_dir }}/{{ params.force_constant }}",
     )
-    final_dihedrals = calculate_dihedrals.override(task_id="dihedrals_values")(
-        init_gro="{{ ti.xcom_pull(task_ids='get_gro') }}",
-        final_gro="{{ ti.xcom_pull(task_ids='mdrun')['-c'] }}",
-    )
+
     traj_dihedrals = trajectory_dihedral.override(task_id="trajectory_dihedrals")(
         tpr="{{ ti.xcom_pull(task_ids='grompp')['-o'] }}",
         xtc="{{ ti.xcom_pull(task_ids='mdrun')['-x'] }}",
         output_dir="{{ params.output_dir }}/{{ params.force_constant }}",
     )
-    grompp_result >> mdrun_result >> [final_dihedrals, traj_dihedrals]
+    grompp >> mdrun >> traj_dihedrals
+
+    add_sim_info = add_to_dataset.override(task_id="add_sim_info")(
+        output_dir="{{ params.output_dir }}",
+        output_fn="{{ params.expected_output }}",
+        new_data={
+            "gro": "{{ ti.xcom_pull(task_ids='mdrun')['-c'] }}",
+            "xtc": "{{ ti.xcom_pull(task_ids='mdrun')['-x'] }}",
+            "tpr": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}",
+            "means": traj_dihedrals["means"],
+        },
+        new_data_keys=["{{ params.force_constant }}"],
+    )
+    mdrun >> add_sim_info
