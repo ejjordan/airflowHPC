@@ -181,10 +181,10 @@ with DAG(
         "output_fn": "result",
         "expected_output": "dihedrals.json",
         "index_fn": "dihedrals.ndx",
-        "force_constant": 600,
+        "force_constant": 500,
         "mdp_updates": {"nsteps": 5000, "nstxout_compressed": 1000, "dt": 0.001},
-        "phi_angle": -70,
-        "psi_angle": -70,
+        "phi_angle": -50,
+        "psi_angle": -50,
     },
 ) as dag:
     input_gro = get_file.override(task_id="get_gro")(
