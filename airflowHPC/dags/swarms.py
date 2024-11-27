@@ -327,8 +327,6 @@ def compute_drift(phi_psi, sim_info, pull_info):
     initial_point = pull_info["next_gro_means"]
     logging.info(f"initial_point: {initial_point}")
     last_frames = []
-    last_frames_diff_init = []
-    last_frames_diff_first = []
     for sim_data in sim_info:
         tpr = sim_data["tpr"]
         xtc = sim_data["xtc"]
@@ -339,140 +337,25 @@ def compute_drift(phi_psi, sim_info, pull_info):
         f_mean = np.mean(first, axis=0)
         f_stdev = np.std(first, axis=0)
         logging.info(
-            f"first mean: {np.round(f_mean, 4)}, first stdev: {np.round(f_stdev, 4)}"
+            f"frame first mean: {np.round(f_mean, 4)}, first stdev: {np.round(f_stdev, 4)}"
         )
         last = rama.results.angles[-1]
         l_mean = np.mean(last, axis=0)
         l_stdev = np.std(last, axis=0)
         logging.info(
-            f"last mean: {np.round(l_mean, 4)}, last stdev: {np.round(l_stdev, 4)}"
+            f"frame last mean: {np.round(l_mean, 4)}, last stdev: {np.round(l_stdev, 4)}"
         )
         last_frames.append(rama.results.angles[-1])
-        last_frames_diff_init.append(rama.results.angles[-1] - initial_point)
-        last_frames_diff_first.append(rama.results.angles[-1] - f_mean)
 
     last = np.concatenate(last_frames, axis=0)
     last_mean = last.mean(axis=0)
     last_stdev = last.std(axis=0)
-    logging.info(f"last_mean: {last_mean}, last_stdev: {last_stdev}")
-
-    last_diff_init = np.concatenate(last_frames_diff_init, axis=0)
-    last_diff_mean_init = last_diff_init.mean(axis=0)
-    last_diff_stdev_init = last_diff_init.std(axis=0)
-    logging.info(
-        f"last-init mean: {last_diff_mean_init}, last-init stdev: {last_diff_stdev_init}"
-    )
-
-    last_diff_first = np.concatenate(last_frames_diff_first, axis=0)
-    last_diff_mean_first = last_diff_first.mean(axis=0)
-    last_diff_stdev_first = last_diff_first.std(axis=0)
-    logging.info(
-        f"last-first mean: {last_diff_mean_first}, last-first stdev: {last_diff_stdev_first}"
-    )
+    logging.info(f"cumulative last mean: {last_mean}, last stdev: {last_stdev}")
 
     return {
         "last_point": last_mean.tolist(),
-        "last_diff_init": last_diff_mean_init.tolist(),
-        "last_diff_first": last_diff_mean_first.tolist(),
         "phi_psi": phi_psi,
     }
-
-
-"""
-@task(multiple_outputs=True)
-def compute_drift(phi_psi, sim_info, pull_info):
-    import logging
-    from MDAnalysis import Universe
-    from MDAnalysis.analysis.dihedrals import Ramachandran
-    import numpy as np
-
-    # MDAnalysis is too verbose
-    logging.getLogger("MDAnalysis").setLevel(logging.WARNING)
-
-    logging.info(f"phi_psi: {phi_psi}")
-    logging.info(f"sim_info: {sim_info}")
-    logging.info(f"pull_info: {pull_info}")
-
-    ideal_point = phi_psi
-    actual_point = pull_info["next_gro_means"]
-    # idrifts = []
-    # adrifts = []
-    # swarm_means = []
-    # swarm_stdevs = []
-    frames = []
-    last_frames = []
-    for sim_data in sim_info:
-        tpr = sim_data["tpr"]
-        xtc = sim_data["xtc"]
-        u = Universe(tpr, xtc)
-        selected_residues = u.select_atoms("resid 1-5")
-        rama = Ramachandran(selected_residues).run()
-        frames.append(rama.results.angles)
-        last_frames.append(rama.results.angles[-1])
-        frames_mean = np.mean(rama.results.angles.mean(axis=1), axis=0)
-        frames_stdev = np.std(rama.results.angles.mean(axis=1), axis=0)
-        logging.info(f"frames_mean: {frames_mean}")
-        logging.info(f"frames_stdev: {frames_stdev}")
-        # swarm_means.append(frames_mean)
-        # swarm_stdevs.append(frames_stdev)
-
-        # ideal_drift = frames_mean - ideal_point
-        # actual_drift = frames_mean - actual_point
-        # logging.info(f"ideal_drift: {ideal_drift}")
-        # logging.info(f"actual_drift: {actual_drift}")
-        # idrifts.append(ideal_drift)
-        # adrifts.append(actual_drift)
-
-    rng = np.random.default_rng()
-    weight = rng.random()
-    logging.info(f"weight: {weight}")
-
-    all_frames = np.concatenate(frames, axis=0)
-    all_means = np.mean(all_frames.mean(axis=0), axis=0)
-    all_stdevs = np.std(all_frames.std(axis=0), axis=0)
-    logging.info(f"cumulative mean: {all_means}")
-    logging.info(f"cumulative stdev: {all_stdevs}")
-    new_point = all_means + weight * all_stdevs
-    logging.info(f"new_point: {new_point}")
-
-    all_frames_actual = all_frames - actual_point
-    all_means_actual = np.mean(all_frames_actual.mean(axis=0), axis=0)
-    # all_stdevs_actual = np.std(all_frames_actual.mean(axis=1), axis=0)
-    logging.info(f"cumulative mean actual: {all_means_actual}")
-    # logging.info(f"cumulative stdev actual: {all_stdevs_actual}")
-    new_actual_point = actual_point + all_means_actual + weight * all_stdevs
-    logging.info(f"new_actual_point: {new_actual_point}")
-
-    all_frames_ideal = all_frames - ideal_point
-    all_means_ideal = np.mean(all_frames_ideal.mean(axis=0), axis=0)
-    # all_stdevs_ideal = np.std(all_frames_ideal.mean(axis=1), axis=0)
-    logging.info(f"cumulative mean ideal: {all_means_ideal}")
-    # logging.info(f"cumulative stdev ideal: {all_stdevs_ideal}")
-    new_ideal_point = ideal_point + all_means_ideal + weight * all_stdevs
-    logging.info(f"new_ideal_point: {new_ideal_point}")
-
-    last_frames_cat = np.concatenate(last_frames, axis=0)
-    last_means = last_frames_cat.mean(axis=0)
-    last_stdevs = last_frames_cat.std(axis=0)
-    logging.info(f"last cumulative mean: {last_means}")
-    logging.info(f"last cumulative stdev: {last_stdevs}")
-    last_point = last_means + weight * last_stdevs
-    logging.info(f"last_point: {last_point}")
-
-    return {
-        "new_point": new_point.tolist(),
-        "ideal_point": new_ideal_point.tolist(),
-        "actual_point": new_actual_point.tolist(),
-        "last_point": last_point.tolist(),
-        "phi_psi": phi_psi,
-    }
-
-    # total_idrift = np_mean(idrifts, axis=0)
-    # total_adrift = np_mean(adrifts, axis=0)
-    # logging.info(f"total_idrift: {total_idrift}")
-    # logging.info(f"total_adrift: {total_adrift}")
-    # return {"ideal_drift": total_idrift.tolist(), "actual_drift": total_adrift.tolist(), "phi_psi": phi_psi}
-"""
 
 
 @task_group
@@ -540,29 +423,6 @@ def step(
     drift = compute_drift(phi_psi, sim_info, pull_info)
     trigger_run_swarm >> sim_info >> add_sim_info
 
-    """
-    rama = ramachandran_analysis(
-        inputs=sim_info,
-        resnums="1-5",
-        output_dir=next_params["output_dir"],
-        phi_psi_point=phi_psi,
-    )
-    next_rama_params = next_step_params_rama(
-        rama, next_params["params"], "{{ params.output_dir }}"
-    )
-    add_rama_info = add_to_dataset.override(task_id="add_rama_info")(
-        output_dir="{{ params.output_dir }}",
-        output_fn="swarms.json",
-        new_data=next_rama_params,
-        new_data_keys=[
-            "iteration_{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration')  + 1 }}",
-            "params",
-        ],
-    )
-    rama >> next_rama_params >> add_rama_info
-
-    return next_rama_params
-    """
     return drift, add_sim_info
 
 
@@ -648,21 +508,6 @@ with DAG(
     # distance_data = distances.map(lambda x: x)
     # next_dist_gro = next_step_gro(distance_data)
     # next_dist_params = next_step_params_dist(next_dist_gro["min"], "{{ params }}")
-
-    """
-    next_rama_params = next_step_params_rama(
-        rama, this_iter_params["params"], "{{ params.output_dir }}"
-    )
-    add_rama_info = add_to_dataset.override(task_id="add_rama_info")(
-        output_dir="{{ params.output_dir }}",
-        output_fn="swarms.json",
-        new_data=next_rama_params,
-        new_data_keys=[
-            "iteration_{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration')  + 1 }}",
-            "params",
-        ],
-    )
-    """
 
     """
     do_next_iteration = evaluate_template_truth.override(
