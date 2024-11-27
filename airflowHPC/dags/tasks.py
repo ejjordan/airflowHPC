@@ -420,7 +420,10 @@ def json_from_dataset_path(
     if not key:
         return data
     else:
-        return [d[key] for d in data]
+        if len(data) == 1:
+            return data[str(key)]
+        else:
+            return [d[key] for d in data]
 
 
 @task

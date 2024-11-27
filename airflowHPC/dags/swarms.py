@@ -1,5 +1,5 @@
 from airflow import DAG
-from airflow.decorators import task
+from airflow.decorators import task, task_group
 from airflow.exceptions import AirflowException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
@@ -8,6 +8,7 @@ from airflowHPC.dags.tasks import (
     json_from_dataset_path,
     evaluate_template_truth,
     add_to_dataset,
+    xcom_lookup,
 )
 
 
@@ -31,9 +32,7 @@ def atoms_distance(
 
 # From "Coarse Master Equations for Peptide Folding Dynamics" J. Phys. Chem. B, 2008, 112 (19)
 @task(trigger_rule="none_failed", multiple_outputs=True)
-def ramachandran_analysis(
-    inputs, resnums, output_dir, list_of_points=[[-50, -50], [120, -70]]
-):
+def ramachandran_analysis(inputs, resnums, output_dir, phi_psi_point=[-50, -50]):
     import logging
     from math import dist
     from MDAnalysis import Universe
@@ -55,24 +54,24 @@ def ramachandran_analysis(
         )
 
     best_frames = {}
-    for point in list_of_points:
-        str_point = str(point)
-        best_frames[str_point] = {}
-        for frame in frames_means:
-            nearest_frame = min(frame["means"], key=lambda x: dist(x, point))
-            nearest_frame_idx = frame["means"].index(nearest_frame)
-            if best_frames[str_point] == {} or dist(nearest_frame, point) < dist(
-                best_frames[str_point]["means"], point
-            ):
-                best_frames[str_point]["means"] = nearest_frame
-                best_frames[str_point]["distance"] = dist(nearest_frame, point)
-                best_frames[str_point]["frame_idx"] = nearest_frame_idx
-                best_frames[str_point]["xtc"] = frame["xtc"]
-                best_frames[str_point]["tpr"] = frame["tpr"]
-        msg = f"Closest point to {point} is {[round(pt, 3) for pt in best_frames[str_point]['means']]}, "
-        msg += f"which is {round(best_frames[str_point]['distance'], 3)} away "
-        msg += f"from timestep {best_frames[str_point]['frame_idx']} in {best_frames[str_point]['xtc']}"
-        logging.info(msg)
+    point = phi_psi_point
+    str_point = str(point)
+    best_frames[str_point] = {}
+    for frame in frames_means:
+        nearest_frame = min(frame["means"], key=lambda x: dist(x, point))
+        nearest_frame_idx = frame["means"].index(nearest_frame)
+        if best_frames[str_point] == {} or dist(nearest_frame, point) < dist(
+            best_frames[str_point]["means"], point
+        ):
+            best_frames[str_point]["means"] = nearest_frame
+            best_frames[str_point]["distance"] = dist(nearest_frame, point)
+            best_frames[str_point]["frame_idx"] = nearest_frame_idx
+            best_frames[str_point]["xtc"] = frame["xtc"]
+            best_frames[str_point]["tpr"] = frame["tpr"]
+    msg = f"Closest point to {point} is {[round(pt, 3) for pt in best_frames[str_point]['means']]}, "
+    msg += f"which is {round(best_frames[str_point]['distance'], 3)} away "
+    msg += f"from timestep {best_frames[str_point]['frame_idx']} in {best_frames[str_point]['xtc']}"
+    logging.info(msg)
 
     point_output = {}
     for i, (point, data) in enumerate(best_frames.items()):
@@ -227,6 +226,364 @@ def short_circuit(condition: bool):
     return condition
 
 
+@task(multiple_outputs=True)
+def new_input(dag_params, new_gro_info, phi_psi_point, **context):
+    import os
+    import logging
+
+    ti = context["ti"]
+    map_index = ti.map_index
+    new_output_dir = f"{dag_params['output_dir']}/{map_index}"
+    logging.info(f"new_gro: {new_gro_info}")
+    logging.info(f"dag_params: {dag_params}")
+    new_gro = new_gro_info["next_gro"]
+    gro_path, gro_fn = os.path.split(new_gro)
+    dag_params["inputs"]["gro"]["directory"] = gro_path
+    dag_params["inputs"]["gro"]["filename"] = gro_fn
+    dag_params["inputs"]["gro"]["ref_data"] = False
+    dag_params["output_dir"] = new_output_dir
+    dag_params["point"] = phi_psi_point
+    return {"params": dag_params, "output_dir": new_output_dir}
+
+
+@task
+def pull_params(
+    phi_psi,
+    output_path,
+    iter_params,
+    iteration,
+    force_constant="500",
+    expected_output="dihedrals.json",
+    **context,
+):
+    import os
+    import logging
+
+    logging.info(f"phi_psi: {phi_psi}")
+    phi = phi_psi[0]
+    psi = phi_psi[1]
+    ti = context["ti"]
+    map_index = ti.map_index
+    output_dir = f"{output_path}/iteration_{iteration}/{map_index}"
+    if "best_gro" in iter_params and iter_params["best_gro"]["gro"] is not None:
+        new_gro = iter_params["best_gro"]["gro"]
+        gro_path, gro_fn = os.path.split(new_gro)
+        ref_data = False
+    else:
+        gro_path = iter_params["inputs"]["gro"]["directory"]
+        gro_fn = iter_params["inputs"]["gro"]["filename"]
+        ref_data = True
+    gro = {"directory": gro_path, "filename": gro_fn, "ref_data": ref_data}
+    return {
+        "phi_angle": phi,
+        "psi_angle": psi,
+        "force_constant": force_constant,
+        "output_dir": output_dir,
+        "expected_output": expected_output,
+        "gro": gro,
+    }
+
+
+@task(trigger_rule="none_failed")
+def json_from_dataset_path_parts(
+    dataset_path_parts: list[str], key: str = None, allow_missing: bool = False
+):
+    import json, os
+    import logging
+
+    logging.info(
+        f"path parts types: {[(part, type(part)) for part in dataset_path_parts]}"
+    )
+    str_parts = [str(part) for part in dataset_path_parts]
+    logging.info(f"str parts types: {[(part, type(part)) for part in str_parts]}")
+    dataset_path = os.path.join(*str_parts)
+    if not os.path.exists(dataset_path):
+        if allow_missing:
+            return {}
+        else:
+            raise AirflowException(f"Dataset path {dataset_path} does not exist")
+    with open(dataset_path, "r") as f:
+        data = json.load(f)
+    if not key:
+        return data
+    else:
+        if len(data) == 1:
+            return data[str(key)]
+        else:
+            return [d[key] for d in data]
+
+
+@task(multiple_outputs=True)
+def compute_drift(phi_psi, sim_info, pull_info):
+    import logging
+    from MDAnalysis import Universe
+    from MDAnalysis.analysis.dihedrals import Ramachandran
+    import numpy as np
+
+    # MDAnalysis is too verbose
+    logging.getLogger("MDAnalysis").setLevel(logging.WARNING)
+
+    logging.info(f"phi_psi: {phi_psi}")
+    initial_point = pull_info["next_gro_means"]
+    logging.info(f"initial_point: {initial_point}")
+    last_frames = []
+    last_frames_diff_init = []
+    last_frames_diff_first = []
+    for sim_data in sim_info:
+        tpr = sim_data["tpr"]
+        xtc = sim_data["xtc"]
+        u = Universe(tpr, xtc)
+        selected_residues = u.select_atoms("resid 1-5")
+        rama = Ramachandran(selected_residues).run()
+        first = rama.results.angles[0]
+        f_mean = np.mean(first, axis=0)
+        f_stdev = np.std(first, axis=0)
+        logging.info(
+            f"first mean: {np.round(f_mean, 4)}, first stdev: {np.round(f_stdev, 4)}"
+        )
+        last = rama.results.angles[-1]
+        l_mean = np.mean(last, axis=0)
+        l_stdev = np.std(last, axis=0)
+        logging.info(
+            f"last mean: {np.round(l_mean, 4)}, last stdev: {np.round(l_stdev, 4)}"
+        )
+        last_frames.append(rama.results.angles[-1])
+        last_frames_diff_init.append(rama.results.angles[-1] - initial_point)
+        last_frames_diff_first.append(rama.results.angles[-1] - f_mean)
+
+    last = np.concatenate(last_frames, axis=0)
+    last_mean = last.mean(axis=0)
+    last_stdev = last.std(axis=0)
+    logging.info(f"last_mean: {last_mean}, last_stdev: {last_stdev}")
+
+    last_diff_init = np.concatenate(last_frames_diff_init, axis=0)
+    last_diff_mean_init = last_diff_init.mean(axis=0)
+    last_diff_stdev_init = last_diff_init.std(axis=0)
+    logging.info(
+        f"last-init mean: {last_diff_mean_init}, last-init stdev: {last_diff_stdev_init}"
+    )
+
+    last_diff_first = np.concatenate(last_frames_diff_first, axis=0)
+    last_diff_mean_first = last_diff_first.mean(axis=0)
+    last_diff_stdev_first = last_diff_first.std(axis=0)
+    logging.info(
+        f"last-first mean: {last_diff_mean_first}, last-first stdev: {last_diff_stdev_first}"
+    )
+
+    return {
+        "last_point": last_mean.tolist(),
+        "last_diff_init": last_diff_mean_init.tolist(),
+        "last_diff_first": last_diff_mean_first.tolist(),
+        "phi_psi": phi_psi,
+    }
+
+
+"""
+@task(multiple_outputs=True)
+def compute_drift(phi_psi, sim_info, pull_info):
+    import logging
+    from MDAnalysis import Universe
+    from MDAnalysis.analysis.dihedrals import Ramachandran
+    import numpy as np
+
+    # MDAnalysis is too verbose
+    logging.getLogger("MDAnalysis").setLevel(logging.WARNING)
+
+    logging.info(f"phi_psi: {phi_psi}")
+    logging.info(f"sim_info: {sim_info}")
+    logging.info(f"pull_info: {pull_info}")
+
+    ideal_point = phi_psi
+    actual_point = pull_info["next_gro_means"]
+    # idrifts = []
+    # adrifts = []
+    # swarm_means = []
+    # swarm_stdevs = []
+    frames = []
+    last_frames = []
+    for sim_data in sim_info:
+        tpr = sim_data["tpr"]
+        xtc = sim_data["xtc"]
+        u = Universe(tpr, xtc)
+        selected_residues = u.select_atoms("resid 1-5")
+        rama = Ramachandran(selected_residues).run()
+        frames.append(rama.results.angles)
+        last_frames.append(rama.results.angles[-1])
+        frames_mean = np.mean(rama.results.angles.mean(axis=1), axis=0)
+        frames_stdev = np.std(rama.results.angles.mean(axis=1), axis=0)
+        logging.info(f"frames_mean: {frames_mean}")
+        logging.info(f"frames_stdev: {frames_stdev}")
+        # swarm_means.append(frames_mean)
+        # swarm_stdevs.append(frames_stdev)
+
+        # ideal_drift = frames_mean - ideal_point
+        # actual_drift = frames_mean - actual_point
+        # logging.info(f"ideal_drift: {ideal_drift}")
+        # logging.info(f"actual_drift: {actual_drift}")
+        # idrifts.append(ideal_drift)
+        # adrifts.append(actual_drift)
+
+    rng = np.random.default_rng()
+    weight = rng.random()
+    logging.info(f"weight: {weight}")
+
+    all_frames = np.concatenate(frames, axis=0)
+    all_means = np.mean(all_frames.mean(axis=0), axis=0)
+    all_stdevs = np.std(all_frames.std(axis=0), axis=0)
+    logging.info(f"cumulative mean: {all_means}")
+    logging.info(f"cumulative stdev: {all_stdevs}")
+    new_point = all_means + weight * all_stdevs
+    logging.info(f"new_point: {new_point}")
+
+    all_frames_actual = all_frames - actual_point
+    all_means_actual = np.mean(all_frames_actual.mean(axis=0), axis=0)
+    # all_stdevs_actual = np.std(all_frames_actual.mean(axis=1), axis=0)
+    logging.info(f"cumulative mean actual: {all_means_actual}")
+    # logging.info(f"cumulative stdev actual: {all_stdevs_actual}")
+    new_actual_point = actual_point + all_means_actual + weight * all_stdevs
+    logging.info(f"new_actual_point: {new_actual_point}")
+
+    all_frames_ideal = all_frames - ideal_point
+    all_means_ideal = np.mean(all_frames_ideal.mean(axis=0), axis=0)
+    # all_stdevs_ideal = np.std(all_frames_ideal.mean(axis=1), axis=0)
+    logging.info(f"cumulative mean ideal: {all_means_ideal}")
+    # logging.info(f"cumulative stdev ideal: {all_stdevs_ideal}")
+    new_ideal_point = ideal_point + all_means_ideal + weight * all_stdevs
+    logging.info(f"new_ideal_point: {new_ideal_point}")
+
+    last_frames_cat = np.concatenate(last_frames, axis=0)
+    last_means = last_frames_cat.mean(axis=0)
+    last_stdevs = last_frames_cat.std(axis=0)
+    logging.info(f"last cumulative mean: {last_means}")
+    logging.info(f"last cumulative stdev: {last_stdevs}")
+    last_point = last_means + weight * last_stdevs
+    logging.info(f"last_point: {last_point}")
+
+    return {
+        "new_point": new_point.tolist(),
+        "ideal_point": new_ideal_point.tolist(),
+        "actual_point": new_actual_point.tolist(),
+        "last_point": last_point.tolist(),
+        "phi_psi": phi_psi,
+    }
+
+    # total_idrift = np_mean(idrifts, axis=0)
+    # total_adrift = np_mean(adrifts, axis=0)
+    # logging.info(f"total_idrift: {total_idrift}")
+    # logging.info(f"total_adrift: {total_adrift}")
+    # return {"ideal_drift": total_idrift.tolist(), "actual_drift": total_adrift.tolist(), "phi_psi": phi_psi}
+"""
+
+
+@task_group
+def step(
+    phi_psi,
+    output_dir,
+    iter_params,
+    iteration,
+    force_constant="250",
+    expected_output="dihedrals.json",
+):
+    pull_dag_params = pull_params(
+        phi_psi, output_dir, iter_params, iteration, force_constant, expected_output
+    )
+    trigger_pull_dag = TriggerDagRunOperator(
+        task_id="trigger_pull_dag",
+        trigger_dag_id="pull",
+        wait_for_completion=True,
+        poke_interval=1,
+        trigger_rule="none_failed",
+        conf=pull_dag_params,
+    )
+    pull_dag_params >> trigger_pull_dag
+    pull_info = json_from_dataset_path_parts.override(task_id="pull_results")(
+        dataset_path_parts=[
+            output_dir,
+            f"iteration_{iteration}",
+            "{{ task_instance.map_index }}",
+            expected_output,
+        ],
+        key=force_constant,
+    )
+    trigger_pull_dag >> pull_info
+
+    next_params = new_input(iter_params, pull_info, phi_psi)
+    trigger_run_swarm = TriggerDagRunOperator(
+        task_id=f"trigger_run_swarm",
+        trigger_dag_id="simulate_expand",
+        wait_for_completion=True,
+        poke_interval=1,
+        trigger_rule="none_failed",
+        conf=next_params["params"],
+    )
+    sim_info = json_from_dataset_path_parts.override(task_id="extract_sim_info")(
+        dataset_path_parts=[
+            output_dir,
+            f"iteration_{iteration}",
+            "{{ task_instance.map_index }}",
+            "result.json",
+        ],
+    )
+    add_sim_info = add_to_dataset.override(task_id="add_sim_info")(
+        output_dir=output_dir,
+        output_fn="swarms.json",
+        new_data={
+            "sims": sim_info,
+            "phi_psi": phi_psi,
+            "pull": pull_info,
+        },
+        new_data_keys=[
+            f"iteration_{iteration}",
+            "{{ task_instance.map_index }}",
+        ],
+    )
+    drift = compute_drift(phi_psi, sim_info, pull_info)
+    trigger_run_swarm >> sim_info >> add_sim_info
+
+    """
+    rama = ramachandran_analysis(
+        inputs=sim_info,
+        resnums="1-5",
+        output_dir=next_params["output_dir"],
+        phi_psi_point=phi_psi,
+    )
+    next_rama_params = next_step_params_rama(
+        rama, next_params["params"], "{{ params.output_dir }}"
+    )
+    add_rama_info = add_to_dataset.override(task_id="add_rama_info")(
+        output_dir="{{ params.output_dir }}",
+        output_fn="swarms.json",
+        new_data=next_rama_params,
+        new_data_keys=[
+            "iteration_{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration')  + 1 }}",
+            "params",
+        ],
+    )
+    rama >> next_rama_params >> add_rama_info
+
+    return next_rama_params
+    """
+    return drift, add_sim_info
+
+
+@task
+def log_info(drift, sim_info):
+    import logging, json
+
+    logging.info(f"drift: {drift}")
+    logging.info(f"sim_info: {sim_info}")
+
+    # ensure items in sim_info are all identical
+    assert all(item == sim_info[0] for item in sim_info)
+
+    # open the dataset and read the json
+    with open(sim_info[0], "r") as f:
+        data = json.load(f)
+
+    # log the data
+    logging.info(f"sim_info data: {data}")
+
+
 with DAG(
     dag_id="swarms",
     schedule=None,
@@ -237,17 +594,17 @@ with DAG(
             "mdp": {"directory": "mdp", "filename": "sim.json"},
             "gro": {
                 "directory": "ala_pentapeptide",
-                "filename": "ala_penta_solv.gro",
+                "filename": "ala_penta_capped_solv.gro",
                 "ref_data": True,
             },
             "top": {
                 "directory": "ala_pentapeptide",
-                "filename": "ala_penta_solv.top",
+                "filename": "ala_penta_capped_solv.top",
                 "ref_data": True,
             },
         },
         "output_dir": "swarms",
-        "mdp_options": [{"nsteps": 5000, "nstxout-compressed": 1000} for _ in range(3)],
+        "mdp_options": [{"nsteps": 50, "nstxout-compressed": 10} for _ in range(4)],
         "expected_output": "result.gro",
         "max_iterations": 2,
     },
@@ -274,41 +631,25 @@ with DAG(
     do_this_iteration = short_circuit.override(task_id="skip_this_iteration")(
         this_iter_params["trigger_this_iteration"]
     )
-    trigger_run_swarm = TriggerDagRunOperator(
-        task_id=f"trigger_run_swarm",
-        trigger_dag_id="simulate_expand",
-        wait_for_completion=True,
-        poke_interval=2,
-        trigger_rule="none_failed",
-        conf=this_iter_params["params"],
-    )
-    do_this_iteration >> trigger_run_swarm
 
-    sim_info = json_from_dataset_path.override(task_id="extract_sim_info")(
-        dataset_path="{{ task_instance.xcom_pull(task_ids='iteration_params', key='output_dir') }}/result.json",
-    )
-    add_sim_info = add_to_dataset.override(task_id="add_sim_info")(
+    pp2 = [[-50, -50], [120, -70]]
+    pp3 = [[-50, -50], [35, -60], [120, -70]]
+    pp5 = [[-50, -50], [-7.5, -55], [35, -60], [77.5, -65], [120, -70]]
+    drift, sim_info = step.partial(
         output_dir="{{ params.output_dir }}",
-        output_fn="swarms.json",
-        new_data=sim_info,
-        new_data_keys=[
-            "iteration_{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration') }}",
-            "sims",
-        ],
-    )
-    trigger_run_swarm >> sim_info
+        iter_params=this_iter_params["params"],
+        iteration=this_iter_params["iteration"],
+    ).expand(phi_psi=pp3)
+
+    do_this_iteration >> [drift, sim_info]
+    log_info(drift, sim_info)
 
     # distances = atoms_distance.expand(inputs=sim_info)
     # distance_data = distances.map(lambda x: x)
     # next_dist_gro = next_step_gro(distance_data)
     # next_dist_params = next_step_params_dist(next_dist_gro["min"], "{{ params }}")
 
-    rama = ramachandran_analysis(
-        inputs=sim_info,
-        resnums="1-5",
-        output_dir=this_iter_params["output_dir"],
-        list_of_points=[[-50, -50]],
-    )
+    """
     next_rama_params = next_step_params_rama(
         rama, this_iter_params["params"], "{{ params.output_dir }}"
     )
@@ -321,7 +662,9 @@ with DAG(
             "params",
         ],
     )
+    """
 
+    """
     do_next_iteration = evaluate_template_truth.override(
         task_id="do_next_iteration", trigger_rule="none_failed_min_one_success"
     )(
@@ -333,4 +676,5 @@ with DAG(
         truth_value=do_next_iteration,
         wait_for_completion=False,
     )
-    add_rama_info >> do_next_iteration >> next_iteration
+    next_rama_params >> do_next_iteration >> next_iteration
+    """

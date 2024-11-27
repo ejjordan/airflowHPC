@@ -182,7 +182,7 @@ with DAG(
         "expected_output": "dihedrals.json",
         "index_fn": "dihedrals.ndx",
         "force_constant": 500,
-        "mdp_updates": {"nsteps": 5000, "nstxout_compressed": 1000, "dt": 0.001},
+        "mdp_updates": {"nsteps": 500, "nstxout_compressed": 50, "dt": 0.001},
         "phi_angle": -50,
         "psi_angle": -50,
     },
@@ -272,6 +272,8 @@ with DAG(
             "tpr": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}",
             "next_gro": traj_dihedrals["closest_frame"],
             "next_gro_means": traj_dihedrals["closest_frame_means"],
+            "force_constant": "{{ params.force_constant }}",
+            "point": ["{{ params.phi_angle }}", "{{ params.psi_angle }}"],
         },
         new_data_keys=["{{ params.force_constant }}"],
     )
