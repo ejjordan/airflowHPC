@@ -4,11 +4,8 @@ from airflow.exceptions import AirflowException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from airflowHPC.dags.tasks import (
-    run_if_false,
     json_from_dataset_path,
-    evaluate_template_truth,
     add_to_dataset,
-    xcom_lookup,
 )
 
 
@@ -252,7 +249,7 @@ def pull_params(
     output_path,
     iter_params,
     iteration,
-    force_constant="500",
+    force_constant,
     expected_output="dihedrals.json",
     **context,
 ):
@@ -327,13 +324,15 @@ def compute_drift(phi_psi, sim_info, pull_info):
     initial_point = pull_info["next_gro_means"]
     logging.info(f"initial_point: {initial_point}")
     last_frames = []
+    last_frames_means = []
     for sim_data in sim_info:
         tpr = sim_data["tpr"]
         xtc = sim_data["xtc"]
         u = Universe(tpr, xtc)
-        selected_residues = u.select_atoms("resid 1-5")
+        selected_residues = u.select_atoms("protein")
         rama = Ramachandran(selected_residues).run()
         first = rama.results.angles[0]
+        logging.info(f"num angles: {len(first)}")
         f_mean = np.mean(first, axis=0)
         f_stdev = np.std(first, axis=0)
         logging.info(
@@ -345,6 +344,7 @@ def compute_drift(phi_psi, sim_info, pull_info):
         logging.info(
             f"frame last mean: {np.round(l_mean, 4)}, last stdev: {np.round(l_stdev, 4)}"
         )
+        last_frames_means.append(l_mean.tolist())
         last_frames.append(rama.results.angles[-1])
 
     last = np.concatenate(last_frames, axis=0)
@@ -352,9 +352,18 @@ def compute_drift(phi_psi, sim_info, pull_info):
     last_stdev = last.std(axis=0)
     logging.info(f"cumulative last mean: {last_mean}, last stdev: {last_stdev}")
 
+    # find the last frame closest to last mean
+    closest_sim_idx = np.argmin(
+        [np.linalg.norm(x - last_mean) for x in np.array(last_frames_means)]
+    )
+    best_gro = sim_info[closest_sim_idx]["gro"]
+    logging.info(f"best_gro: {best_gro}, type: {type(best_gro)}")
+
     return {
-        "last_point": last_mean.tolist(),
-        "phi_psi": phi_psi,
+        "final_point_means": last_mean.tolist(),
+        "phi_psi_points": phi_psi,
+        "final_points": last_frames_means,
+        "best_gro": best_gro,
     }
 
 
@@ -364,7 +373,7 @@ def step(
     output_dir,
     iter_params,
     iteration,
-    force_constant="250",
+    force_constant="200",
     expected_output="dihedrals.json",
 ):
     pull_dag_params = pull_params(
@@ -427,21 +436,63 @@ def step(
 
 
 @task
-def log_info(drift, sim_info):
-    import logging, json
+def new_string(drift, output_dir):
+    import logging
+    import numpy as np
+    import matplotlib.pyplot as plt
 
     logging.info(f"drift: {drift}")
-    logging.info(f"sim_info: {sim_info}")
 
-    # ensure items in sim_info are all identical
-    assert all(item == sim_info[0] for item in sim_info)
+    last_point_means = [np.round(item["final_point_means"]).tolist() for item in drift]
+    last_points = [item["final_points"] for item in drift]
+    phi_psi_points = [item["phi_psi_points"] for item in drift]
+    num_points = len(phi_psi_points)
 
-    # open the dataset and read the json
-    with open(sim_info[0], "r") as f:
-        data = json.load(f)
+    cmap = plt.cm.get_cmap("rainbow")
+    assert len(last_points) == len(phi_psi_points)
+    colors = cmap(np.linspace(0, 1, len(phi_psi_points)))
+    for i in range(num_points):
+        logging.info(f"phi_psi_points: {phi_psi_points[i]}")
+        plt.scatter(
+            phi_psi_points[i][0],
+            phi_psi_points[i][1],
+            label=f"Phi/Psi point {i + 1}",
+            color=colors[i],
+            marker="x",
+        )
+        logging.info(f"last_point_means: {last_point_means[i]}")
+        plt.scatter(
+            last_point_means[i][0], last_point_means[i][1], color=colors[i], marker="2"
+        )
+        for j in range(len(last_points[i])):
+            logging.info(f"last_points: {last_points[i][j]}")
+            plt.scatter(
+                last_points[i][j][0], last_points[i][j][1], color=colors[i], marker="+"
+            )
 
-    # log the data
-    logging.info(f"sim_info data: {data}")
+    plt.legend()
+    plt.xlim(-180, 180)
+    plt.ylim(-180, 180)
+    plt.xlabel("Psi")
+    plt.ylabel("Phi")
+    plt.savefig(f"{output_dir}/old_and_new_paths.png")
+    plt.close()
+
+    return last_point_means
+
+
+@task
+def get_phi_psi_point(iter_params, num_points):
+    from numpy import linspace
+
+    Hummer = [[-50, -50], [-70, 120]]
+    Delamotte = [[-85, 75], [70, -70]]
+    use = Hummer
+    points_list = linspace(use[0], use[1], num_points).tolist()
+    if iter_params["iteration"] == 1:
+        return points_list
+    else:
+        return iter_params["phi_psi_points"]
 
 
 with DAG(
@@ -464,7 +515,7 @@ with DAG(
             },
         },
         "output_dir": "swarms",
-        "mdp_options": [{"nsteps": 50, "nstxout-compressed": 10} for _ in range(4)],
+        "mdp_options": [{"nsteps": 100, "nstxout-compressed": 10} for _ in range(3)],
         "expected_output": "result.gro",
         "max_iterations": 2,
     },
@@ -492,17 +543,15 @@ with DAG(
         this_iter_params["trigger_this_iteration"]
     )
 
-    pp2 = [[-50, -50], [120, -70]]
-    pp3 = [[-50, -50], [35, -60], [120, -70]]
-    pp5 = [[-50, -50], [-7.5, -55], [35, -60], [77.5, -65], [120, -70]]
+    phi_psi_point = get_phi_psi_point(this_iter_params["params"], 4)
     drift, sim_info = step.partial(
         output_dir="{{ params.output_dir }}",
         iter_params=this_iter_params["params"],
         iteration=this_iter_params["iteration"],
-    ).expand(phi_psi=pp3)
+    ).expand(phi_psi=phi_psi_point)
 
     do_this_iteration >> [drift, sim_info]
-    log_info(drift, sim_info)
+    new_string(drift, this_iter_params["output_dir"])
 
     # distances = atoms_distance.expand(inputs=sim_info)
     # distance_data = distances.map(lambda x: x)
