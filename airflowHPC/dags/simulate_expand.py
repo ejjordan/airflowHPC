@@ -114,7 +114,7 @@ with DAG(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 4,
+            "cpus_per_task": 1,
             "gpus": 0,
             "gpu_type": None,
         },
