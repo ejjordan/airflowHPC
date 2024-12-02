@@ -86,7 +86,7 @@ class SlurmHook(BaseHook):
     def get_core_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
         if task_instance_key not in self.slots_dict:
             self.log.info(f"Task keys {self.task_resource_requests.keys()}")
-            raise ValueError(f"Resource not allocated for task {task_instance_key}")
+            raise RuntimeError(f"Resource not allocated for task {task_instance_key}")
         return [core.index for core in self.slots_dict[task_instance_key].cores]
 
     def get_rank_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
@@ -97,13 +97,13 @@ class SlurmHook(BaseHook):
     def get_gpu_ids(self, task_instance_key: TaskInstanceKey) -> List[int]:
         if task_instance_key not in self.slots_dict:
             self.log.info(f"Task keys {self.task_resource_requests.keys()}")
-            raise ValueError(f"Resource not allocated for task {task_instance_key}")
+            raise RuntimeError(f"Resource not allocated for task {task_instance_key}")
         return [gpu.index for gpu in self.slots_dict[task_instance_key].gpus]
 
     def get_hostname(self, task_instance_key: TaskInstanceKey) -> str:
         if task_instance_key not in self.slots_dict:
             self.log.info(f"Task keys {self.task_resource_requests.keys()}")
-            raise ValueError(f"Resource not allocated for task {task_instance_key}")
+            raise RuntimeError(f"Resource not allocated for task {task_instance_key}")
         return self.slots_dict[task_instance_key].hostname
 
     def set_task_resources(

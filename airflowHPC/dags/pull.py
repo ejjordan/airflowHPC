@@ -53,7 +53,7 @@ def make_ndx_dihedrals(gro, output_dir, output_fn):
 
 @task
 def mdp_update_params(
-    phi_psi_dict, force_constant, phi_angle, psi_angle, extra_updates
+    phi_psi_dict, force_constant, phi_angle, psi_angle, extra_updates, pull_rate=None
 ):
     import ast
 
@@ -72,8 +72,14 @@ def mdp_update_params(
         group_string = f"{group_idxs_phi[0]} {group_idxs_phi[1]} {group_idxs_phi[1]} {group_idxs_phi[2]} {group_idxs_phi[2]} {group_idxs_phi[3]}"
         mdp_updates[f"pull-coord{pull_group_index}-groups"] = group_string
         mdp_updates[f"pull-coord{pull_group_index}-k"] = force_constant
-        mdp_updates[f"pull-coord{pull_group_index}-init"] = phi_angle
         mdp_updates[f"pull-coord{pull_group_index}-geometry"] = "dihedral"
+        if pull_rate and not phi_angle:
+            mdp_updates[f"pull-coord{pull_group_index}-start"] = "yes"
+            mdp_updates[f"pull-coord{pull_group_index}-rate"] = pull_rate
+        elif phi_angle and not pull_rate:
+            mdp_updates[f"pull-coord{pull_group_index}-init"] = phi_angle
+        else:
+            raise ValueError("Either phi_angle or pull_rate must be set, but not both")
         pull_group_index += 1
 
         group_idxs_psi = []
@@ -88,8 +94,14 @@ def mdp_update_params(
         group_string = f"{group_idxs_psi[0]} {group_idxs_psi[1]} {group_idxs_psi[1]} {group_idxs_psi[2]} {group_idxs_psi[2]} {group_idxs_psi[3]}"
         mdp_updates[f"pull-coord{pull_group_index}-groups"] = group_string
         mdp_updates[f"pull-coord{pull_group_index}-k"] = force_constant
-        mdp_updates[f"pull-coord{pull_group_index}-init"] = psi_angle
         mdp_updates[f"pull-coord{pull_group_index}-geometry"] = "dihedral"
+        if pull_rate and not psi_angle:
+            mdp_updates[f"pull-coord{pull_group_index}-start"] = "yes"
+            mdp_updates[f"pull-coord{pull_group_index}-rate"] = pull_rate
+        elif psi_angle and not pull_rate:
+            mdp_updates[f"pull-coord{pull_group_index}-init"] = psi_angle
+        else:
+            raise ValueError("Either psi_angle or pull_rate must be set, but not both")
         pull_group_index += 1
 
     mdp_updates["pull-ngroups"] = group_name_index - 1
@@ -99,7 +111,7 @@ def mdp_update_params(
     return mdp_updates
 
 
-def plot_dihedrals(phi_psi_angles, output_dir):
+def plot_timeseries(phi_psi_angles, output_dir):
     import matplotlib.pyplot as plt
 
     # Plot phi/psi angles as a time series
@@ -119,6 +131,22 @@ def plot_dihedrals(phi_psi_angles, output_dir):
             ax[i + 1, j].axhline(y=-70, color="r", linestyle="--")
     fig.suptitle("Phi/Psi angles")
     plt.savefig(f"{output_dir}/phi_psi_angles.png")
+    plt.close()
+
+
+def plot_scatter(phi_psi_angles, output_dir):
+    import matplotlib.pyplot as plt
+
+    # Plot phi/psi angles as a scatter plot
+    fig, ax = plt.subplots()
+    ax.scatter(phi_psi_angles.T[0], phi_psi_angles.T[1])
+    ax.set_xlim([-180, 180])
+    ax.set_ylim([-180, 180])
+    ax.grid(True)
+    ax.set_xlabel("Phi")
+    ax.set_ylabel("Psi")
+    fig.suptitle("Phi/Psi angles")
+    plt.savefig(f"{output_dir}/phi_psi_scatter.png")
     plt.close()
 
 
@@ -146,7 +174,8 @@ def trajectory_dihedral(tpr, xtc, output_dir, phi_angle, psi_angle, plot=True):
         distances.append(distance)
 
     if plot:
-        plot_dihedrals(phi_psi_angles, output_dir)
+        plot_timeseries(phi_psi_angles, output_dir)
+        plot_scatter(phi_psi_angles, output_dir)
 
     # Get frame closest to target angles
     min_dist_idx = distances.index(min(distances))
@@ -182,7 +211,7 @@ with DAG(
         "expected_output": "dihedrals.json",
         "index_fn": "dihedrals.ndx",
         "force_constant": 500,
-        "mdp_updates": {"nsteps": 5000, "nstxout_compressed": 1000, "dt": 0.001},
+        "mdp_updates": {"nsteps": 500, "nstxout_compressed": 50, "dt": 0.001},
         "phi_angle": -50,
         "psi_angle": -50,
     },
@@ -272,6 +301,8 @@ with DAG(
             "tpr": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}",
             "next_gro": traj_dihedrals["closest_frame"],
             "next_gro_means": traj_dihedrals["closest_frame_means"],
+            "force_constant": "{{ params.force_constant }}",
+            "point": ["{{ params.phi_angle }}", "{{ params.psi_angle }}"],
         },
         new_data_keys=["{{ params.force_constant }}"],
     )
