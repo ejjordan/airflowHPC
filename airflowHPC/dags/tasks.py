@@ -445,7 +445,7 @@ def xcom_lookup(dag_id, task_id, key, **context):
     return xcom
 
 
-@task
+@task(max_active_tis_per_dagrun=1)
 def add_to_dataset(
     output_dir: str, output_fn: str, new_data: dict, new_data_keys: list[str]
 ):
