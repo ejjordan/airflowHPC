@@ -31,9 +31,7 @@ def atoms_distance(
 
 # From "Coarse Master Equations for Peptide Folding Dynamics" J. Phys. Chem. B, 2008, 112 (19)
 @task(trigger_rule="none_failed", multiple_outputs=True)
-def ramachandran_analysis(
-    inputs, resnums, output_dir, list_of_points=[[-50, -50], [120, -70]]
-):
+def ramachandran_analysis(inputs, resnums, output_dir, phi_psi_point=[-50, -50]):
     import logging
     from math import dist
     from MDAnalysis import Universe
@@ -55,24 +53,24 @@ def ramachandran_analysis(
         )
 
     best_frames = {}
-    for point in list_of_points:
-        str_point = str(point)
-        best_frames[str_point] = {}
-        for frame in frames_means:
-            nearest_frame = min(frame["means"], key=lambda x: dist(x, point))
-            nearest_frame_idx = frame["means"].index(nearest_frame)
-            if best_frames[str_point] == {} or dist(nearest_frame, point) < dist(
-                best_frames[str_point]["means"], point
-            ):
-                best_frames[str_point]["means"] = nearest_frame
-                best_frames[str_point]["distance"] = dist(nearest_frame, point)
-                best_frames[str_point]["frame_idx"] = nearest_frame_idx
-                best_frames[str_point]["xtc"] = frame["xtc"]
-                best_frames[str_point]["tpr"] = frame["tpr"]
-        msg = f"Closest point to {point} is {[round(pt, 3) for pt in best_frames[str_point]['means']]}, "
-        msg += f"which is {round(best_frames[str_point]['distance'], 3)} away "
-        msg += f"from timestep {best_frames[str_point]['frame_idx']} in {best_frames[str_point]['xtc']}"
-        logging.info(msg)
+    point = phi_psi_point
+    str_point = str(point)
+    best_frames[str_point] = {}
+    for frame in frames_means:
+        nearest_frame = min(frame["means"], key=lambda x: dist(x, point))
+        nearest_frame_idx = frame["means"].index(nearest_frame)
+        if best_frames[str_point] == {} or dist(nearest_frame, point) < dist(
+            best_frames[str_point]["means"], point
+        ):
+            best_frames[str_point]["means"] = nearest_frame
+            best_frames[str_point]["distance"] = dist(nearest_frame, point)
+            best_frames[str_point]["frame_idx"] = nearest_frame_idx
+            best_frames[str_point]["xtc"] = frame["xtc"]
+            best_frames[str_point]["tpr"] = frame["tpr"]
+    msg = f"Closest point to {point} is {[round(pt, 3) for pt in best_frames[str_point]['means']]}, "
+    msg += f"which is {round(best_frames[str_point]['distance'], 3)} away "
+    msg += f"from timestep {best_frames[str_point]['frame_idx']} in {best_frames[str_point]['xtc']}"
+    logging.info(msg)
 
     point_output = {}
     for i, (point, data) in enumerate(best_frames.items()):
@@ -298,16 +296,11 @@ with DAG(
     )
     trigger_run_swarm >> sim_info
 
-    # distances = atoms_distance.expand(inputs=sim_info)
-    # distance_data = distances.map(lambda x: x)
-    # next_dist_gro = next_step_gro(distance_data)
-    # next_dist_params = next_step_params_dist(next_dist_gro["min"], "{{ params }}")
-
     rama = ramachandran_analysis(
         inputs=sim_info,
         resnums="1-5",
         output_dir=this_iter_params["output_dir"],
-        list_of_points=[[-50, -50]],
+        phi_psi_point=[-50, -50],
     )
     next_rama_params = next_step_params_rama(
         rama, this_iter_params["params"], "{{ params.output_dir }}"
