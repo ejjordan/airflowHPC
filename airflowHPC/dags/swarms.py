@@ -11,140 +11,6 @@ from airflowHPC.dags.tasks import (
 )
 
 
-@task(multiple_outputs=True)
-def atoms_distance(
-    inputs,
-    atom_sel1: str = "name CA and resid 1",
-    atom_sel2: str = "name CA and resid 5",
-):
-    from MDAnalysis import Universe
-    from MDAnalysis.analysis import distances
-
-    gro = inputs["gro"]
-    u = Universe(gro)
-    atom1 = u.select_atoms(atom_sel1)
-    atom2 = u.select_atoms(atom_sel2)
-    _, _, distance = distances.dist(atom1, atom2)
-    assert len(distance) == 1
-    return {"distance": distance[0], "gro": gro}
-
-
-# From "Coarse Master Equations for Peptide Folding Dynamics" J. Phys. Chem. B, 2008, 112 (19)
-@task(trigger_rule="none_failed", multiple_outputs=True)
-def ramachandran_analysis(inputs, resnums, output_dir, phi_psi_point=[-50, -50]):
-    import logging
-    from math import dist
-    from MDAnalysis import Universe
-    from MDAnalysis.analysis.dihedrals import Ramachandran
-    from MDAnalysis import Writer
-
-    # MDAnalysis is too verbose
-    logging.getLogger("MDAnalysis").setLevel(logging.WARNING)
-    frames_means = []
-    for item in inputs:
-        xtc = item["xtc"]
-        tpr = item["tpr"]
-        u = Universe(tpr, xtc)
-        selected_residues = u.select_atoms(f"resid {resnums}")
-        rama = Ramachandran(selected_residues).run()
-        phi_psi_frame_means = rama.results.angles.mean(axis=1)
-        frames_means.append(
-            {"means": phi_psi_frame_means.tolist(), "xtc": xtc, "tpr": tpr}
-        )
-
-    best_frames = {}
-    point = phi_psi_point
-    str_point = str(point)
-    best_frames[str_point] = {}
-    for frame in frames_means:
-        nearest_frame = min(frame["means"], key=lambda x: dist(x, point))
-        nearest_frame_idx = frame["means"].index(nearest_frame)
-        if best_frames[str_point] == {} or dist(nearest_frame, point) < dist(
-            best_frames[str_point]["means"], point
-        ):
-            best_frames[str_point]["means"] = nearest_frame
-            best_frames[str_point]["distance"] = dist(nearest_frame, point)
-            best_frames[str_point]["frame_idx"] = nearest_frame_idx
-            best_frames[str_point]["xtc"] = frame["xtc"]
-            best_frames[str_point]["tpr"] = frame["tpr"]
-    msg = f"Closest point to {point} is {[round(pt, 3) for pt in best_frames[str_point]['means']]}, "
-    msg += f"which is {round(best_frames[str_point]['distance'], 3)} away "
-    msg += f"from timestep {best_frames[str_point]['frame_idx']} in {best_frames[str_point]['xtc']}"
-    logging.info(msg)
-
-    point_output = {}
-    for i, (point, data) in enumerate(best_frames.items()):
-        universe = Universe(data["tpr"], data["xtc"])
-        output_fn = f"{output_dir}/best_frame{i}.gro"
-        with Writer(output_fn, universe.atoms.n_atoms) as W:
-            universe.trajectory[data["frame_idx"]]
-            W.write(universe.atoms)
-        point_output[point] = {"fn": output_fn, "distance": data["distance"]}
-
-    return point_output
-
-
-@task(multiple_outputs=True)
-def next_step_gro(distance_info):
-    import logging
-
-    distance_info = [info for info in distance_info]
-    for info in distance_info:
-        logging.info(f"Distance: {info['distance']} in {info['gro']}")
-    min_dist = min(distance_info, key=lambda x: x["distance"])
-    max_dist = max(distance_info, key=lambda x: x["distance"])
-    return {"min": min_dist, "max": max_dist}
-
-
-@task
-def next_step_params_dist(gro, dag_params):
-    import os
-
-    if "best_gro" not in dag_params:
-        dag_params["best_gro"] = {"gro": None, "distance": None}
-    distance = gro["distance"]
-    if (
-        dag_params["best_gro"]["distance"] is None
-        or distance < dag_params["best_gro"]["distance"]
-    ):
-        dag_params["best_gro"] = gro
-        next_gro = gro["gro"]
-    else:
-        next_gro = dag_params["best_gro"]["gro"]
-
-    gro_path, gro_fn = os.path.split(next_gro)
-    dag_params["inputs"]["gro"]["directory"] = gro_path
-    dag_params["inputs"]["gro"]["filename"] = gro_fn
-    dag_params["iteration"] += 1
-    return dag_params
-
-
-@task
-def next_step_params_rama(rama_output, dag_params, output_dir):
-    import os
-
-    if "best_gro" not in dag_params:
-        dag_params["best_gro"] = {"gro": None, "distance": None}
-    for point, items in rama_output.items():
-        gro = items["fn"]
-        distance = items["distance"]
-        if (
-            dag_params["best_gro"]["distance"] is None
-            or distance < dag_params["best_gro"]["distance"]
-        ):
-            dag_params["best_gro"] = {"gro": gro, "distance": distance}
-            next_gro = gro
-        else:
-            next_gro = dag_params["best_gro"]["gro"]
-        gro_path, gro_fn = os.path.split(next_gro)
-        dag_params["inputs"]["gro"]["directory"] = gro_path
-        dag_params["inputs"]["gro"]["filename"] = gro_fn
-        dag_params["inputs"]["gro"]["ref_data"] = False
-    dag_params["iteration"] += 1
-    dag_params["output_dir"] = output_dir
-    return dag_params
-
-
 @task
 def iterations_completed(dataset_dict, max_iterations):
     import logging
@@ -448,59 +314,6 @@ def step(
     return drift, add_sim_info
 
 
-@task(multiple_outputs=True)
-def new_string(drift, output_dir):
-    import logging
-    import numpy as np
-    import matplotlib.pyplot as plt
-
-    logging.info(f"drift: {drift}")
-
-    last_point_means = [np.round(item["final_point_means"]).tolist() for item in drift]
-    gro_files = [item["best_gro"] for item in drift]
-    last_points = [item["final_points"] for item in drift]
-    phi_psi_points = [item["phi_psi_points"] for item in drift]
-    num_points = len(phi_psi_points)
-
-    cmap = plt.cm.get_cmap("rainbow")
-    assert len(last_points) == len(phi_psi_points)
-    colors = cmap(np.linspace(0, 1, len(phi_psi_points)))
-    for i in range(num_points):
-        logging.info(f"phi_psi_points: {phi_psi_points[i]}")
-        plt.scatter(
-            phi_psi_points[i][0],
-            phi_psi_points[i][1],
-            label=f"Phi/Psi point {i + 1}",
-            color=colors[i],
-            marker="x",
-        )
-        logging.info(f"last_point_means: {last_point_means[i]}")
-        plt.scatter(
-            last_point_means[i][0], last_point_means[i][1], color=colors[i], marker="2"
-        )
-        for j in range(len(last_points[i])):
-            logging.info(f"last_points: {last_points[i][j]}")
-            plt.scatter(
-                last_points[i][j][0], last_points[i][j][1], color=colors[i], marker="+"
-            )
-
-    # plt.legend()
-    plt.grid(True)
-    plt.xlim(-180, 180)
-    plt.ylim(-180, 180)
-    plt.xticks([-180, -90, 0, 90, 180])
-    plt.yticks([-180, -90, 0, 90, 180])
-    plt.xlabel("Psi")
-    plt.ylabel("Phi")
-    plt.savefig(f"{output_dir}/old_and_new_paths.png")
-    plt.close()
-
-    new_string_dict = {}
-    for i in range(num_points):
-        new_string_dict[str(last_point_means[i])] = gro_files[i]
-    return new_string_dict
-
-
 @task
 def next_step_params_drift(drift, dag_params, output_dir):
     import logging
@@ -532,7 +345,9 @@ def get_phi_psi_point(iter_params, num_points):
     import numpy as np
     import ast
 
+    # "Coarse Master Equations for Peptide Folding Dynamics" J. Phys. Chem. B, 2008, 112 (19)
     Hummer = [[-50, -50], [-70, 120]]
+    # "Finding transition pathways using the string method with swarms of trajectories" J Phys Chem B. 2008 112 (11)
     Pan = [[-82.7, 73.5], [70.5, -69.5]]
     random = np.random.uniform(
         low=[-180, -150], high=[90, 180], size=(num_points, 2)
@@ -611,6 +426,7 @@ def reparametrize(drift, output_dir, iteration):
         np.round(string_length(original_string), 2),
         copy.deepcopy(original_string),
     )
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 7))
     for clamp in clamps:
         scaler = MinMaxScaler()
         string = copy.deepcopy(final_points_string)
@@ -624,7 +440,7 @@ def reparametrize(drift, output_dir, iteration):
         logging.info(f"clamp: {clamp}, new string length: {new_string_length}")
         if new_string_length > longest[0]:
             longest = (new_string_length, new_string)
-        plt.plot(
+        ax1.plot(
             new_string[:, 0], new_string[:, 1], label=f"clamp: {clamp}", marker="o"
         )
 
@@ -632,13 +448,23 @@ def reparametrize(drift, output_dir, iteration):
     logging.info(
         f"original: {original_string}, length: {string_length(original_string)}"
     )
-    plt.plot(original_string[:, 0], original_string[:, 1], label="original", marker="o")
-    plt.scatter(
+    ax1.plot(original_string[:, 0], original_string[:, 1], label="original", marker="o")
+    ax1.scatter(
         final_points[:, :, 0], final_points[:, :, 1], label="final points", marker="x"
     )
-    plt.legend()
-    plt.grid(True)
-    plt.title(f"Reparametrized string, iteration {iteration}")
+    ax1.legend(loc="best")
+    ax1.grid(True)
+    ax2.plot(original_string[:, 0], original_string[:, 1], label="original", marker="o")
+    ax2.plot(longest[1][:, 0], longest[1][:, 1], label="new", marker="o")
+    ax2.legend(loc="best")
+    ax2.grid(True)
+    ax2.set_xlim(-180, 180)
+    ax2.set_ylim(-180, 180)
+    ax2.set_xticks([-180, -90, 0, 90, 180])
+    ax2.set_yticks([-180, -90, 0, 90, 180])
+    ax2.set_xlabel("Psi")
+    ax2.set_ylabel("Phi")
+    fig.suptitle(f"Reparametrized string, iteration {iteration}")
     plt.savefig(f"{output_dir}/reparametrized_string.png")
     plt.close()
 
