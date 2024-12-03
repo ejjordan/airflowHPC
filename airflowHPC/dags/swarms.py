@@ -1,4 +1,3 @@
-import numpy as np
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.exceptions import AirflowException
@@ -392,6 +391,7 @@ def step(
     trigger_pull_dag = TriggerDagRunOperator(
         task_id="trigger_pull_dag",
         trigger_dag_id="pull",
+        trigger_run_id="{{ task_instance.map_index }}_{{ ts_nodash }}",  # unique id
         wait_for_completion=True,
         poke_interval=1,
         trigger_rule="none_failed",
@@ -414,6 +414,7 @@ def step(
     trigger_run_swarm = TriggerDagRunOperator(
         task_id=f"trigger_run_swarm",
         trigger_dag_id="simulate_expand",
+        trigger_run_id="{{ task_instance.map_index }}_{{ ts_nodash }}",  # unique id
         wait_for_completion=True,
         poke_interval=1,
         trigger_rule="none_failed",
@@ -487,6 +488,8 @@ def new_string(drift, output_dir):
     plt.grid(True)
     plt.xlim(-180, 180)
     plt.ylim(-180, 180)
+    plt.xticks([-180, -90, 0, 90, 180])
+    plt.yticks([-180, -90, 0, 90, 180])
     plt.xlabel("Psi")
     plt.ylabel("Phi")
     plt.savefig(f"{output_dir}/old_and_new_paths.png")
@@ -526,7 +529,7 @@ def next_step_params_drift(drift, dag_params, output_dir):
 
 @task
 def get_phi_psi_point(iter_params, num_points):
-    from numpy import linspace
+    import numpy as np
     import ast
 
     Hummer = [[-50, -50], [-70, 120]]
@@ -534,16 +537,117 @@ def get_phi_psi_point(iter_params, num_points):
     random = np.random.uniform(
         low=[-180, -150], high=[90, 180], size=(num_points, 2)
     ).tolist()
+
+    x_points = np.linspace(-150, 90, 5)
+    y_points = np.linspace(-120, 120, 5)
+    grid = np.array(np.meshgrid(x_points, y_points)).T.reshape(-1, 2).tolist()
     use = Hummer
-    if use == random and iter_params["iteration"] == 1:
-        return random
-    points_list = linspace(use[0], use[1], num_points).tolist()
+    if iter_params["iteration"] == 1:
+        if use == random:
+            return random
+        if use == grid:
+            return grid
+    points_list = np.linspace(use[0], use[1], num_points).tolist()
     if iter_params["iteration"] == 1:
         return points_list
     else:
         points_list = iter_params["inputs"]["point"]
         points_list = [ast.literal_eval(point) for point in points_list]
         return points_list
+
+
+@task
+def reparametrize(drift, output_dir, iteration):
+    import logging
+    import numpy as np
+    from sklearn.preprocessing import MinMaxScaler
+    import matplotlib.pyplot as plt
+    import copy
+
+    logging.info(f"drift: {drift}")
+
+    def string_length(string):
+        x = string[:, 0]
+        y = string[:, 1]
+        dx, dy = np.diff(x), np.diff(y)
+        ds = np.array((0, *np.sqrt(dx * dx + dy * dy)))
+        return np.sum(ds)
+
+    def interpolate_string(string, num_points):
+        x = string[:, 0]
+        y = string[:, 1]
+        # compute the distances, ds, between points
+        dx, dy = np.diff(x), np.diff(y)
+        ds = np.array((0, *np.sqrt(dx * dx + dy * dy)))
+        # compute the total distance from the 1st point, measured on the curve
+        s = np.cumsum(ds)
+
+        # interpolate
+        xinter = np.interp(np.linspace(0, s[-1], num_points), s, x)
+        yinter = np.interp(np.linspace(0, s[-1], num_points), s, y)
+        interpolated_string = np.array([xinter, yinter]).T
+        return interpolated_string
+
+    def iter_interpolate_string(string, num_points, max_iterations=5, tol=1e-2):
+        prev_string = interpolate_string(string, num_points)
+        assert max_iterations > 0
+        for i in range(max_iterations):
+            new_string = interpolate_string(prev_string, num_points)
+            dist = np.linalg.norm(new_string - prev_string) / np.linalg.norm(
+                prev_string
+            )
+            prev_string = new_string
+            logging.debug(f"iteration {i}, dist: {dist}")
+            if dist <= tol:
+                break
+        return prev_string
+
+    final_points_string = np.array([list(d["final_point_means"]) for d in drift])
+    original_string = np.array([list(d["phi_psi_points"]) for d in drift])
+    final_points = np.array([d["final_points"] for d in drift])
+
+    clamps = [[], [0], [-1], [0, -1]]
+    longest = (
+        np.round(string_length(original_string), 2),
+        copy.deepcopy(original_string),
+    )
+    for clamp in clamps:
+        scaler = MinMaxScaler()
+        string = copy.deepcopy(final_points_string)
+        for c in clamp:
+            string[c] = original_string[c]
+        interpolate = iter_interpolate_string(string, len(string), 10)
+
+        scaled_string = scaler.fit_transform(interpolate)
+        new_string = scaler.inverse_transform(scaled_string)
+        new_string_length = np.round(string_length(new_string), 2)
+        logging.info(f"clamp: {clamp}, new string length: {new_string_length}")
+        if new_string_length > longest[0]:
+            longest = (new_string_length, new_string)
+        plt.plot(
+            new_string[:, 0], new_string[:, 1], label=f"clamp: {clamp}", marker="o"
+        )
+
+    logging.info(f"longest: {longest[1]}, length: {longest[0]}")
+    logging.info(
+        f"original: {original_string}, length: {string_length(original_string)}"
+    )
+    plt.plot(original_string[:, 0], original_string[:, 1], label="original", marker="o")
+    plt.scatter(
+        final_points[:, :, 0], final_points[:, :, 1], label="final points", marker="x"
+    )
+    plt.legend()
+    plt.grid(True)
+    plt.title(f"Reparametrized string, iteration {iteration}")
+    plt.savefig(f"{output_dir}/reparametrized_string.png")
+    plt.close()
+
+    gro_files = [d["best_gro"] for d in drift]
+    new_string = longest[1]
+    new_string_dict = {}
+    for i in range(len(new_string)):
+        new_string_dict[str(np.round(new_string[i]).tolist())] = gro_files[i]
+    return new_string_dict
 
 
 with DAG(
@@ -566,11 +670,11 @@ with DAG(
             },
         },
         "output_dir": "swarms",
-        "mdp_options": {"nsteps": 100, "nstxout-compressed": 10},
+        "mdp_options": {"nsteps": 50, "nstxout-compressed": 10},
         "expected_output": "result.gro",
-        "max_iterations": 2,
+        "max_iterations": 6,
         "swarm_size": 3,
-        "num_string_points": 2,
+        "num_string_points": 12,
     },
 ) as swarms:
     prev_results = json_from_dataset_path.override(task_id="get_iteration_params")(
@@ -606,7 +710,11 @@ with DAG(
     ).expand(phi_psi=phi_psi_point)
 
     do_this_iteration >> [drift, sim_info]
-    next_string = new_string(drift, this_iter_params["output_dir"])
+    next_string = reparametrize(
+        drift,
+        this_iter_params["output_dir"],
+        "{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration') }}",
+    )
     next_params = next_step_params_drift(
         next_string, this_iter_params["params"], "{{ params.output_dir }}"
     )
