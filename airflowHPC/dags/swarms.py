@@ -372,12 +372,20 @@ def get_phi_psi_point(iter_params, num_points):
 
 
 @task
-def reparametrize(drift, output_dir, iteration):
+def reparametrize(drift, output_dir, iteration, max_swarms):
     import logging
     import numpy as np
     from sklearn.preprocessing import MinMaxScaler
     import matplotlib.pyplot as plt
     import copy
+    from dataclasses import dataclass
+
+    @dataclass
+    class Longest:
+        length: float
+        string: np.array
+        gro: str | None = None
+        gro_idx: int | None = None
 
     logging.info(f"drift: {drift}")
 
@@ -420,31 +428,46 @@ def reparametrize(drift, output_dir, iteration):
     final_points_string = np.array([list(d["final_point_means"]) for d in drift])
     original_string = np.array([list(d["phi_psi_points"]) for d in drift])
     final_points = np.array([d["final_points"] for d in drift])
+    gro_files = [d["best_gro"] for d in drift]
 
     clamps = [[], [0], [-1], [0, -1]]
-    longest = (
-        np.round(string_length(original_string), 2),
-        copy.deepcopy(original_string),
-    )
+    longest = Longest(0, copy.deepcopy(original_string))
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 7))
     for clamp in clamps:
         scaler = MinMaxScaler()
         string = copy.deepcopy(final_points_string)
+        gro_to_insert = None
         for c in clamp:
-            string[c] = original_string[c]
+            if len(clamp) == 1 and len(string) < max_swarms:
+                # add a new point to the string
+                if c == 0:
+                    string = np.vstack([original_string[c], string])
+                else:
+                    string = np.vstack([string, original_string[c]])
+                logging.info(f"string: {string}")
+                gro_to_insert = gro_files[c]
+                logging.info(f"adding point {c} to string")
+            else:
+                string[c] = original_string[c]
+
         interpolate = iter_interpolate_string(string, len(string), 10)
 
         scaled_string = scaler.fit_transform(interpolate)
         new_string = scaler.inverse_transform(scaled_string)
         new_string_length = np.round(string_length(new_string), 2)
         logging.info(f"clamp: {clamp}, new string length: {new_string_length}")
-        if new_string_length > longest[0]:
-            longest = (new_string_length, new_string)
+        if new_string_length > longest.length:
+            if gro_to_insert:
+                longest = Longest(
+                    new_string_length, new_string, gro_to_insert, clamp[0]
+                )
+            else:
+                longest = Longest(new_string_length, new_string)
         ax1.plot(
             new_string[:, 0], new_string[:, 1], label=f"clamp: {clamp}", marker="o"
         )
 
-    logging.info(f"longest: {longest[1]}, length: {longest[0]}")
+    logging.info(f"longest: {longest.string}, length: {longest.length}")
     logging.info(
         f"original: {original_string}, length: {string_length(original_string)}"
     )
@@ -455,7 +478,7 @@ def reparametrize(drift, output_dir, iteration):
     ax1.legend(loc="best")
     ax1.grid(True)
     ax2.plot(original_string[:, 0], original_string[:, 1], label="original", marker="o")
-    ax2.plot(longest[1][:, 0], longest[1][:, 1], label="new", marker="o")
+    ax2.plot(longest.string[:, 0], longest.string[:, 1], label="new", marker="o")
     ax2.legend(loc="best")
     ax2.grid(True)
     ax2.set_xlim(-180, 180)
@@ -468,8 +491,10 @@ def reparametrize(drift, output_dir, iteration):
     plt.savefig(f"{output_dir}/reparametrized_string.png")
     plt.close()
 
-    gro_files = [d["best_gro"] for d in drift]
-    new_string = longest[1]
+    logging.info(f"longest: {longest}")
+    new_string = longest.string
+    if longest.gro:
+        gro_files.insert(longest.gro_idx, longest.gro)
     new_string_dict = {}
     for i in range(len(new_string)):
         new_string_dict[str(np.round(new_string[i]).tolist())] = gro_files[i]
@@ -501,6 +526,7 @@ with DAG(
         "max_iterations": 6,
         "swarm_size": 3,
         "num_string_points": 12,
+        "max_string_points": 20,
     },
 ) as swarms:
     prev_results = json_from_dataset_path.override(task_id="get_iteration_params")(
@@ -540,6 +566,7 @@ with DAG(
         drift,
         this_iter_params["output_dir"],
         "{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration') }}",
+        "{{ params.max_string_points }}",
     )
     next_params = next_step_params_drift(
         next_string, this_iter_params["params"], "{{ params.output_dir }}"
