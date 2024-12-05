@@ -71,12 +71,30 @@ def json2mdp(mdp_json_data, output_file: str = None):
 
 def validate_json_mdp(mdp_data):
     import jsonschema, json, os
+    from jsonschema.validators import extend
 
     file_dir = os.path.abspath(os.path.dirname(__file__))
     schema_file_path = os.path.join(file_dir, "mdp_schema.json")
     with open(schema_file_path, "r") as schema_file:
         schema = json.load(schema_file)
-    jsonschema.validate(mdp_data, schema)
+
+    def case_insensitive_enum(validator, enums, instance, schema):
+        if isinstance(instance, str) and "enum" in schema:
+            if instance.lower() not in [e.lower() for e in schema["enum"]]:
+                yield jsonschema.ValidationError(
+                    f"{instance} is not one of {schema['enum']}"
+                )
+        else:
+            for error in jsonschema.Draft7Validator.VALIDATORS["enum"](
+                validator, enums, instance, schema
+            ):
+                yield error
+
+    CaseInsensitiveEnumValidator = extend(
+        jsonschema.Draft7Validator, {"enum": case_insensitive_enum}
+    )
+
+    jsonschema.validate(mdp_data, schema, cls=CaseInsensitiveEnumValidator)
 
 
 @task
@@ -123,6 +141,10 @@ def update_write_mdp_json_as_mdp_from_file(
     logging.info(f"update: {update_dict}")
     with open(mdp_json_file_path, "r") as mdp_file:
         mdp_data = json.load(mdp_file)
+    for key in list(mdp_data):
+        if "-" in key:
+            new_key = key.replace("-", "_")
+            mdp_data[new_key] = mdp_data.pop(key)
     return update_write_mdp_json_as_mdp(mdp_data, update_dict, output_file)
 
 

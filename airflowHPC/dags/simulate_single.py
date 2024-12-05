@@ -35,6 +35,7 @@ with DAG(
         ),
         "output_dir": "sim",
         "expected_output": "sim.gro",
+        "mdp_updates": {},
     },
 ) as simulate_cpt:
     simulate_cpt.doc = """Simulation from a cpt file."""
@@ -59,7 +60,8 @@ with DAG(
         file_name="{{ params.inputs.mdp.filename }}",
     )
     mdp_cpt = update_write_mdp_json_as_mdp_from_file.override(task_id="write_mdp")(
-        mdp_json_file_path=mdp_json_cpt
+        mdp_json_file_path=mdp_json_cpt,
+        update_dict="{{ params.mdp_updates }}",
     )
 
     grompp_cpt = ResourceGmxOperator(
@@ -129,6 +131,7 @@ with DAG(
             },
             section="inputs",
         ),
+        "mdp_updates": {},
         "output_dir": "sim",
         "expected_output": "sim.gro",
     },
@@ -150,7 +153,8 @@ with DAG(
         file_name="{{ params.inputs.mdp.filename }}",
     )
     mdp_no_cpt = update_write_mdp_json_as_mdp_from_file.override(task_id="write_mdp")(
-        mdp_json_file_path=mdp_json_no_cpt
+        mdp_json_file_path=mdp_json_no_cpt,
+        update_dict="{{ params.mdp_updates }}",
     )
 
     grompp_no_cpt = ResourceGmxOperator(
