@@ -70,8 +70,8 @@ def plot_free_energy(cv_info, output_dir):
     logging.info(f"Number of contours: {num_contours}")
     plt.contourf(xedges[:-1], yedges[:-1], free_energy.T, levels=20, cmap="viridis")
     plt.colorbar(label="Free Energy (kcal/mol)")
-    plt.xlabel("Psi")
-    plt.ylabel("Phi")
+    plt.xlabel("Phi")
+    plt.ylabel("Psi")
     plt.xlim(-180, 180)
     plt.ylim(-180, 180)
     plt.xticks([-180, -90, 0, 90, 180])
@@ -89,7 +89,7 @@ def plot_paths(cv_info, output_dir):
     num_iterations = len(cv_info.keys())
     ncols = 3
     nrows = (num_iterations + ncols - 1) // ncols
-    fig, ax = plt.subplots(nrows, ncols, figsize=(15, 15))
+    fig, ax = plt.subplots(nrows, ncols, figsize=(15, 5 * nrows))
     ax = ax.flatten()
 
     for i, (iteration, iter_info) in enumerate(cv_info.items()):
@@ -109,7 +109,10 @@ def plot_paths(cv_info, output_dir):
         ax[i].set_ylim(-180, 180)
         ax[i].set_xticks([-180, -90, 0, 90, 180])
         ax[i].set_yticks([-180, -90, 0, 90, 180])
-        ax[i].set_title(f"Iteration {i}")
+        ax[i].set_xlabel("Phi")
+        ax[i].set_ylabel("Psi")
+        ax[i].set_aspect("equal")
+        ax[i].set_title(f"{iteration}")
     plt.tight_layout()
     plt.savefig(f"{output_dir}/paths.png")
     plt.close()

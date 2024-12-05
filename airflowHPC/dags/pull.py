@@ -111,24 +111,34 @@ def mdp_update_params(
     return mdp_updates
 
 
-def plot_timeseries(phi_psi_angles, output_dir):
+def plot_timeseries(phi_psi_angles, phi, psi, output_dir):
     import matplotlib.pyplot as plt
 
+    phi = float(phi)
+    psi = float(psi)
     # Plot phi/psi angles as a time series
     fig, ax = plt.subplots(nrows=6, ncols=2)
-    for i in range(2):
+    ax[0, 0].set_title(f"Phi={phi:.0f}")
+    ax[0, 1].set_title(f"Psi={psi:.0f}")
+    for i, angle in enumerate([phi, psi]):
         ax[0, i].plot(
-            phi_psi_angles.mean(axis=1).T[i], label=f"{['Phi', 'Psi'][i]} mean"
+            phi_psi_angles.mean(axis=1).T[i],
+            label=f"Final mean: {phi_psi_angles.mean(axis=1).T[i][-1]:.0f}",
         )
         ax[0, i].set_ylim([-180, 180])
-        ax[0, i].axhline(y=-70, color="r", linestyle="--")
+        ax[0, i].set_yticks([-90, 0, 90])
+        ax[0, i].set_xticks([])
+        ax[0, i].axhline(y=angle, color="r", linestyle=":")
+        ax[0, i].legend(loc="best", handlelength=0)
+
     for i in range(5):
-        for j in range(2):
-            ax[i + 1, j].plot(
-                phi_psi_angles.T[j][i], label=f"{['Phi', 'Psi'][j]} res{i + 1}"
-            )
+        for j, angle in enumerate([phi, psi]):
+            ax[i + 1, j].plot(phi_psi_angles.T[j][i])
             ax[i + 1, j].set_ylim([-180, 180])
-            ax[i + 1, j].axhline(y=-70, color="r", linestyle="--")
+            ax[i + 1, j].set_yticks([-90, 0, 90])
+            ax[i + 1, j].set_xticks([])
+            ax[i + 1, j].axhline(y=angle, color="r", linestyle=":")
+
     fig.suptitle("Phi/Psi angles")
     plt.savefig(f"{output_dir}/phi_psi_angles.png")
     plt.close()
@@ -150,7 +160,7 @@ def plot_scatter(phi_psi_angles, output_dir):
     plt.close()
 
 
-@task(multiple_outputs=True)
+@task
 def trajectory_dihedral(tpr, xtc, output_dir, phi_angle, psi_angle, plot=True):
     import logging
     from MDAnalysis import Universe
@@ -174,19 +184,10 @@ def trajectory_dihedral(tpr, xtc, output_dir, phi_angle, psi_angle, plot=True):
         distances.append(distance)
 
     if plot:
-        plot_timeseries(phi_psi_angles, output_dir)
+        plot_timeseries(phi_psi_angles, phi_angle, psi_angle, output_dir)
         plot_scatter(phi_psi_angles, output_dir)
 
-    # Get frame closest to target angles
-    min_dist_idx = distances.index(min(distances))
-    u.trajectory[min_dist_idx]
-    output_frame = f"{output_dir}/closest_frame.gro"
-    u.atoms.write(output_frame)
-
-    return {
-        "closest_frame": output_frame,
-        "closest_frame_means": traj_means[min_dist_idx],
-    }
+    return traj_means[-1]
 
 
 with DAG(
@@ -211,7 +212,7 @@ with DAG(
         "expected_output": "dihedrals.json",
         "index_fn": "dihedrals.ndx",
         "force_constant": 500,
-        "mdp_updates": {"nsteps": 500, "nstxout_compressed": 50, "dt": 0.001},
+        "mdp_updates": {"nsteps": 2000, "nstxout_compressed": 500, "dt": 0.001},
         "phi_angle": -50,
         "psi_angle": -50,
     },
@@ -223,7 +224,7 @@ with DAG(
     )
     dih_ndx = make_ndx_dihedrals(
         gro=input_gro,
-        output_dir="{{ params.output_dir }}/{{ params.force_constant }}",
+        output_dir="{{ params.output_dir }}",
         output_fn="{{ params.index_fn }}",
     )
     mdp_updates = mdp_update_params.override(task_id="initial_mdp_updates")(
@@ -262,14 +263,14 @@ with DAG(
             "-n": "{{ params.index_fn }}",
         },
         output_files={"-o": "{{ params.output_fn }}.tpr"},
-        output_dir="{{ params.output_dir }}/{{ params.force_constant }}",
+        output_dir="{{ params.output_dir }}",
     )
 
     mdrun = ResourceGmxOperator(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 2,
+            "cpus_per_task": 1,
             "gpus": 0,
             "gpu_type": None,
         },
@@ -280,13 +281,13 @@ with DAG(
             "-c": "{{ params.output_fn }}.gro",
             "-x": "{{ params.output_fn }}.xtc",
         },
-        output_dir="{{ params.output_dir }}/{{ params.force_constant }}",
+        output_dir="{{ params.output_dir }}",
     )
 
     traj_dihedrals = trajectory_dihedral.override(task_id="trajectory_dihedrals")(
         tpr="{{ ti.xcom_pull(task_ids='grompp')['-o'] }}",
         xtc="{{ ti.xcom_pull(task_ids='mdrun')['-x'] }}",
-        output_dir="{{ params.output_dir }}/{{ params.force_constant }}",
+        output_dir="{{ params.output_dir }}",
         phi_angle="{{ params.phi_angle }}",
         psi_angle="{{ params.psi_angle }}",
     )
@@ -299,8 +300,8 @@ with DAG(
             "gro": "{{ ti.xcom_pull(task_ids='mdrun')['-c'] }}",
             "xtc": "{{ ti.xcom_pull(task_ids='mdrun')['-x'] }}",
             "tpr": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}",
-            "next_gro": traj_dihedrals["closest_frame"],
-            "next_gro_means": traj_dihedrals["closest_frame_means"],
+            "next_gro": "{{ ti.xcom_pull(task_ids='mdrun')['-c'] }}",
+            "next_gro_means": traj_dihedrals,
             "force_constant": "{{ params.force_constant }}",
             "point": ["{{ params.phi_angle }}", "{{ params.psi_angle }}"],
         },

@@ -90,7 +90,7 @@ def pull_params(
     psi = phi_psi[1]
     ti = context["ti"]
     map_index = ti.map_index
-    output_dir = f"{output_path}/iteration_{iteration}/{map_index}"
+    output_dir = f"{output_path}/iteration_{iteration}/{map_index}/pull"
     gro_path = iter_params["inputs"]["gro"]["directory"]
     gro_fn = iter_params["inputs"]["gro"]["filename"]
     ref_data = iter_params["inputs"]["gro"]["ref_data"]
@@ -215,6 +215,7 @@ def step(
             output_dir,
             f"iteration_{iteration}",
             "{{ task_instance.map_index }}",
+            "pull",
             expected_output,
         ],
         key=force_constant,
@@ -230,7 +231,7 @@ def step(
         poke_interval=1,
         trigger_rule="none_failed",
         conf=next_params["params"],
-        max_active_tis_per_dagrun=4,
+        max_active_tis_per_dagrun=2,
     )
     sim_info = json_from_dataset_path_parts.override(task_id="extract_sim_info")(
         dataset_path_parts=[
@@ -317,20 +318,12 @@ def get_phi_psi_point(iter_params, num_points):
 
 
 @task
-def reparametrize(drift, output_dir, iteration, max_swarms):
+def reparametrize(drift, output_dir, iteration, add_point, max_swarms):
     import logging
     import numpy as np
     from sklearn.preprocessing import MinMaxScaler
     import matplotlib.pyplot as plt
     import copy
-    from dataclasses import dataclass
-
-    @dataclass
-    class Longest:
-        length: float
-        string: np.array
-        gro: str | None = None
-        gro_idx: int | None = None
 
     logging.info(f"drift: {drift}")
 
@@ -374,72 +367,57 @@ def reparametrize(drift, output_dir, iteration, max_swarms):
     original_string = np.array([list(d["phi_psi_points"]) for d in drift])
     final_points = np.array([d["final_points"] for d in drift])
     gro_files = [d["best_gro"] for d in drift]
+    scaler = MinMaxScaler()
+    string = copy.deepcopy(final_points_string)
+    # Fix the endpoints
+    string[0] = original_string[0]
+    string[-1] = original_string[-1]
+    add = 0
+    if add_point and len(string) < max_swarms:
+        add = 1
+        # extend gro_files by copying the middle gro file
+        middle_gro_idx = len(gro_files) // 2
+        gro_files.insert(middle_gro_idx, gro_files[middle_gro_idx])
 
-    clamps = [[], [0], [-1], [0, -1]]
-    longest = Longest(0, copy.deepcopy(original_string))
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 7))
-    for clamp in clamps:
-        scaler = MinMaxScaler()
-        string = copy.deepcopy(final_points_string)
-        gro_to_insert = None
-        for c in clamp:
-            if len(clamp) == 1 and len(string) < max_swarms:
-                # add a new point to the string
-                if c == 0:
-                    string = np.vstack([original_string[c], string])
-                else:
-                    string = np.vstack([string, original_string[c]])
-                logging.info(f"string: {string}")
-                gro_to_insert = gro_files[c]
-                logging.info(f"adding point {c} to string")
-            else:
-                string[c] = original_string[c]
-
-        interpolate = iter_interpolate_string(string, len(string), 10)
-
-        scaled_string = scaler.fit_transform(interpolate)
-        new_string = scaler.inverse_transform(scaled_string)
-        new_string_length = np.round(string_length(new_string), 2)
-        logging.info(f"clamp: {clamp}, new string length: {new_string_length}")
-        if new_string_length > longest.length:
-            if gro_to_insert:
-                longest = Longest(
-                    new_string_length, new_string, gro_to_insert, clamp[0]
-                )
-            else:
-                longest = Longest(new_string_length, new_string)
-        ax1.plot(
-            new_string[:, 0], new_string[:, 1], label=f"clamp: {clamp}", marker="o"
-        )
-
-    logging.info(f"longest: {longest.string}, length: {longest.length}")
+    interpolate = iter_interpolate_string(string, len(string) + add, 10)
+    scaled_string = scaler.fit_transform(interpolate)
+    new_string = scaler.inverse_transform(scaled_string)
+    new_string_length = np.round(string_length(new_string), 2)
+    original_sting_length = np.round(string_length(original_string), 2)
     logging.info(
-        f"original: {original_string}, length: {string_length(original_string)}"
+        f"original length: {original_sting_length}, new length: {new_string_length}"
     )
-    ax1.plot(original_string[:, 0], original_string[:, 1], label="original", marker="o")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 7))
+    for i, ax in enumerate([ax1, ax2]):
+        ax.plot(
+            new_string[:, 0],
+            new_string[:, 1],
+            label="new",
+            marker="o",
+        )
+        ax.plot(
+            original_string[:, 0],
+            original_string[:, 1],
+            label="original",
+            marker="o",
+        )
+        ax.legend(loc="best")
+        ax.grid(True)
+        ax.set_xlabel("Psi")
+        ax.set_ylabel("Phi")
     ax1.scatter(
         final_points[:, :, 0], final_points[:, :, 1], label="final points", marker="x"
     )
-    ax1.legend(loc="best")
-    ax1.grid(True)
-    ax2.plot(original_string[:, 0], original_string[:, 1], label="original", marker="o")
-    ax2.plot(longest.string[:, 0], longest.string[:, 1], label="new", marker="o")
-    ax2.legend(loc="best")
-    ax2.grid(True)
+    ax1.set_title(f"Detail view")
     ax2.set_xlim(-180, 180)
     ax2.set_ylim(-180, 180)
     ax2.set_xticks([-180, -90, 0, 90, 180])
     ax2.set_yticks([-180, -90, 0, 90, 180])
-    ax2.set_xlabel("Psi")
-    ax2.set_ylabel("Phi")
-    fig.suptitle(f"Reparametrized string, iteration {iteration}")
+    ax2.set_title(f"Full view")
+    plt.suptitle(f"Reparametrized string, iteration {iteration}")
     plt.savefig(f"{output_dir}/reparametrized_string.png")
     plt.close()
 
-    logging.info(f"longest: {longest}")
-    new_string = longest.string
-    if longest.gro:
-        gro_files.insert(longest.gro_idx, longest.gro)
     new_string_dict = {}
     for i in range(len(new_string)):
         new_string_dict[str(np.round(new_string[i]).tolist())] = gro_files[i]
@@ -466,12 +444,12 @@ with DAG(
             },
         },
         "output_dir": "swarms",
-        "mdp_options": {"nsteps": 50, "nstxout-compressed": 10},
+        "mdp_options": {"nsteps": 500, "nstxout-compressed": 100},
         "expected_output": "result.gro",
-        "max_iterations": 6,
-        "swarm_size": 3,
+        "max_iterations": 2,
+        "swarm_size": 10,
         "num_string_points": 12,
-        "max_string_points": 20,
+        "max_string_points": 12,
     },
 ) as swarms:
     prev_results = json_from_dataset_path.override(task_id="get_iteration_params")(
@@ -511,6 +489,7 @@ with DAG(
         drift,
         this_iter_params["output_dir"],
         "{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration') }}",
+        False,
         "{{ params.max_string_points }}",
     )
     next_params = next_step_params_drift(
