@@ -1,5 +1,6 @@
 from airflow import Dataset
 from airflow.decorators import task, task_group
+from airflow.exceptions import AirflowSkipException, AirflowException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.operators.empty import EmptyOperator
 from dataclasses import dataclass
@@ -404,15 +405,25 @@ def dict_from_xcom_dicts(list_of_dicts, dict_structure):
 
 
 @task(trigger_rule="none_failed")
-def json_from_dataset_path(dataset_path: str, key: str = None):
-    import json
+def json_from_dataset_path(
+    dataset_path: str, key: str = None, allow_missing: bool = False
+):
+    import json, os
 
+    if not os.path.exists(dataset_path):
+        if allow_missing:
+            return {}
+        else:
+            raise AirflowException(f"Dataset path {dataset_path} does not exist")
     with open(dataset_path, "r") as f:
         data = json.load(f)
     if not key:
         return data
     else:
-        return [d[key] for d in data]
+        if len(data) == 1:
+            return data[str(key)]
+        else:
+            return [d[key] for d in data]
 
 
 @task
@@ -432,6 +443,39 @@ def xcom_lookup(dag_id, task_id, key, **context):
         dag_id=dag_id, task_ids=task_id, key=key, include_prior_dates=True
     )
     return xcom
+
+
+@task(max_active_tis_per_dagrun=1)
+def add_to_dataset(
+    output_dir: str, output_fn: str, new_data: dict, new_data_keys: list[str]
+):
+    import os
+    import json
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    out_path = os.path.abspath(output_dir)
+    output_file = os.path.join(out_path, output_fn)
+    if os.path.exists(output_file):
+        with open(output_file, "r") as f:
+            data = json.load(f)
+    else:
+        data = {}
+
+    # Navigate through the nested keys
+    nested_data = data
+    for key in new_data_keys[:-1]:
+        if key not in nested_data:
+            nested_data[key] = {}
+        nested_data = nested_data[key]
+
+    # Assign the new data to the final key
+    nested_data[new_data_keys[-1]] = new_data
+
+    with open(output_file, "w") as f:
+        json.dump(data, f, indent=2, separators=(",", ": "))
+    dataset = Dataset(uri=output_file)
+    return dataset
 
 
 @task
