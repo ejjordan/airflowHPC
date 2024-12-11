@@ -1,3 +1,4 @@
+import datetime
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.exceptions import AirflowException
@@ -67,9 +68,7 @@ def new_input(dag_params, new_gro_info, phi_psi_point, **context):
     dag_params["inputs"]["gro"]["ref_data"] = False
     dag_params["output_dir"] = new_output_dir
     dag_params["point"] = phi_psi_point
-    dag_params["mdp_options"] = [
-        dag_params["mdp_options"] for _ in range(dag_params["swarm_size"])
-    ]
+    dag_params["num_sims"] = dag_params["swarm_size"]
     return {"params": dag_params, "output_dir": new_output_dir}
 
 
@@ -193,7 +192,7 @@ def step(
     output_dir,
     iter_params,
     iteration,
-    force_constant="200",
+    force_constant="300",
     expected_output="dihedrals.json",
 ):
     pull_dag_params = pull_params(
@@ -202,12 +201,14 @@ def step(
     trigger_pull_dag = TriggerDagRunOperator(
         task_id="trigger_pull_dag",
         trigger_dag_id="pull",
-        trigger_run_id="{{ task_instance.map_index }}_{{ ts_nodash }}",  # unique id
+        trigger_run_id="{{ task_instance.map_index }}_{{ task_instance.try_number }}_{{ ts_nodash }}",  # unique id
         wait_for_completion=True,
         poke_interval=1,
         trigger_rule="none_failed",
         conf=pull_dag_params,
         max_active_tis_per_dagrun=4,
+        retries=4,
+        retry_delay=datetime.timedelta(seconds=0),
     )
     pull_dag_params >> trigger_pull_dag
     pull_info = json_from_dataset_path_parts.override(task_id="pull_results")(
@@ -225,13 +226,15 @@ def step(
     next_params = new_input(iter_params, pull_info, phi_psi)
     trigger_run_swarm = TriggerDagRunOperator(
         task_id=f"trigger_run_swarm",
-        trigger_dag_id="simulate_expand",
-        trigger_run_id="{{ task_instance.map_index }}_{{ ts_nodash }}",  # unique id
+        trigger_dag_id="simulate_expand_uniform",
+        trigger_run_id="{{ task_instance.map_index }}_{{ task_instance.try_number }}_{{ ts_nodash }}",  # unique id
         wait_for_completion=True,
         poke_interval=1,
         trigger_rule="none_failed",
         conf=next_params["params"],
         max_active_tis_per_dagrun=2,
+        retries=2,
+        retry_delay=datetime.timedelta(seconds=0),
     )
     sim_info = json_from_dataset_path_parts.override(task_id="extract_sim_info")(
         dataset_path_parts=[
@@ -444,12 +447,12 @@ with DAG(
             },
         },
         "output_dir": "swarms",
-        "mdp_options": {"nsteps": 500, "nstxout-compressed": 100},
+        "mdp_options": {"nsteps": 5000, "nstxout-compressed": 1000},
         "expected_output": "result.gro",
-        "max_iterations": 2,
-        "swarm_size": 10,
-        "num_string_points": 12,
-        "max_string_points": 12,
+        "max_iterations": 20,
+        "swarm_size": 8,
+        "num_string_points": 16,
+        "max_string_points": 16,
     },
 ) as swarms:
     prev_results = json_from_dataset_path.override(task_id="get_iteration_params")(
@@ -486,11 +489,11 @@ with DAG(
 
     do_this_iteration >> [drift, sim_info]
     next_string = reparametrize(
-        drift,
-        this_iter_params["output_dir"],
-        "{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration') }}",
-        False,
-        "{{ params.max_string_points }}",
+        drift=drift,
+        output_dir=this_iter_params["output_dir"],
+        iteration="{{ task_instance.xcom_pull(task_ids='iteration_params', key='iteration') }}",
+        add_point=False,
+        max_swarms="{{ params.max_string_points }}",
     )
     next_params = next_step_params_drift(
         next_string, this_iter_params["params"], "{{ params.output_dir }}"

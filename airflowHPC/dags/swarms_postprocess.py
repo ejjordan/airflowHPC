@@ -150,9 +150,7 @@ def plot_paths(cv_info, start_iteration, end_iteration, output_dir):
 
 
 @task
-def plot_vector_field(
-    cv_info, start_iteration, end_iteration, output_dir, plot_sims=True
-):
+def plot_vector_field(cv_info, start_iteration, end_iteration, output_dir, plot_sims):
     import numpy as np
     import logging
     import matplotlib.pyplot as plt
@@ -257,6 +255,7 @@ with DAG(
         "expected_output": "swarms.json",
         "first_iteration_to_consider": 12,
         "last_iteration_to_consider": 15,
+        "show_sims": False,
     },
 ) as swarms_postprocessing:
     prev_results = json_from_dataset_path.override(task_id="get_iteration_params")(
@@ -279,4 +278,5 @@ with DAG(
         start_iteration="{{ params.first_iteration_to_consider }}",
         end_iteration=num_completed_iters,
         output_dir="{{ params.output_dir }}",
+        plot_sims="{{ params.show_sims }}",
     )
