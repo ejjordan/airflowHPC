@@ -86,6 +86,7 @@ def plot_free_energy(cv_info, output_dir):
     plt.colorbar(label="Free Energy (kcal/mol)")
     plt.xlabel("Phi")
     plt.ylabel("Psi")
+    plt.grid(True)
     plt.title("Free Energy Landscape")
     plt.savefig(f"{output_dir}/free_energy_landscape.png")
     plt.close()
@@ -187,9 +188,10 @@ def plot_vector_field(cv_info, start_iteration, end_iteration, output_dir, plot_
     logging.info(f"swarm_sim_vectors: {swarm_sim_vectors}")
 
     num_iterations = len(iterations_to_use)
-    ncols = 3
+    ncols = 4 if num_iterations <= 12 else 5
     nrows = (num_iterations + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(15, 5 * nrows))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 5 * nrows))
+    fig.set_tight_layout(True)
     axes = axes.flatten()
 
     for i, iteration in enumerate(iterations_to_use):
@@ -210,7 +212,7 @@ def plot_vector_field(cv_info, start_iteration, end_iteration, output_dir, plot_
                 U = [v[1][0] - v[0][0] for v in swarm_sim]
                 V = [v[1][1] - v[0][1] for v in swarm_sim]
                 ax.quiver(
-                    X, Y, U, V, angles="xy", scale_units="xy", scale=1, width=0.002
+                    X, Y, U, V, angles="xy", scale_units="xy", scale=1, width=0.001
                 )
                 U_range = [
                     min(min([v[1][0] for v in swarm_sim]), U_range[0]),
@@ -240,9 +242,142 @@ def plot_vector_field(cv_info, start_iteration, end_iteration, output_dir, plot_
         ax.set_xlim(U_range[0] - 10, U_range[1] + 10)
         ax.set_ylim(V_range[0] - 10, V_range[1] + 10)
 
-    plt.tight_layout()
     plt.savefig(f"{output_dir}/trajectory_vector_field.png")
     plt.close()
+    # plt.show()
+
+
+@task
+def plot_convergence_angles(cv_info, iteration_num, output_dir):
+    import numpy as np
+    import logging
+    import matplotlib.pyplot as plt
+    import ast
+
+    assert f"iteration_{iteration_num}" in list(cv_info.keys())
+    iteration_to_use = f"iteration_{iteration_num}"
+
+    iter_info = cv_info[iteration_to_use]
+    logging.debug(f"iter_info: {iter_info}")
+    points = []
+    swarm_avg_vectors = {}
+    for j, (point, swarm_info) in enumerate(iter_info.items()):
+        logging.debug(f"swarm_info: {swarm_info}")
+        logging.debug(f"point: {point}")
+        points.append(ast.literal_eval(point))
+        sim_vecs = []
+        for sim_info in np.array(list(swarm_info.values())):
+            sim_vecs.append([sim_info[0].tolist(), sim_info[-1].tolist()])
+        swarm_avg = np.average(np.array(sim_vecs), axis=0)
+        logging.debug(f"swarm_avg: {swarm_avg}")
+        swarm_avg_vectors[point] = swarm_avg.tolist()
+
+    logging.info(f"points: {points}")
+    logging.info(f"swarm_avg_vectors: {swarm_avg_vectors}")
+
+    ncols = 4 if len(points) <= 12 else 5
+    nrows = (len(points) + ncols) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 5 * nrows))
+    fig.set_tight_layout(True)
+    axes = axes.flatten()
+
+    def vector_angle(u, v):
+        u = np.array(u)
+        v = np.array(v)
+        cos_theta = np.dot(u, v) / (np.linalg.norm(u) * np.linalg.norm(v))
+        angle_rad = np.arccos(np.clip(cos_theta, -1.0, 1.0))
+        angle_deg = np.degrees(angle_rad)
+        return angle_deg
+
+    points_T = np.transpose(points)
+    x_range = np.max(points_T[0]) - np.min(points_T[0])
+    y_range = np.max(points_T[1]) - np.min(points_T[1])
+    long_axis = 0 if x_range > y_range else 1
+    logging.info(f"Will sort points based on axis {'x' if long_axis == 0 else 'y'}")
+    sorted_points = sorted(points, key=lambda x: x[long_axis])
+    angle_errors = []
+
+    cmap = plt.cm.get_cmap("viridis")
+    colors = cmap(np.linspace(0, 1, len(sorted_points)))
+    for j, point in enumerate(sorted_points):
+        ax = axes[j + 1]
+        ax.set_xlim(-120, 50)
+        ax.set_ylim(-50, 120)
+        swarm_avg = swarm_avg_vectors[str(point)]
+        X = swarm_avg[0][0]
+        Y = swarm_avg[0][1]
+        U = swarm_avg[1][0] - swarm_avg[0][0]
+        V = swarm_avg[1][1] - swarm_avg[0][1]
+        ax.quiver(X, Y, U, V, angles="xy", scale_units="xy", scale=1, color="red")
+        logging.info(f"swarm_vec: {swarm_avg}")
+        swarm_vec = np.array(swarm_avg[-1]) - np.array(swarm_avg[0])
+        angle_fwd, angle_rev = 180, 180
+        if j > 0:
+            point_rev = np.array(sorted_points[j - 1]) - np.array(sorted_points[j])
+            plot_pts = np.transpose([sorted_points[j - 1], sorted_points[j]])
+            angle_rev = vector_angle(swarm_vec, point_rev)
+            ax.plot(
+                plot_pts[0],
+                plot_pts[1],
+                color=colors[j],
+                marker="o",
+                label=f"rev: {angle_rev:.2f}",
+            )
+            logging.info(f"point-1: {sorted_points[j - 1]}")
+        logging.info(f"point: {point}")
+        if j < len(sorted_points) - 1:
+            point_fwd = np.array(sorted_points[j + 1]) - np.array(sorted_points[j])
+            plot_pts = np.transpose([sorted_points[j], sorted_points[j + 1]])
+            angle_fwd = vector_angle(swarm_vec, point_fwd)
+            ax.plot(
+                plot_pts[0],
+                plot_pts[1],
+                color=colors[j],
+                marker="o",
+                label=f"fwd: {angle_fwd:.2f}",
+            )
+            logging.info(f"point+1: {sorted_points[j + 1]}")
+        logging.info(
+            f"fwd angle: {round(angle_fwd, 2)}, rev angle: {round(angle_rev, 2)}"
+        )
+        angle_errors.append(min(angle_fwd, angle_rev))
+        ax.legend()
+        ax.set_xlabel("Phi")
+        ax.set_ylabel("Psi")
+    angle_err = np.mean(angle_errors)
+    logging.info(f"angle_sum: {angle_err} for {iteration_to_use}")
+
+    ax = axes[0]
+    U_range = [0, 0]
+    V_range = [0, 0]
+
+    for j, point in enumerate(sorted_points):
+        swarm_avg = swarm_avg_vectors[str(point)]
+        swarm_avg = np.array(swarm_avg)
+
+        ax.plot(point[0], point[1], color="black", marker="o")
+        U_range = [
+            min(float(swarm_avg[1][0]), U_range[0]),
+            max(float(swarm_avg[1][0]), U_range[1]),
+        ]
+        V_range = [
+            min(float(swarm_avg[1][1]), V_range[0]),
+            max(float(swarm_avg[1][1]), V_range[1]),
+        ]
+        X = swarm_avg[0][0]
+        Y = swarm_avg[0][1]
+        U = swarm_avg[1][0] - swarm_avg[0][0]
+        V = swarm_avg[1][1] - swarm_avg[0][1]
+        ax.quiver(X, Y, U, V, angles="xy", scale_units="xy", scale=1, color="red")
+        ax.set_xlabel("Phi")
+        ax.set_ylabel("Psi")
+        ax.set_title(f"{iteration_to_use} angle error: {angle_err:.2f}")
+    ax.set_xlim(U_range[0] - 10, U_range[1] + 10)
+    ax.set_ylim(V_range[0] - 10, V_range[1] + 10)
+
+    plt.savefig(f"{output_dir}/convergence_angles.png")
+    plt.close()
+    # plt.show()
 
 
 with DAG(
@@ -279,4 +414,9 @@ with DAG(
         end_iteration=num_completed_iters,
         output_dir="{{ params.output_dir }}",
         plot_sims="{{ params.show_sims }}",
+    )
+    plot_convergence_angles(
+        cv_info=cv_data,
+        iteration_num=num_completed_iters,
+        output_dir="{{ params.output_dir }}",
     )
