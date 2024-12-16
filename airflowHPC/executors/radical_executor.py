@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any, Optional, Tuple
 from airflow.executors.base_executor import PARALLELISM
 from airflow.executors.local_executor import LocalExecutor
 from airflow.utils.state import TaskInstanceState
+from functools import cached_property
+from airflow.utils.providers_configuration_loader import providers_configuration_loaded
+from airflow.configuration import conf
 
 import radical.pilot as rp
 import radical.utils as ru
@@ -31,9 +34,7 @@ if TYPE_CHECKING:
 
 
 class RadicalExecutor(LocalExecutor):
-
     def __init__(self, parallelism: int = PARALLELISM):
-
         # FIXME: `parallelism` should be infinite, it is handled by RCT
         super().__init__(parallelism=parallelism)
 
@@ -74,13 +75,22 @@ class RadicalExecutor(LocalExecutor):
 
         # TODO: how to get pilot size and resource label from application level?
         #       probably best to run within an allocation...
-        with open('/tmp/test.txt', 'w') as f:
+        with open("/tmp/test.txt", "w") as f:
             f.write("RadicalExecutor: %s\n" % os.getcwd())
             f.flush()
-        n_nodes = os.environ.get("RCT_N_NODES")
-        pd = rp.PilotDescription({"resource": "local.localhost",
-                                  "nodes": int(n_nodes),
-                                  "runtime": 1440})
+        n_nodes = os.environ.get("RCT_N_NODES", 1)
+        pd = rp.PilotDescription(
+            {
+                "resource": "local.localhost",
+                "nodes": int(n_nodes),
+                "runtime": 1440,
+            }
+        )
+        if pd.get("cores") == 0:
+            self.log.info(
+                f"No cores specified in rp config, using environment variable: {self.cores_per_node}"
+            )
+            pd["cores"] = self.cores_per_node
         self._pilot = self._rct_pmgr.submit_pilots(pd)
         self._rct_tmgr.add_pilots(self._pilot)
 
@@ -102,6 +112,11 @@ class RadicalExecutor(LocalExecutor):
 
         self.log.info("RadicalExecutor: start ok")
 
+    @cached_property
+    @providers_configuration_loaded
+    def cores_per_node(self) -> int:
+        return int(conf.get("hpc", "cores_per_node", fallback=8))
+
     def end(self) -> None:
         self.log.info("RadicalExecutor: end")
         self._rct_session.close()
@@ -122,6 +137,7 @@ class RadicalExecutor(LocalExecutor):
 
     def _request_cb(self, topic, msg):
         import pprint
+
         self.log.info("request: %s" % pprint.pformat(msg))
         op_id = msg["op_id"]
 
@@ -209,7 +225,6 @@ class RadicalExecutor(LocalExecutor):
 
         if task_tuples:
             self._process_tasks(task_tuples)
-
 
     def orig_trigger_tasks(self, open_slots: int) -> None:
         """

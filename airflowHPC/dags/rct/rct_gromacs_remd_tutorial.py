@@ -228,7 +228,9 @@ with DAG(
         "expected_output": "nvt.gro",
     }
     nvt_equil = run_if_needed.override(group_id="nvt_equil")(
-        dag_id="rct_simulate_no_cpt", dag_params=nvt_params, dag_display_name="nvt_equil"
+        dag_id="rct_simulate_no_cpt",
+        dag_params=nvt_params,
+        dag_display_name="nvt_equil",
     )
 
     npt_params = {

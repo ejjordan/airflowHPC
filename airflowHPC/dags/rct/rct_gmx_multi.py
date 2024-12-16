@@ -64,7 +64,7 @@ with DAG(
         task_id="grompp",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 2,
+            "cpus_per_task": 1,
             "gpus": 0,
             "gpu_type": None,
         },
@@ -75,7 +75,7 @@ with DAG(
     mdrun_input_list = (
         update_gmx_input.override(task_id="mdrun_input_list")
         .partial(
-            args=["mdrun", "-v", "-deffnm", "result", "-ntomp", "2"],
+            args=["mdrun", "-v", "-deffnm", "result"],
             input_files_keys={"-s": "-o"},
             output_files={"-c": "result.gro", "-x": "result.xtc"},
         )
@@ -84,8 +84,8 @@ with DAG(
     mdrun_result = ResourceRCTOperatorDataclass.partial(
         task_id="mdrun",
         executor_config={
-            "mpi_ranks": 4,
-            "cpus_per_task": 2,
+            "mpi_ranks": 2,
+            "cpus_per_task": 4,
             "gpus": 0,
             "gpu_type": None,
         },
