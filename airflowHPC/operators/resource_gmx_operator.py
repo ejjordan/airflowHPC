@@ -195,13 +195,14 @@ class ResourceGmxOperator(ResourceBashOperator):
         call = list()
         call.append(mpi_executable)
         call.extend([self.num_ranks_flag, str(mpi_ranks)])
-        call.extend(["--cpu-set", self.core_ids])
         if self.hostname:
             if "srun" in mpi_executable:
                 host_flag = "--nodelist"
+                call.extend([host_flag, f"{self.hostname}"])
             else:
                 host_flag = "-host"
-            call.extend([host_flag, f"{self.hostname}:{self.mpi_ranks}"])
+                call.extend([host_flag, f"{self.hostname}:{self.mpi_ranks}"])
+                call.extend(["--cpu-set", self.core_ids])
         call.append(gmx_executable)
         call.extend(gmx_arguments)
         call.extend(self.flatten_dict(input_files))
