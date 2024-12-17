@@ -146,7 +146,7 @@ def plot_paths(cv_info, start_iteration, end_iteration, output_dir):
         ax[i].set_aspect("equal")
         ax[i].set_title(f"{iteration}")
     plt.tight_layout()
-    plt.savefig(f"{output_dir}/paths.png")
+    plt.savefig(f"{output_dir}/cv_observations.png")
     plt.close()
 
 
@@ -242,9 +242,8 @@ def plot_vector_field(cv_info, start_iteration, end_iteration, output_dir, plot_
         ax.set_xlim(U_range[0] - 10, U_range[1] + 10)
         ax.set_ylim(V_range[0] - 10, V_range[1] + 10)
 
-    plt.savefig(f"{output_dir}/trajectory_vector_field.png")
+    plt.savefig(f"{output_dir}/swarm_vectors.png")
     plt.close()
-    # plt.show()
 
 
 @task
@@ -377,7 +376,6 @@ def plot_convergence_angles(cv_info, iteration_num, output_dir):
 
     plt.savefig(f"{output_dir}/convergence_angles.png")
     plt.close()
-    # plt.show()
 
 
 with DAG(

@@ -212,7 +212,7 @@ with DAG(
         "expected_output": "dihedrals.json",
         "index_fn": "dihedrals.ndx",
         "force_constant": 500,
-        "mdp_updates": {"nsteps": 2000, "nstxout_compressed": 500, "dt": 0.001},
+        "mdp_options": {"nsteps": 2000, "nstxout_compressed": 500, "dt": 0.001},
         "phi_angle": -50,
         "psi_angle": -50,
     },
@@ -232,7 +232,7 @@ with DAG(
         force_constant="{{ params.force_constant }}",
         phi_angle="{{ params.phi_angle }}",
         psi_angle="{{ params.psi_angle }}",
-        extra_updates="{{ params.mdp_updates }}",
+        extra_updates="{{ params.mdp_options }}",
     )
     input_top = get_file.override(task_id="get_top")(
         input_dir="{{ params.inputs.top.directory }}",
