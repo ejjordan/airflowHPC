@@ -268,15 +268,25 @@ class ResourceExecutor(BaseExecutor):
             assert self.task_queue
 
         self.slurm_hook.assign_task_resources(key)
-        core_ids = self.slurm_hook.get_core_ids(key)
-        rank_ids = self.slurm_hook.get_rank_ids(key)
-        gpu_ids = self.slurm_hook.get_gpu_ids(key)
-        hostname = self.slurm_hook.get_hostname(key)
-        self.log.debug(
-            f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids} and rank IDs: {rank_ids}"
-        )
+        try:
+            core_ids = self.slurm_hook.get_core_ids(key)
+            rank_ids = self.slurm_hook.get_rank_ids(key)
+            gpu_ids = self.slurm_hook.get_gpu_ids(key)
+            hostname = self.slurm_hook.get_hostname(key)
+            self.log.debug(
+                f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids} and rank IDs: {rank_ids}"
+            )
+            self.task_queue.put((key, command, rank_ids, gpu_ids, hostname))
+        except RuntimeError:
+            self.log.error(
+                f"Failed to allocate resources for task {key.task_id}.{key.map_index}"
+            )
+            self.change_state(
+                key=key,
+                state=TaskInstanceState.FAILED,
+                info=f"No viable resource assignment for task: {key.task_id}.{key.map_index}",
+            )
 
-        self.task_queue.put((key, command, rank_ids, gpu_ids, hostname))
 
     def heartbeat(self) -> None:
         """Heartbeat sent to trigger new jobs."""

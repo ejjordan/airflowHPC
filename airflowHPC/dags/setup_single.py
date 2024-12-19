@@ -30,10 +30,10 @@ with DAG(
             "inputs": {
                 "pdb": {
                     "directory": "ala_pentapeptide",
-                    "filename": "ala_pentapeptide.pdb",
+                    "filename": "ala_capped_pentapeptide.pdb",
                 }
             },
-            "box_size": 3.5,
+            "box_size": 3.2,
             "force_field": "amber99sb-ildn",
             "water_model": "tip3p",
             "ion_concentration": 0,
@@ -78,6 +78,7 @@ with DAG(
             "output_dir": "sim",
             "mdp_updates": {
                 "comm-grps": ["Protein", "Non-Protein"],
+                "nsteps": 5000,
             },
         },
     },
