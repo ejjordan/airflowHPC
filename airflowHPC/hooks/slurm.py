@@ -36,17 +36,26 @@ class SlurmHook(BaseHook):
         if nodelist:
             self.node_names = get_hostlist(nodelist)
         elif "SLURM_JOB_ID" in os.environ:
-            # need to fix for interactive sessions
+            # needed for interactive sessions
             # sacct --noheader -X -P -oNodeList --jobs=$SLURM_JOB_ID
             result = subprocess.run(
-                ["sacct", "--noheader", "-X", "-P", "-oNodeList", f"--jobs={os.environ['SLURM_JOB_ID']}"],
+                [
+                    "sacct",
+                    "--noheader",
+                    "-X",
+                    "-P",
+                    "-oNodeList",
+                    f"--jobs={os.environ['SLURM_JOB_ID']}",
+                ],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
             nodelist = result.stdout.strip()
-            self.log.info(f"SLURM_JOB_NODELIST not set, using sacct: {nodelist}")
             self.node_names = get_hostlist(nodelist)
+            self.log.info(
+                f"SLURM_JOB_NODELIST not set, using sacct to determine node names: {self.node_names}"
+            )
         else:
             if self.num_nodes > 1:
                 raise ValueError("SLURM_JOB_NODELIST not set and SLURM_NNODES > 1")
