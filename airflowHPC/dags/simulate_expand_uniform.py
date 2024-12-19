@@ -101,6 +101,7 @@ with DAG(
             "gpus": 0,
             "gpu_type": None,
         },
+        gmx_executable="gmx_mpi",
         gmx_arguments=["grompp"],
         input_files={"-f": mdp, "-c": gro, "-p": top},
         output_files={"-o": "{{ params.expected_output | replace('.gro', '.tpr') }}"},

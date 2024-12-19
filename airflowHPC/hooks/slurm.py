@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+import subprocess
 
 from functools import cached_property
 from radical.utils import get_hostlist
@@ -33,6 +34,18 @@ class SlurmHook(BaseHook):
         self.num_nodes = int(os.environ.get("SLURM_NNODES", 1))
         nodelist = os.environ.get("SLURM_JOB_NODELIST")
         if nodelist:
+            self.node_names = get_hostlist(nodelist)
+        elif "SLURM_JOB_ID" in os.environ:
+            # need to fix for interactive sessions
+            # sacct --noheader -X -P -oNodeList --jobs=$SLURM_JOB_ID
+            result = subprocess.run(
+                ["sacct", "--noheader", "-X", "-P", "-oNodeList", f"--jobs={os.environ['SLURM_JOB_ID']}"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            nodelist = result.stdout.strip()
+            self.log.info(f"SLURM_JOB_NODELIST not set, using sacct: {nodelist}")
             self.node_names = get_hostlist(nodelist)
         else:
             if self.num_nodes > 1:
