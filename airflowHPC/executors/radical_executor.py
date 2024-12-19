@@ -72,20 +72,23 @@ class RadicalExecutor(LocalExecutor):
 
         self.log.info("RadicalExecutor: start")
 
-        # TODO: how to get pilot size and resource label from application level?
-        #       probably best to run within an allocation...
-        with open('/tmp/test.txt', 'w') as f:
-            f.write("RadicalExecutor: %s\n" % os.getcwd())
-            f.flush()
-        n_nodes = os.environ.get("RCT_N_NODES")
-        pd = rp.PilotDescription({"resource": "local.localhost",
-                                  "nodes": int(n_nodes),
-                                  "runtime": 1440})
+        pilot_json = os.environ.get("RCT_PILOT_CFG")
+        if pilot_json:
+            print('=== pilot_json: %s' % pilot_json)
+            pd_dict = ru.read_json(pilot_json)
+        else:
+            print('=== pilot_resource: localhost')
+            pd_dict = {"resource": "local.localhost",
+                       "nodes": 1,
+                       "runtime": 1440}
+
+        pd = rp.PilotDescription(pd_dict)
         self._pilot = self._rct_pmgr.submit_pilots(pd)
         self._rct_tmgr.add_pilots(self._pilot)
 
         # wait for the pilot to become active (but don't stall on errors)
         self._pilot.wait(rp.FINAL + [rp.PMGR_ACTIVE])
+        print('=== pilot state: %s' % self._pilot.state)
         assert self._pilot.state == rp.PMGR_ACTIVE
 
         # we now have a nodelist and can schedule tasks.  Keep a map of Airflow
