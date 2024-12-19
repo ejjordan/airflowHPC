@@ -102,7 +102,7 @@ class ResourceWorker(Process, LoggingMixin):
             self.log.debug(f"Setting {self.gpu_env_var_name} to {visible_devices}")
             env.update({self.gpu_env_var_name: visible_devices})
         if hostname:
-            self.log.debug(f"Setting {self.hostname_env_var_name} to {hostname}")
+            self.log.info(f"Setting {self.hostname_env_var_name} to {hostname}")
             env.update({self.hostname_env_var_name: hostname})
         state = self._execute_work_in_subprocess(command, env)
         self.result_queue.put((key, state))
