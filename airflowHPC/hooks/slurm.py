@@ -32,9 +32,9 @@ class SlurmHook(BaseHook):
             os.environ.get("SLURM_CPUS_PER_TASK", self.threads_per_core)
         )
         self.num_nodes = int(os.environ.get("SLURM_NNODES", 1))
-        nodelist = os.environ.get("SLURM_JOB_NODELIST")
-        if nodelist:
-            self.node_names = get_hostlist(nodelist)
+        if "SLURM_JOB_NODELIST" in os.environ:
+            self.node_names = get_hostlist(os.environ.get("SLURM_JOB_NODELIST"))
+            self.num_nodes = len(self.node_names)
         elif "SLURM_JOB_ID" in os.environ:
             # needed for interactive sessions
             # sacct --noheader -X -P -oNodeList --jobs=$SLURM_JOB_ID
@@ -53,6 +53,7 @@ class SlurmHook(BaseHook):
             )
             nodelist = result.stdout.strip()
             self.node_names = get_hostlist(nodelist)
+            self.num_nodes = len(self.node_names)
             self.log.info(
                 f"SLURM_JOB_NODELIST not set, using sacct to determine node names: {self.node_names}"
             )
