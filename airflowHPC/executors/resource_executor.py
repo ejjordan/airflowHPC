@@ -102,7 +102,7 @@ class ResourceWorker(Process, LoggingMixin):
             self.log.debug(f"Setting {self.gpu_env_var_name} to {visible_devices}")
             env.update({self.gpu_env_var_name: visible_devices})
         if hostname:
-            self.log.info(f"Setting {self.hostname_env_var_name} to {hostname}")
+            self.log.debug(f"Setting {self.hostname_env_var_name} to {hostname}")
             env.update({self.hostname_env_var_name: hostname})
         state = self._execute_work_in_subprocess(command, env)
         self.result_queue.put((key, state))
@@ -274,7 +274,7 @@ class ResourceExecutor(BaseExecutor):
             gpu_ids = self.slurm_hook.get_gpu_ids(key)
             hostname = self.slurm_hook.get_hostname(key)
             self.log.debug(
-                f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids} and rank IDs: {rank_ids}"
+                f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids} and rank IDs: {rank_ids} on {hostname}"
             )
             self.task_queue.put((key, command, rank_ids, gpu_ids, hostname))
         except RuntimeError:
@@ -286,7 +286,6 @@ class ResourceExecutor(BaseExecutor):
                 state=TaskInstanceState.FAILED,
                 info=f"No viable resource assignment for task: {key.task_id}.{key.map_index}",
             )
-
 
     def heartbeat(self) -> None:
         """Heartbeat sent to trigger new jobs."""
@@ -303,6 +302,9 @@ class ResourceExecutor(BaseExecutor):
             )
             self.log.debug(
                 f"SLOTS: {[[ro.index for ro in slot.cores] for slot in slots]}"
+            )
+            self.log.info(
+                f"\033[91mSlot: {[(slot.hostname, [core.index for core in slot.cores]) for slot in slots]}\033[0m"
             )
 
         num_running_tasks = len(self.running)
