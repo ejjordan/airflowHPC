@@ -85,6 +85,7 @@ class RadicalExecutor(LocalExecutor):
 
         pd = rp.PilotDescription(pd_dict)
         self._pilot = self._rct_pmgr.submit_pilots(pd)
+        self._pilot.prepare_env('bs0', {'type' : 'shell'})
         self._rct_tmgr.add_pilots(self._pilot)
 
         # wait for the pilot to become active (but don't stall on errors)

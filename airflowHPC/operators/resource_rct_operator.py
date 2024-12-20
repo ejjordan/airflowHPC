@@ -148,8 +148,10 @@ class ResourceRCTOperator(BaseOperator):
                 "arguments": args,
                 "ranks": self.mpi_ranks,
                 "cores_per_rank": self.cpus_per_task,
-                # 'input_staging': input_files_paths,
+              # 'input_staging': input_files_paths,
+                "pre_exec": ['. ~/scalems/.env.task'],
                 "output_staging": sds,
+              # "named_env": "bs0"
             }
         )
 

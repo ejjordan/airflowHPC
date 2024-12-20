@@ -5,7 +5,9 @@
 
 ### modules and conda env
 > module load anaconda3
-> module load gcc openmpi
+> module load gcc
+> module load openmpi
+> module load cuda
 > conda create -n scalems python==3.10
 > conda activate scalems
 
@@ -29,6 +31,7 @@
 > pip install radical.utils
 > pip install sphinx
 > pip install apache-airflow[postgresql]
+> conda install psycopg2
 
 > cd $SCALEMS
 > git clone https://github.com/ejjordan/airflowHPC.git
@@ -46,10 +49,11 @@
 > cd gromacs-2024.4/
 > mkdir build
 > cd build
-> cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../install -DGMX_BUILD_OWN_FFTW=ON  ..
+> cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../install -DGMX_BUILD_OWN_FFTW=ON -DGMX_MPI=ON -DGMX_GPU=CUDA ..
 > make -j 8
 > make install
 > . $SCALEMS/gromacs-2024.4/install/bin/GMXRC.bash
+> pip install --no-cache-dir gmxapi
 
 
 # run test
@@ -59,7 +63,6 @@ cat > $SCALEMS/pilot_cfg.json <<EOF
     "project"  : "dmr170002p",
     "queue"    : "GPU",
     "nodes"    : 2,
-  
     "runtime"  : 20
 }
 EOF
@@ -71,7 +74,7 @@ EOF
 
 #SBATCH --account=dmr170002p
 #SBATCH --partition=GPU
-#SBATCH --time=00:10:00
+#SBATCH --time=00:20:00
 #SBATCH --nodes=2
 #SBATCH --gpus=v100-32:16
 
