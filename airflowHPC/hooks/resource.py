@@ -215,30 +215,18 @@ class NodeList:
             return slot
 
     def find_available_slots(self, rr_list: List[RankRequirements]) -> List[Slot]:
-        slots = list()
-        # TODO: this will not work if more than one node is requested
-        for node in self.nodes:
-            node_slots = self._find_available_slots(node, rr_list)
-            if node_slots:
-                slots.extend(node_slots)
-            else:
-                break
-        return slots
-
-    def _find_available_slots(
-        self, node: NodeResources, rr_list: List[RankRequirements]
-    ) -> List[Slot]:
         with self.__lock__:
             slots = list()
             for rr in rr_list:
-                slot = self._find_slot(node, rr)
-                if slot:
-                    slots.append(slot)
-                    self._allocate_slot(node, rr)
-                else:
-                    break
+                for node in self.nodes:
+                    slot = self._find_slot(node, rr)
+                    if slot:
+                        slots.append(slot)
+                        self._allocate_slot(node, rr)
+                        break
+
             for slot in slots:
-                self._release_slot(node, slot)
+                self.release_slot(slot)
             return slots
 
     def allocate_slot(self, rr: RankRequirements) -> Slot | None:
@@ -267,9 +255,6 @@ class NodeList:
 
     def release_slot(self, slot: Slot) -> None:
         node = self.nodes[slot.node_index]
-        self._release_slot(node, slot)
-
-    def _release_slot(self, node: NodeResources, slot: Slot) -> None:
         with self.__lock__:
             for ro in slot.cores:
                 node.cores[ro.index].occupation -= ro.occupation

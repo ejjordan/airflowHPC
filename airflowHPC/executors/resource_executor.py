@@ -306,6 +306,7 @@ class ResourceExecutor(BaseExecutor):
             self.log.info(
                 f"\033[91mSlot: {[(slot.hostname, [core.index for core in slot.cores]) for slot in slots]}\033[0m"
             )
+            self.log.info(f"tasks: {[task for task in self.queued_tasks]}")
 
         num_running_tasks = len(self.running)
         num_queued_tasks = len(self.queued_tasks)
