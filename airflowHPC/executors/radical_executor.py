@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any, Optional, Tuple
 from airflow.executors.base_executor import PARALLELISM
 from airflow.executors.local_executor import LocalExecutor
 from airflow.utils.state import TaskInstanceState
+from functools import cached_property
+from airflow.utils.providers_configuration_loader import providers_configuration_loaded
+from airflow.configuration import conf
 
 import radical.pilot as rp
 import radical.utils as ru
@@ -31,9 +34,7 @@ if TYPE_CHECKING:
 
 
 class RadicalExecutor(LocalExecutor):
-
     def __init__(self, parallelism: int = PARALLELISM):
-
         # FIXME: `parallelism` should be infinite, it is handled by RCT
         super().__init__(parallelism=parallelism)
 
@@ -74,10 +75,10 @@ class RadicalExecutor(LocalExecutor):
 
         pilot_json = os.environ.get("RCT_PILOT_CFG")
         if pilot_json:
-            print('=== pilot_json: %s' % pilot_json)
+            self.log.debug('pilot_json: %s' % pilot_json)
             pd_dict = ru.read_json(pilot_json)
         else:
-            print('=== pilot_resource: localhost')
+            self.log.debug('pilot_resource: localhost')
             pd_dict = {"resource": "local.localhost",
                        "nodes": 1,
                        "runtime": 1440}
@@ -88,7 +89,7 @@ class RadicalExecutor(LocalExecutor):
 
         # wait for the pilot to become active (but don't stall on errors)
         self._pilot.wait(rp.FINAL + [rp.PMGR_ACTIVE])
-        print('=== pilot state: %s' % self._pilot.state)
+        self.log.debug('pilot state: %s' % self._pilot.state)
         assert self._pilot.state == rp.PMGR_ACTIVE
 
         # we now have a nodelist and can schedule tasks.  Keep a map of Airflow
@@ -104,6 +105,11 @@ class RadicalExecutor(LocalExecutor):
         super().start()
 
         self.log.info("RadicalExecutor: start ok")
+
+    @cached_property
+    @providers_configuration_loaded
+    def cores_per_node(self) -> int:
+        return int(conf.get("hpc", "cores_per_node", fallback=8))
 
     def end(self) -> None:
         self.log.info("RadicalExecutor: end")
@@ -125,6 +131,7 @@ class RadicalExecutor(LocalExecutor):
 
     def _request_cb(self, topic, msg):
         import pprint
+
         self.log.info("request: %s" % pprint.pformat(msg))
         op_id = msg["op_id"]
 
@@ -212,7 +219,6 @@ class RadicalExecutor(LocalExecutor):
 
         if task_tuples:
             self._process_tasks(task_tuples)
-
 
     def orig_trigger_tasks(self, open_slots: int) -> None:
         """

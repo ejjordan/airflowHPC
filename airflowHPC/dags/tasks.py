@@ -21,6 +21,7 @@ __all__ = (
     "run_if_needed",
     "run_if_false",
     "unpack_inputs",
+    "verify_files",
 )
 
 

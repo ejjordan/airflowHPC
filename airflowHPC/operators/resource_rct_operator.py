@@ -52,8 +52,16 @@ class ResourceRCTOperator(BaseOperator):
         self.log.info(f"=== ResourceRCTOperator: __init__ {kwargs}")
         # kwargs.update({"cwd": output_dir})
         super().__init__(**kwargs)
+        if (
+            self.executor_config
+            and gmx_arguments[0] not in ["mdrun", "mdrun_mpi"]
+            and self.executor_config["cpus_per_task"] > 1
+        ):
+            self.executor_config["cpus_per_task"] = 1
+            self.warn = f"Overriding 'cpus_per_task' to 1 for {gmx_arguments[0]} as it is not supported."
 
         self.mpi_ranks = kwargs.get("executor_config", {}).get("mpi_ranks", 1)
+        self.cpus_per_task = kwargs.get("executor_config", {}).get("cpus_per_task", 1)
 
         if gmx_executable is None:
             try:
@@ -73,6 +81,17 @@ class ResourceRCTOperator(BaseOperator):
         self._rct_event = mt.Event()
         self._rct_task = None
         self.show_return_value_in_logs = show_return_value_in_logs
+
+    def check_add_args(self, arg: str, value: str):
+        for i, gmx_arg in enumerate(self.gmx_arguments):
+            if arg == gmx_arg:
+                if value != self.gmx_arguments[i + 1]:
+                    msg = f"Changing argument '{arg} {self.gmx_arguments[i + 1]}' to '{arg} {value}'."
+                    msg += f"The mdrun flag '{arg}' is managed by the operator and user input will be overridden."
+                    self.log.warning(msg)
+                    self.gmx_arguments[i + 1] = value
+                return
+        self.gmx_arguments.extend([arg, value])
 
     def execute(self, context: Context):
         pub_address = os.environ.get("RCT_PUB_URL")
@@ -95,6 +114,12 @@ class ResourceRCTOperator(BaseOperator):
             f"{k}": f"{os.path.join(out_dir_full_path, v)}"
             for k, v in self.output_files.items()
         }
+
+        if isinstance(self.gmx_arguments, (str, bytes)):
+            self.gmx_arguments = [self.gmx_arguments]
+        if self.gmx_arguments[0] in ["mdrun", "mdrun_mpi"]:
+            self.check_add_args("-ntomp", str(self.executor_config["cpus_per_task"]))
+
         self.log.info(f"mpi_ranks         : {self.mpi_ranks}")
         self.log.info(f"gmx_executable    : {self.gmx_executable}")
         self.log.info(f"gmx_arguments     : {self.gmx_arguments}")
@@ -122,6 +147,7 @@ class ResourceRCTOperator(BaseOperator):
                 "executable": self.gmx_executable,
                 "arguments": args,
                 "ranks": self.mpi_ranks,
+                "cores_per_rank": self.cpus_per_task,
                 # 'input_staging': input_files_paths,
                 "output_staging": sds,
             }
