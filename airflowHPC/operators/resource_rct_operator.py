@@ -184,7 +184,6 @@ class ResourceRCTOperator(BaseOperator):
 
         return output_files_paths
 
-
     def flatten_dict(self, mapping: dict):
         for key, value in mapping.items():
             yield str(key)

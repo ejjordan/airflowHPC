@@ -37,7 +37,7 @@ class RadicalExecutor(LocalExecutor):
 
     def __init__(self, parallelism: int = PARALLELISM):
         # FIXME: `parallelism` should be infinite, it is handled by RCT
-        parallelism = 32
+        parallelism = int(os.environ.get('RCT_PARALLELISM', 128))
         super().__init__(parallelism=parallelism)
 
         self.log.info(f"RadicalExecutor: __init__ {parallelism}")
