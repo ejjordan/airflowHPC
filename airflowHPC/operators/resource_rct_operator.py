@@ -106,6 +106,7 @@ class ResourceRCTOperator(BaseOperator):
 
         self.log.info(f"======= PUB URL: {pub_address}")
         self._rct_pub = ru.zmq.Publisher(channel="rct", url=pub_address)
+        time.sleep(1)
 
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -200,10 +201,12 @@ class ResourceRCTOperator(BaseOperator):
         state = task["state"]
 
         if uuid != self._uuid:
-            self.log.info("===================== ignore %s: %s" % (uid, state))
+            self.log.info("===================== %s - ignore %s: %s - %s"
+                    % (self._uuid, uid, state, uuid))
             return
 
-        self.log.info("===================== update %s: %s" % (uid, state))
+        self.log.info("===================== %s - update %s: %s - %s"
+                % (self._uuid, uid, state, uuid))
 
         self._rct_task = msg["task"]
 
