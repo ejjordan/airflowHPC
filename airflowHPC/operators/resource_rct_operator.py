@@ -79,7 +79,6 @@ class ResourceRCTOperator(BaseOperator):
         self.output_files = output_files
         self.output_dir = output_dir
         self._rct_event = mt.Event()
-        self._rct_task = None
         self.show_return_value_in_logs = show_return_value_in_logs
 
     def check_add_args(self, arg: str, value: str):
@@ -94,18 +93,12 @@ class ResourceRCTOperator(BaseOperator):
         self.gmx_arguments.extend([arg, value])
 
     def execute(self, context: Context):
-        pub_address = os.environ.get("RCT_PUB_URL")
-        sub_address = os.environ.get("RCT_SUB_URL")
 
-        assert pub_address is not None, "RCT_PUB_URL is not set"
-        assert sub_address is not None, "RCT_SUB_URL is not set"
+        server_addr = os.environ.get("RCT_SERVER_URL")
+        assert server_addr is not None, "RCT_SERVER_URL is not set"
 
-        self.log.info(f"======= SUB URL: {sub_address} {os.getpid()}")
-        self._rct_sub = ru.zmq.Subscriber(channel="rct", url=sub_address)
-        self._rct_sub.subscribe("update", cb=self._update_cb)
-
-        self.log.info(f"======= PUB URL: {pub_address}")
-        self._rct_pub = ru.zmq.Publisher(channel="rct", url=pub_address)
+        self.log.info(f"======= SERVERURL: {server_addr}")
+        self._rct_client = ru.zmq.Client(server_addr)
 
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -149,29 +142,28 @@ class ResourceRCTOperator(BaseOperator):
                 "ranks": self.mpi_ranks,
                 "cores_per_rank": self.cpus_per_task,
               # 'input_staging': input_files_paths,
-                "pre_exec": ['. ~/scalems/.env.task'],
+              # "pre_exec": ['. ~/scalems/.env.task'],
                 "output_staging": sds,
               # "named_env": "bs0"
             }
         )
 
         self.log.info("====================== submit td %d" % os.getpid())
-        self._rct_pub.put("request", {"op_id": self._uuid, "td": td.as_dict()})
+        uid = self._client.submit(td.as_dict())
+        self.log.info("====================== submitted %s" % uid)
 
         # timeout to avoid zombie tasks?
         timeout = 60 * 60  # FIXME
         start = time.time()
+        task = None
         while time.time() - start < timeout:
-            if self._rct_event.wait(timeout=1.0):
-                self.log.info("=== waiting for task")
+            state, exit_code = self._client.check(uid)
+            self.log.info("=== check %s: %s" % (uid, state))
+            if state in rp.FINAL:
                 break
             time.sleep(1)
 
         self.log.info("=== task completed")
-        if not self._rct_task:
-            raise AirflowException("=== No result from RCT task.")
-
-        state = self._rct_task["state"]
         if state in [rp.FAILED, rp.CANCELED]:
             raise AirflowException(f"Command failed with a state {state}.")
 
@@ -182,7 +174,6 @@ class ResourceRCTOperator(BaseOperator):
         #         f"Bash command returned exit code {result.exit_code}. Skipping."
         #     )
 
-        exit_code = self._rct_task["exit_code"]
         if exit_code != 0:
             raise AirflowException(
                 f"Bash command returned a non-zero exit code {exit_code}."
@@ -193,23 +184,6 @@ class ResourceRCTOperator(BaseOperator):
 
         return output_files_paths
 
-    def _update_cb(self, topic, msg):
-        uuid = msg["op_id"]
-        task = msg["task"]
-        uid = task["uid"]
-        state = task["state"]
-
-        if uuid != self._uuid:
-            self.log.info("===================== ignore %s: %s" % (uid, state))
-            return
-
-        self.log.info("===================== update %s: %s" % (uid, state))
-
-        self._rct_task = msg["task"]
-
-        if state in rp.FINAL:
-            self.log.info("=== task %s: \n%s" % (uid, pprint.pformat(task)))
-            self._rct_event.set()
 
     def flatten_dict(self, mapping: dict):
         for key, value in mapping.items():

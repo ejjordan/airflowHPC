@@ -42,9 +42,22 @@ class RadicalExecutor(LocalExecutor):
         self._rct_session = None
         self._rct_pmgr = None
         self._rct_tmgr = None
-        self._rct_pubsub = None
-        self._rct_pub = None
-        self._rct_sub = None
+        self._rct_server = None
+        self._rct_tasks = {}
+
+
+    def _submit_task(self, task_description):
+
+        td = rp.TaskDescription(task_description)
+        task = self._rct_tmgr.submit_tasks(td)
+        self._tasks[task.uid] = task
+        self._free_cores -= 1
+        return task.uid
+
+    def _check_task(self, uid):
+        if uid not in self._tasks:
+            return None
+        return self._tasks[uid].state
 
     def start(self) -> None:
         """Start the executor."""
@@ -55,21 +68,14 @@ class RadicalExecutor(LocalExecutor):
 
         self._rct_tmgr.register_callback(self._rct_state_cb)
 
-        self._rct_pubsub = ru.zmq.PubSub("rct")
-        self._rct_pubsub.start()
-        time.sleep(1)  # let zmq settle
-
-        self.log.info(f"SUB URL: {self._rct_pubsub.addr_sub}")
-        self._rct_sub = ru.zmq.Subscriber(channel="rct", url=self._rct_pubsub.addr_sub)
-        self._rct_sub.subscribe("request", cb=self._request_cb)
-
-        self.log.info(f"PUB URL: {self._rct_pubsub.addr_pub}")
-        self._rct_pub = ru.zmq.Publisher(channel="rct", url=self._rct_pubsub.addr_pub)
+        self._rct_server = ru.zmq.Server(url='tcp://*:100100')
+        self._rct_server.register_request('submit', self._submit_task)
+        self._rct_server.register_request('check', self._check_task)
+        time.sleep(0.1)  # let zmq settle
 
         # "airflow tasks run" lives in the same environment as the executor
         # and gets the ZMQ endpoints passed as environment variables
-        os.environ["RCT_PUB_URL"] = str(self._rct_pubsub.addr_pub)
-        os.environ["RCT_SUB_URL"] = str(self._rct_pubsub.addr_sub)
+        os.environ["RCT_SERVER_URL"] = str(self._rct_server.addr)
 
         self.log.info("RadicalExecutor: start")
 
@@ -129,31 +135,6 @@ class RadicalExecutor(LocalExecutor):
             #     key=tid,
             #     state=TaskInstanceState.SUCCESS if state == rp.DONE else TaskInstanceState.FAILED,
             # )
-
-    def _request_cb(self, topic, msg):
-        import pprint
-
-        self.log.info("request: %s" % pprint.pformat(msg))
-        op_id = msg["op_id"]
-
-        td = rp.TaskDescription(msg["td"])
-
-        if not td.metadata:
-            td.metadata = dict()
-        td.metadata["airflow_op_id"] = op_id
-
-        # gmx shenanigans: if 'gmx_mpi' is set as executable, add core pinning
-        # and gpu binding to the task description
-
-        task = self._rct_tmgr.submit_tasks(td)
-
-        self.log.info("update: %s" % pprint.pformat(task))
-        self._rct_pub.put("update", {"op_id": op_id, "task": task.as_dict()})
-        self._free_cores -= 1
-        # self.change_state(
-        #     key=task.uid,
-        #     state=TaskInstanceState.RUNNING,
-        # )
 
     def trigger_tasks(self, open_slots: int) -> None:
         """
