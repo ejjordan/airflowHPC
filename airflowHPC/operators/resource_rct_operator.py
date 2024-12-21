@@ -98,7 +98,7 @@ class ResourceRCTOperator(BaseOperator):
         assert server_addr is not None, "RCT_SERVER_URL is not set"
 
         self.log.info(f"======= SERVERURL: {server_addr}")
-        self._rct_client = ru.zmq.Client(server_addr)
+        rct_client = ru.zmq.Client(url=server_addr)
 
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -149,15 +149,15 @@ class ResourceRCTOperator(BaseOperator):
         )
 
         self.log.info("====================== submit td %d" % os.getpid())
-        uid = self._client.submit(td.as_dict())
-        self.log.info("====================== submitted %s" % uid)
+        uid = rct_client.request('submit', td.as_dict())
+        self.log.info("=== submitted %s" % uid)
 
         # timeout to avoid zombie tasks?
         timeout = 60 * 60  # FIXME
         start = time.time()
         task = None
         while time.time() - start < timeout:
-            state, exit_code = self._client.check(uid)
+            state, exit_code = rct_client.request('check', uid)
             self.log.info("=== check %s: %s" % (uid, state))
             if state in rp.FINAL:
                 break

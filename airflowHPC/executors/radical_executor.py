@@ -34,8 +34,10 @@ if TYPE_CHECKING:
 
 
 class RadicalExecutor(LocalExecutor):
+
     def __init__(self, parallelism: int = PARALLELISM):
         # FIXME: `parallelism` should be infinite, it is handled by RCT
+        parallelism = 32
         super().__init__(parallelism=parallelism)
 
         self.log.info(f"RadicalExecutor: __init__ {parallelism}")
@@ -45,9 +47,7 @@ class RadicalExecutor(LocalExecutor):
         self._rct_server = None
         self._rct_tasks = {}
 
-
     def _submit_task(self, task_description):
-
         td = rp.TaskDescription(task_description)
         task = self._rct_tmgr.submit_tasks(td)
         self._tasks[task.uid] = task
@@ -55,9 +55,10 @@ class RadicalExecutor(LocalExecutor):
         return task.uid
 
     def _check_task(self, uid):
-        if uid not in self._tasks:
-            return None
-        return self._tasks[uid].state
+        task = self._tasks.get(uid)
+        if not task:
+            return None, None
+        return task.state, task.exit_code
 
     def start(self) -> None:
         """Start the executor."""
@@ -68,9 +69,10 @@ class RadicalExecutor(LocalExecutor):
 
         self._rct_tmgr.register_callback(self._rct_state_cb)
 
-        self._rct_server = ru.zmq.Server(url='tcp://*:100100')
+        self._rct_server = ru.zmq.Server()
         self._rct_server.register_request('submit', self._submit_task)
         self._rct_server.register_request('check', self._check_task)
+        self._rct_server.start()
         time.sleep(0.1)  # let zmq settle
 
         # "airflow tasks run" lives in the same environment as the executor
@@ -112,11 +114,6 @@ class RadicalExecutor(LocalExecutor):
         super().start()
 
         self.log.info("RadicalExecutor: start ok")
-
-    @cached_property
-    @providers_configuration_loaded
-    def cores_per_node(self) -> int:
-        return int(conf.get("hpc", "cores_per_node", fallback=8))
 
     def end(self) -> None:
         self.log.info("RadicalExecutor: end")
@@ -266,3 +263,12 @@ class RadicalExecutor(LocalExecutor):
 
         if task_tuples:
             self._process_tasks(task_tuples)
+
+
+    def heartbeat(self) -> None:
+        """Heartbeat sent to trigger new jobs."""
+
+        open_slots = 1024 * 1024
+        self.sync()
+        self.trigger_tasks(open_slots)
+        self.sync()
