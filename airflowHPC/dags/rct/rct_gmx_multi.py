@@ -4,6 +4,7 @@ from airflowHPC.dags.tasks import get_file, prepare_gmx_input, update_gmx_input
 from airflowHPC.operators import ResourceRCTOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
+n_sims = 8
 
 with DAG(
     "rct_gmx_multi",
@@ -11,7 +12,7 @@ with DAG(
     catchup=False,
     params={
         "output_dir": "rct_gmx_multi",
-        "num_simulations": 16,
+        "num_simulations": n_sims,
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "basic_md.json"},
             "gro": {"directory": "ensemble_md", "filename": "sys.gro"},
@@ -34,29 +35,11 @@ with DAG(
 
     mdp_sim = update_write_mdp_json_as_mdp_from_file.partial(
         mdp_json_file_path=input_mdp
-    ).expand(
-        update_dict=[
-            {"nsteps": 5000},
-            {"nsteps": 5000},
-            {"nsteps": 5000},
-            {"nsteps": 5000},  
-            {"nsteps": 5000},
-            {"nsteps": 5000},
-            {"nsteps": 5000},
-            {"nsteps": 5000},  
-            {"nsteps": 5000},
-            {"nsteps": 5000},
-            {"nsteps": 5000},
-            {"nsteps": 5000},  
-            {"nsteps": 5000},
-            {"nsteps": 5000},
-            {"nsteps": 5000},
-            {"nsteps": 5000},  
-          # {"nsteps": 5000},  "dt": 0.2},
-            # < 0.002 fs: expected to succeed
-            # > 0.1   fs: expected to fail
-        ]
-    )
+    ).expand(update_dict=[{"nsteps": 1000}] * n_sims)
+                        # {"nsteps": 5000},
+                        # {"nsteps": 5000},  "dt": 0.200},
+                                               # < 0.002 fs: expected to succeed
+                                               # > 0.100 fs: expected to fail
 
     grompp_input_list_sim = prepare_gmx_input.override(task_id="grompp_input_list")(
         args=["grompp", "-maxwarn", "1"],
