@@ -4,12 +4,13 @@ from airflowHPC.dags.tasks import get_file, prepare_gmx_input, update_gmx_input
 from airflowHPC.operators import ResourceRCTOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
-n_sims = 8
+n_sims = 128
 
 with DAG(
     "rct_gmx_multi",
     start_date=timezone.utcnow(),
     catchup=False,
+    max_active_tasks=n_sims,
     params={
         "output_dir": "rct_gmx_multi",
         "num_simulations": n_sims,
@@ -35,7 +36,7 @@ with DAG(
 
     mdp_sim = update_write_mdp_json_as_mdp_from_file.partial(
         mdp_json_file_path=input_mdp
-    ).expand(update_dict=[{"nsteps": 1000}] * n_sims)
+    ).expand(update_dict=[{"nsteps": 10000}] * n_sims)
                         # {"nsteps": 5000},
                         # {"nsteps": 5000},  "dt": 0.200},
                                                # < 0.002 fs: expected to succeed
