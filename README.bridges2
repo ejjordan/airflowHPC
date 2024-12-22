@@ -15,14 +15,22 @@
 ### spack and postgres
 
 > git clone https://github.com/spack/spack
-> export PATH="$PATH:$HOME/spack/bin"
+> export PATH="$PATH:$SCALEMS/spack/bin"
+> . $SCALEMS/spack/share/spack/setup-env.sh
 > spack install postgresql
 > spack load postgresql
 
+> initdb postgresql_db/data
 > pg_ctl -D postgresql_db/data -l logfile start
 > createdb -T template1 airflow_db
 > psql airflow_db
-...
+```sql
+CREATE USER airflow_user WITH PASSWORD 'airflow_pass';
+GRANT ALL PRIVILEGES ON DATABASE airflow_db TO airflow_user;
+GRANT ALL ON SCHEMA public TO airflow_user;
+ALTER USER airflow_user SET search_path = public;
+quit;
+```
 
 
 ### airflow install
@@ -93,16 +101,17 @@ EOF
 > conda activate scalems
 
 > # no idea why this is sometimes needed
-> export PYTHONPATH=$HOME/airflowHPC
+> export PYTHONPATH=$SCALEMS/airflowHPC
 
 > export RCT_PILOT_CFG=$SCALEMS/pilot_cfg.json
 > export TMPDIR=$SCALEMS/tmp
+> mkdir -p $TMPDIR
 
-> export PATH="$PATH:$HOME/spack/bin"
-> . $HOME/spack/share/spack/setup-env.sh
+> export PATH="$PATH:$SCALEMS/spack/bin"
+> . $SCALEMS/spack/share/spack/setup-env.sh
 
 > export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow_user:airflow_pass@localhost/airflow_db"
->
+
 > export AIRFLOW__CORE__EXECUTOR=airflowHPC.executors.resource_executor.ResourceExecutor
 > export AIRFLOW__CORE__EXECUTOR=airflowHPC.executors.radical_executor.RadicalExecutor
 > export AIRFLOW__CORE__LOAD_EXAMPLES=False
