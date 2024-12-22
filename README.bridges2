@@ -98,7 +98,6 @@ EOF
 
 > SCALEMS="$HOME/scalems"
 
-> export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK
 > export OMP_PLACES=cores
 
 > conda activate scalems
