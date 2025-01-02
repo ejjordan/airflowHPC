@@ -1,4 +1,7 @@
+import pytest
+from contextlib import nullcontext
 from airflowHPC.hooks.slurm import SlurmHook
+from airflowHPC.hooks.resource import RankRequirements
 import unittest.mock
 from airflow.models.taskinstancekey import TaskInstanceKey
 
@@ -30,7 +33,6 @@ def test_set_task_resources():
         assert task_resource_req.num_gpus == num_gpus
 
 
-# TODO: fix SlurmHook.find_available_slots so this works
 def test_find_available_slots():
     with unittest.mock.patch("subprocess.run") as mock_run:
         mock_run.return_value.stdout = "nid[000123,000456]"
@@ -85,6 +87,42 @@ def test_find_available_slots():
         assert len(slots) == 4
         assert slots[-1].hostname == "nid000456"
         assert [core.index for core in slots[-1].cores] == list(range(8, 16))
+
+
+@pytest.mark.parametrize(
+    "resource_req, cores_list, gpu_list",
+    [
+        (
+            RankRequirements(num_ranks=4, num_threads=2, num_gpus=2),
+            list(range(8)),
+            nullcontext(list(range(2))),
+        ),
+        (
+            RankRequirements(num_ranks=4, num_threads=2, num_gpus=4),
+            list(range(8)),
+            pytest.raises(ValueError),
+        ),
+    ],
+)
+def test_find_available_slots_gpu(resource_req, cores_list, gpu_list):
+    with unittest.mock.patch("subprocess.run") as mock_run:
+        mock_run.return_value.stdout = "nid000123"
+        slurm_hook = SlurmHook()
+        ti_key = TaskInstanceKey("dag_id", "task", "run_id")
+
+        with gpu_list as gpu_expectation:
+            slurm_hook.set_task_resources(
+                ti_key,
+                resource_req.num_ranks,
+                resource_req.num_threads,
+                resource_req.num_gpus,
+            )
+            assert ti_key in slurm_hook.task_resource_requests
+            slots = slurm_hook.find_available_slots([ti_key])
+            assert len(slots) == 1
+            assert slots[0].hostname == "nid000123"
+            assert [core.index for core in slots[0].cores] == cores_list
+            assert [gpu.index for gpu in slots[0].gpus] == gpu_expectation
 
 
 # Test that resources are allocated from alternating nodes
