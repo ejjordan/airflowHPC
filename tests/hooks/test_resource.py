@@ -146,6 +146,44 @@ def test_release_slot():
 
 
 @pytest.mark.parametrize(
+    "num_ranks, num_threads, expected_result",
+    [
+        (4.0, 2.0, nullcontext()),
+        (2.0, 4.0, nullcontext()),
+        (0.5, 1, pytest.raises(ValueError)),
+        (1, 0.5, pytest.raises(ValueError)),
+        (1.5, 1, pytest.raises(ValueError)),
+        (1, 1.5, pytest.raises(ValueError)),
+        (-1, 1, pytest.raises(ValueError)),
+        (1, -1, pytest.raises(ValueError)),
+        (0, 1, pytest.raises(ValueError)),
+        (1, 0, pytest.raises(ValueError)),
+    ],
+)
+def test_resource_req(num_ranks, num_threads, expected_result):
+    with expected_result as expected:
+        rr = RankRequirements(num_ranks=num_ranks, num_threads=num_threads, num_gpus=0)
+        assert rr.num_ranks == num_ranks
+        assert rr.num_threads == num_threads
+
+
+@pytest.mark.parametrize(
+    "num_ranks, num_threads, expected_result",
+    [
+        ("1", 1, nullcontext(1)),
+        (1, "1", nullcontext(1)),
+        ("1.5", 1, pytest.raises(ValueError)),
+        (1, "1.5", pytest.raises(ValueError)),
+    ],
+)
+def test_resource_req_str(num_ranks, num_threads, expected_result):
+    with expected_result as expected:
+        rr = RankRequirements(num_ranks=num_ranks, num_threads=num_threads, num_gpus=0)
+        assert rr.num_ranks == expected
+        assert rr.num_threads == expected
+
+
+@pytest.mark.parametrize(
     "num_gpus, gpu_occupation, expected_result",
     [
         (2, 1, nullcontext(2)),
@@ -154,11 +192,21 @@ def test_release_slot():
         (1, 0.25, nullcontext(1)),
         (1, 0.1, pytest.raises(ValueError)),
         (1, 0, pytest.raises(ValueError)),
+        (0, 1, nullcontext(0)),
         (0, 0, pytest.raises(ValueError)),
         (-1, 1.0, pytest.raises(ValueError)),
+        (1.5, 1.0, pytest.raises(ValueError)),
+        (1, 1.5, pytest.raises(ValueError)),
+        ("1", 1.0, nullcontext(1)),
+        (1, "1", nullcontext(1)),
+        ("1.5", 1.0, pytest.raises(ValueError)),
+        (1, "1.5", pytest.raises(ValueError)),
+        (1, "0.5", nullcontext(1)),
+        (1, "0.25", nullcontext(1)),
+        (1, "0.1", pytest.raises(ValueError)),
     ],
 )
-def test_resource_req(num_gpus, gpu_occupation, expected_result):
+def test_resource_req_gpu(num_gpus, gpu_occupation, expected_result):
     with expected_result as expected_gpus:
         rr = RankRequirements(
             num_ranks=4, num_threads=2, num_gpus=num_gpus, gpu_occupation=gpu_occupation

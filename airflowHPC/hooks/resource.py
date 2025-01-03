@@ -38,14 +38,44 @@ DOWN = None
 
 @dataclass
 class RankRequirements:
+    num_ranks: int
+    num_threads: int
     num_gpus: int
     gpu_occupation: float
-    num_ranks: int = 1
-    num_threads: int = 1
-    core_occupation: float = 1.0
     mem: int = 0
+    _num_ranks: int = field(default=1, init=False, repr=False)
+    _num_threads: int = field(default=1, init=False, repr=False)
     _gpu_occupation: float = field(default=1.0, init=False, repr=False)
     _num_gpus: int = field(default=0, init=False, repr=False)
+    core_occupation: float = field(default=1.0, init=False, repr=False)
+
+    @property
+    def num_ranks(self) -> int:
+        return self._num_ranks
+
+    @num_ranks.setter
+    def num_ranks(self, value: int) -> None:
+        if type(value) is property:
+            # Use the default value if not specified
+            value = RankRequirements._num_ranks
+        check_value = float(value)
+        if check_value <= 0 or check_value.as_integer_ratio()[1] != 1:
+            raise ValueError(f"num_threads: {value} must be a positive integer")
+        self._num_ranks = int(value)
+
+    @property
+    def num_threads(self) -> int:
+        return self._num_threads
+
+    @num_threads.setter
+    def num_threads(self, value: int) -> None:
+        if type(value) is property:
+            # Use the default value if not specified
+            value = RankRequirements._num_threads
+        check_value = float(value)
+        if check_value <= 0 or check_value.as_integer_ratio()[1] != 1:
+            raise ValueError(f"num_threads: {value} must be a positive integer")
+        self._num_threads = int(value)
 
     @property
     def num_gpus(self) -> int:
@@ -56,9 +86,10 @@ class RankRequirements:
         if type(value) is property:
             # Use the default value if not specified
             value = RankRequirements._num_gpus
-        if value < 0:
-            raise ValueError(f"num_gpus: {value} must be non-negative")
-        self._num_gpus = value
+        check_value = float(value)
+        if check_value < 0 or check_value.as_integer_ratio()[1] != 1:
+            raise ValueError(f"num_gpus: {value} must be a non-negative integer")
+        self._num_gpus = int(value)
 
     @property
     def gpu_occupation(self) -> float:
@@ -69,6 +100,7 @@ class RankRequirements:
         if type(value) is property:
             # Use the default value if not specified
             value = RankRequirements._gpu_occupation
+        value = float(value)
         allowed_values = [0.25, 0.5, 1.0]
         if value not in allowed_values:
             raise ValueError(f"gpu_occupation: {value} not in {allowed_values}")
