@@ -1,4 +1,5 @@
 import pytest
+from contextlib import nullcontext
 from airflowHPC.hooks.resource import (
     NodeList,
     NodeResources,
@@ -142,3 +143,24 @@ def test_release_slot():
         nodes_list.nodes[0].cores[i].occupation == FREE
         for i in range(len(nodes_list.nodes[0].cores))
     ]
+
+
+@pytest.mark.parametrize(
+    "num_gpus, gpu_occupation, expected_result",
+    [
+        (2, 1, nullcontext(2)),
+        (1, 0.5, nullcontext(1)),
+        (2, 0.5, pytest.raises(ValueError)),
+        (1, 0.25, nullcontext(1)),
+        (1, 0.1, pytest.raises(ValueError)),
+        (1, 0, pytest.raises(ValueError)),
+        (0, 0, pytest.raises(ValueError)),
+        (-1, 1.0, pytest.raises(ValueError)),
+    ],
+)
+def test_resource_req(num_gpus, gpu_occupation, expected_result):
+    with expected_result as expected_gpus:
+        rr = RankRequirements(
+            num_ranks=4, num_threads=2, num_gpus=num_gpus, gpu_occupation=gpu_occupation
+        )
+        assert rr.num_gpus == expected_gpus

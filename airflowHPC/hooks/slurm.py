@@ -135,11 +135,13 @@ class SlurmHook(BaseHook):
         num_ranks: int,
         num_threads: int,
         num_gpus: int,
+        gpu_occupation: float = 1.0,
     ):
         resource_request = RankRequirements(
             num_ranks=num_ranks,
             num_threads=num_threads,
             num_gpus=num_gpus,
+            gpu_occupation=gpu_occupation,
         )
         # This will raise if the request cannot be satisfied
         self.nodes_list.find_slot(resource_request)

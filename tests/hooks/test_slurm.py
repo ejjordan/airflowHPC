@@ -1,7 +1,6 @@
 import pytest
 from contextlib import nullcontext
 from airflowHPC.hooks.slurm import SlurmHook
-from airflowHPC.hooks.resource import RankRequirements
 import unittest.mock
 from airflow.models.taskinstancekey import TaskInstanceKey
 
@@ -90,39 +89,72 @@ def test_find_available_slots():
 
 
 @pytest.mark.parametrize(
-    "resource_req, cores_list, gpu_list",
+    "num_gpus, gpu_occupation, gpu_list",
     [
-        (
-            RankRequirements(num_ranks=4, num_threads=2, num_gpus=2),
-            list(range(8)),
-            nullcontext(list(range(2))),
-        ),
-        (
-            RankRequirements(num_ranks=4, num_threads=2, num_gpus=4),
-            list(range(8)),
-            pytest.raises(ValueError),
-        ),
+        (2, 1.0, nullcontext(list(range(2)))),
+        (4, 1.0, pytest.raises(ValueError)),
+        (1, 0.25, nullcontext([0])),
+        (1, 0.5, nullcontext([0])),
     ],
 )
-def test_find_available_slots_gpu(resource_req, cores_list, gpu_list):
+def test_find_available_slots_gpu(num_gpus, gpu_occupation, gpu_list):
     with unittest.mock.patch("subprocess.run") as mock_run:
         mock_run.return_value.stdout = "nid000123"
         slurm_hook = SlurmHook()
         ti_key = TaskInstanceKey("dag_id", "task", "run_id")
 
         with gpu_list as gpu_expectation:
+            slurm_hook.set_task_resources(ti_key, 4, 2, num_gpus, gpu_occupation)
+            assert ti_key in slurm_hook.task_resource_requests
+            slots = slurm_hook.find_available_slots([ti_key])
+            assert len(slots) == 1
+            assert slots[0].hostname == "nid000123"
+            assert [gpu.index for gpu in slots[0].gpus] == gpu_expectation
+
+
+def test_can_share_gpu():
+    with unittest.mock.patch("subprocess.run") as mock_run:
+        mock_run.return_value.stdout = "nid000123"
+        slurm_hook = SlurmHook()
+        ti_key1 = TaskInstanceKey("dag_id", "task1", "run_id")
+        ti_key2 = TaskInstanceKey("dag_id", "task2", "run_id")
+        num_ranks = 4
+        num_threads = 2
+        num_gpus = 1
+        gpu_occupation = 0.5
+
+        slurm_hook.set_task_resources(
+            ti_key1, num_ranks, num_threads, num_gpus, gpu_occupation
+        )
+        slurm_hook.set_task_resources(
+            ti_key2, num_ranks, num_threads, num_gpus, gpu_occupation
+        )
+        slots = slurm_hook.find_available_slots([ti_key1, ti_key2])
+        assert len(slots) == 2
+        assert slots[0].hostname == "nid000123"
+        assert [gpu.index for gpu in slots[0].gpus] == [0]
+        assert slots[1].hostname == "nid000123"
+        assert [gpu.index for gpu in slots[1].gpus] == [0]
+
+
+def test_bad_gpu_occupation_fails():
+    with unittest.mock.patch("subprocess.run") as mock_run:
+        mock_run.return_value.stdout = "nid000123"
+        slurm_hook = SlurmHook()
+        ti_key = TaskInstanceKey("dag_id", "task", "run_id")
+        with pytest.raises(ValueError):
             slurm_hook.set_task_resources(
                 ti_key,
-                resource_req.num_ranks,
-                resource_req.num_threads,
-                resource_req.num_gpus,
+                4,
+                2,
+                1,
+                0.1,
             )
             assert ti_key in slurm_hook.task_resource_requests
             slots = slurm_hook.find_available_slots([ti_key])
             assert len(slots) == 1
             assert slots[0].hostname == "nid000123"
-            assert [core.index for core in slots[0].cores] == cores_list
-            assert [gpu.index for gpu in slots[0].gpus] == gpu_expectation
+            assert [gpu.index for gpu in slots[0].gpus] == []
 
 
 # Test that resources are allocated from alternating nodes

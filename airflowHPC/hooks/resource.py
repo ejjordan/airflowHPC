@@ -38,12 +38,45 @@ DOWN = None
 
 @dataclass
 class RankRequirements:
+    num_gpus: int
+    gpu_occupation: float
     num_ranks: int = 1
     num_threads: int = 1
-    num_gpus: int = 0
     core_occupation: float = 1.0
-    gpu_occupation: float = 1.0
     mem: int = 0
+    _gpu_occupation: float = field(default=1.0, init=False, repr=False)
+    _num_gpus: int = field(default=0, init=False, repr=False)
+
+    @property
+    def num_gpus(self) -> int:
+        return self._num_gpus
+
+    @num_gpus.setter
+    def num_gpus(self, value: int) -> None:
+        if type(value) is property:
+            # Use the default value if not specified
+            value = RankRequirements._num_gpus
+        if value < 0:
+            raise ValueError(f"num_gpus: {value} must be non-negative")
+        self._num_gpus = value
+
+    @property
+    def gpu_occupation(self) -> float:
+        return self._gpu_occupation
+
+    @gpu_occupation.setter
+    def gpu_occupation(self, value: float) -> None:
+        if type(value) is property:
+            # Use the default value if not specified
+            value = RankRequirements._gpu_occupation
+        allowed_values = [0.25, 0.5, 1.0]
+        if value not in allowed_values:
+            raise ValueError(f"gpu_occupation: {value} not in {allowed_values}")
+        if self.num_gpus > 1 and value != 1.0:
+            msg = f"gpu_occupation is {value}, which is only allowed for a single GPU. "
+            msg += f"It must be 1.0 for {self.num_gpus} GPUs"
+            raise ValueError(msg)
+        self._gpu_occupation = value
 
     def __eq__(self, other: RankRequirements) -> bool:
         if not isinstance(other, RankRequirements):
@@ -188,7 +221,8 @@ class NodeList:
             if rr.num_gpus:
                 for i in range(len(node.gpus) - rr.num_gpus + 1):
                     if all(
-                        node.gpus[i + j].occupation == FREE for j in range(rr.num_gpus)
+                        node.gpus[i + j].occupation <= rr.gpu_occupation
+                        for j in range(rr.num_gpus)
                     ):
                         gpus = [
                             ResourceOccupation(
