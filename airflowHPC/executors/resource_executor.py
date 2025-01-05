@@ -220,6 +220,7 @@ class ResourceExecutor(BaseExecutor):
                     msg = f"Setting task resources to {self.slurm_hook.task_resource_requests[task_instance.key].num_ranks} "
                     msg += f"MPI ranks, {self.slurm_hook.task_resource_requests[task_instance.key].num_threads} threads, "
                     msg += f"and {self.slurm_hook.task_resource_requests[task_instance.key].num_gpus} GPU(s) "
+                    msg += f"with occupation {self.slurm_hook.task_resource_requests[task_instance.key].gpu_occupation} "
                     msg += f"for task {task_instance.key.task_id}.{task_instance.key.map_index}"
                     self.log.info(msg)
                 except ValueError:
@@ -273,9 +274,11 @@ class ResourceExecutor(BaseExecutor):
             rank_ids = self.slurm_hook.get_rank_ids(key)
             gpu_ids = self.slurm_hook.get_gpu_ids(key)
             hostname = self.slurm_hook.get_hostname(key)
-            self.log.debug(
-                f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids} and rank IDs: {rank_ids} on {hostname}"
-            )
+            if self.log.level == 10:  # DEBUG
+                msg = f"ALLOCATED task {key.task_id}.{key.map_index} using cores: {core_ids} and rank IDs: {rank_ids} on {hostname}"
+                if gpu_ids:
+                    msg += f" and GPU IDs: {gpu_ids}"
+                self.log.debug(msg)
             self.task_queue.put((key, command, rank_ids, gpu_ids, hostname))
         except RuntimeError:
             self.log.error(

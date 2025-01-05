@@ -134,9 +134,13 @@ class SlurmHook(BaseHook):
         task_instance_key: TaskInstanceKey,
         num_ranks: int,
         num_threads: int,
-        num_gpus: int,
-        gpu_occupation: float = 1.0,
+        num_gpus: int | float,
     ):
+        if num_gpus > 0 and num_gpus < 1:
+            gpu_occupation = num_gpus
+            num_gpus = 1
+        else:
+            gpu_occupation = 1.0
         resource_request = RankRequirements(
             num_ranks=num_ranks,
             num_threads=num_threads,

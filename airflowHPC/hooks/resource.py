@@ -11,7 +11,10 @@ from threading import RLock
 @dataclass
 class ResourceOccupation:
     index: int = 0
-    occupation: float = 0.0
+    occupation: float = 1.0
+
+    def __repr__(self) -> str:
+        return f"{self.index}:{self.occupation}"
 
 
 @dataclass
@@ -252,8 +255,8 @@ class NodeList:
             # TODO: It might make sense to ensure GPUs are contiguous, but more important would be to ensure they are on the same NUMA node
             if rr.num_gpus:
                 for i in range(len(node.gpus) - rr.num_gpus + 1):
-                    if all(
-                        node.gpus[i + j].occupation <= rr.gpu_occupation
+                    if any(
+                        1 - node.gpus[i + j].occupation >= rr.gpu_occupation
                         for j in range(rr.num_gpus)
                     ):
                         gpus = [
