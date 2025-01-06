@@ -1,11 +1,10 @@
 from airflow import DAG
-from airflow.utils import timezone
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceGmxOperator
 
 with DAG(
     "run_gmx",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     params={"output_dir": "run_gmx"},
 ) as dag:

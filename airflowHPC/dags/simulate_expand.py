@@ -1,5 +1,4 @@
 from airflow import DAG
-from airflow.utils import timezone
 from airflow.models.param import Param
 from airflowHPC.dags.tasks import (
     get_file,
@@ -14,7 +13,7 @@ from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 with DAG(
     dag_id="simulate_expand",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     params={

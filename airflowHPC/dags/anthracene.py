@@ -2,7 +2,6 @@ from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
     get_file,
@@ -112,7 +111,7 @@ def get_gro(param_name, input_dir):
 
 with DAG(
     dag_id="anthracene_simulation",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     params=dagrun_params,
@@ -904,7 +903,7 @@ def next_step(states, output_dir, states_per_step, total_states, nsteps, new_gro
 
 with DAG(
     dag_id="anthracene_runner",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     params=dagrun_params,

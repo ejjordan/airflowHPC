@@ -1,6 +1,5 @@
 from airflow import DAG
 from airflow.decorators import task
-from airflow.utils import timezone
 from airflow.models.param import Param
 from airflowHPC.dags.tasks import (
     get_file,
@@ -35,7 +34,7 @@ def prepare_output(mdrun, grompp):
 
 with DAG(
     dag_id="simulate_expand_uniform",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     params={

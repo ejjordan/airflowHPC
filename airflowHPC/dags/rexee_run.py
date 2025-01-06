@@ -1,13 +1,12 @@
 import os
 from airflow import DAG
-from airflow.utils import timezone
 
 from airflowHPC.dags.replex import read_counter
 from airflowHPC.dags.tasks import run_if_false, get_file, evaluate_template_truth
 
 with DAG(
     "REXEE_runner",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,

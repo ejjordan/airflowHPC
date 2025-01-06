@@ -1,7 +1,6 @@
 from airflow import DAG, Dataset
 from airflow.decorators import task
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
     get_file,
@@ -29,7 +28,7 @@ def path_as_dataset(dataset_path: str) -> Dataset:
 
 with DAG(
     "REXEE_continuation",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,

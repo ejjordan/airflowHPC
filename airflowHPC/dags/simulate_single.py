@@ -1,5 +1,4 @@
 from airflow import DAG
-from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceGmxOperator
@@ -9,7 +8,7 @@ from airflow.models.param import Param
 
 with DAG(
     dag_id="simulate_cpt",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     params={
@@ -108,7 +107,7 @@ with DAG(
 
 with DAG(
     dag_id="simulate_no_cpt",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     params={

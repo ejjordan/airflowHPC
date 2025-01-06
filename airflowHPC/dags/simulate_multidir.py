@@ -1,6 +1,5 @@
 import os
 from airflow import DAG
-from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
     get_file,
@@ -22,7 +21,7 @@ except:
 
 with DAG(
     dag_id="simulate_multidir",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,

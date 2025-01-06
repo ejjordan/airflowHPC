@@ -1,7 +1,6 @@
 import os
 from airflow import DAG
 from airflow.decorators import task
-from airflow.utils import timezone
 from airflowHPC.dags.tasks import run_if_needed, run_if_false
 
 
@@ -20,7 +19,7 @@ def verify_files(input_dir, filename):
 
 with DAG(
     dag_id="setup_single",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,

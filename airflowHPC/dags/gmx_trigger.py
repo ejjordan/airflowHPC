@@ -1,6 +1,5 @@
 from airflow import DAG
 from airflow.decorators import task, task_group
-from airflow.utils import timezone
 from airflowHPC.dags.tasks import (
     get_file,
     run_if_false,
@@ -86,7 +85,7 @@ def run_iteration(
 
 with DAG(
     "gmx_triggered",
-    start_date=timezone.utcnow(),
+    schedule=None,
     render_template_as_native_obj=True,
     is_paused_upon_creation=False,
     params={
@@ -203,7 +202,7 @@ def get_execution_date(_, context):
 
 with DAG(
     "gmx_triggerer",
-    start_date=timezone.utcnow(),
+    schedule=None,
     render_template_as_native_obj=True,
     params={
         "output_dir": "dynamic",

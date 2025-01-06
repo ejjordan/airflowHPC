@@ -1,6 +1,5 @@
 from airflow import DAG
 from airflow.decorators import task
-from airflow.utils import timezone
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -15,7 +14,7 @@ def outputs_list(**context):
 
 with DAG(
     "gmx_multi",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     params={
         "output_dir": "gmx_multi",

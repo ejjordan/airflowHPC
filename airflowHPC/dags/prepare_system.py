@@ -1,7 +1,6 @@
 import os
 from airflow import DAG
 from airflow.operators.bash import BashOperator
-from airflow.utils import timezone
 from airflow.models.param import Param
 from airflowHPC.dags.tasks import get_file, run_gmxapi, branch_task_template
 from airflowHPC.utils.mdp2json import write_mdp_json_as_mdp
@@ -9,7 +8,7 @@ from airflowHPC.utils.mdp2json import write_mdp_json_as_mdp
 
 with DAG(
     "prepare_system",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,

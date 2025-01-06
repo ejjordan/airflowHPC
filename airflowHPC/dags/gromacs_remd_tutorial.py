@@ -1,7 +1,6 @@
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from airflow.utils import timezone
 
 from airflowHPC.dags.tasks import (
     get_file,
@@ -156,7 +155,7 @@ def reverse_condition(condition):
 
 with DAG(
     dag_id="remd_demo",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
