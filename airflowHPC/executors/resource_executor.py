@@ -339,6 +339,9 @@ class ResourceExecutor(BaseExecutor):
 
     def heartbeat(self) -> None:
         """Heartbeat sent to trigger new jobs."""
+        # Free any resources that are no longer being used
+        self.sync()
+
         slots = self.slurm_hook.find_available_slots(
             [task for task in self.queued_tasks]
         )
@@ -381,7 +384,6 @@ class ResourceExecutor(BaseExecutor):
         )
 
         self.log.debug("Calling the %s sync method", self.__class__)
-        self.sync()
 
         self.trigger_tasks(open_slots)
 
@@ -396,8 +398,8 @@ class ResourceExecutor(BaseExecutor):
                 try:
                     if state in {TaskInstanceState.SUCCESS, TaskInstanceState.FAILED}:
                         core_ids = self.slurm_hook.get_core_ids(key)
-                        self.log.debug(
-                            f"FREED task {key.task_id}.{key.map_index} using cores: {core_ids}"
+                        self.log.info(
+                            f"\033[1;92mFREED task {key.task_id}.{key.map_index} using cores: {core_ids}\033[0m"
                         )
                         # TODO: The slurm hook should be connected to a DB backend so that allocate and free
                         # can be called by the task execute method
