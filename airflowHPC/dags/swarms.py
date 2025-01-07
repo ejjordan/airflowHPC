@@ -212,7 +212,7 @@ def step(
         poke_interval=1,
         trigger_rule="none_failed",
         conf=pull_dag_params,
-        max_active_tis_per_dagrun=4,
+        max_active_tis_per_dagrun=100,
         retries=4,
         retry_delay=datetime.timedelta(seconds=0),
     )
@@ -238,7 +238,7 @@ def step(
         poke_interval=1,
         trigger_rule="none_failed",
         conf=next_params["params"],
-        max_active_tis_per_dagrun=4,
+        max_active_tis_per_dagrun=100,
         retries=2,
         retry_delay=datetime.timedelta(seconds=0),
     )
