@@ -5,7 +5,7 @@ import os
 import subprocess
 from multiprocessing import Manager, Process
 from queue import Empty
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 from setproctitle import getproctitle, setproctitle
 
 from airflow import settings
@@ -277,17 +277,16 @@ class ResourceExecutor(BaseExecutor):
         hostname = self.slurm_hook.get_hostname(key)
         self.task_queue.put((key, command, rank_ids, gpu_ids, hostname))
 
-    def trigger_tasks(self, open_slots: int) -> None:
+    def trigger_tasks(self, ti_keys: List[TaskInstanceKey]) -> None:
         """
         Initiate async execution of the queued tasks, up to the number of available slots.
 
-        :param open_slots: Number of open slots
+        :param ti_keys: List of TaskInstanceKey to trigger
         """
-        sorted_queue = self.order_queued_tasks_by_priority()
         task_tuples = []
 
-        for _ in range(min((open_slots, len(self.queued_tasks)))):
-            key, (command, _, queue, ti) = sorted_queue.pop(0)
+        for key in ti_keys:
+            (command, _, queue, ti) = self.queued_tasks[key]
             if self.slurm_hook.assign_task_resources(key):
                 if self.log.level == 0:  # DEBUG
                     msg = f"ALLOCATED task {key.task_id}.{key.map_index} using cores: "
@@ -340,14 +339,16 @@ class ResourceExecutor(BaseExecutor):
     def heartbeat(self) -> None:
         """Heartbeat sent to trigger new jobs."""
         # Free any resources that are no longer being used
+        self.log.debug("Calling the %s sync method", self.__class__)
         self.sync()
 
-        slots = self.slurm_hook.find_available_slots(
-            [task for task in self.queued_tasks]
+        sorted_queue = self.order_queued_tasks_by_priority()
+        ti_keys, slots = self.slurm_hook.find_available_slots(
+            [task for task, _ in sorted_queue]
         )
         open_slots = len(slots)
         if open_slots > 0:
-            self.log.debug(
+            self.log.info(
                 f"Queued tasks: {[(task.dag_id, task.task_id, task.map_index) for task in self.queued_tasks]}"
             )
             self.log.debug(
@@ -383,9 +384,7 @@ class ResourceExecutor(BaseExecutor):
             tags={"status": "running", "name": self.__class__.__name__},
         )
 
-        self.log.debug("Calling the %s sync method", self.__class__)
-
-        self.trigger_tasks(open_slots)
+        self.trigger_tasks(ti_keys)
 
         self.log.debug("Calling the %s sync method", self.__class__)
         self.sync()

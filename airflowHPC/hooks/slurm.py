@@ -168,7 +168,10 @@ class SlurmHook(BaseHook):
             assert ti_key in self.task_resource_requests
             resource_requests.append(self.task_resource_requests[ti_key])
         slots = self.nodes_list.find_available_slots(resource_requests)
-        return slots
+        assert len(slots) == len(task_instance_keys)
+        ret_slots = [slot for slot in slots if slot]
+        tis = [task_instance_keys[i] for i, slot in enumerate(slots) if slot]
+        return tis, ret_slots
 
     def release_task_resources(self, task_instance_key: TaskInstanceKey):
         if task_instance_key not in self.slots_dict:

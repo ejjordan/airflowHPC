@@ -48,44 +48,51 @@ def test_find_available_slots():
         # Ask for resources for a single task
         slurm_hook.set_task_resources(ti_key1, num_ranks, num_threads, num_gpus)
         assert ti_key1 in slurm_hook.task_resource_requests
-        slots = slurm_hook.find_available_slots([ti_key1])
+        ti, slots = slurm_hook.find_available_slots([ti_key1])
         assert len(slots) == 1
         assert slots[0].hostname == "nid000123"
         assert [core.index for core in slots[0].cores] == list(range(8))
+        assert ti == [ti_key1]
 
         # Ask for resources for two tasks
         slurm_hook.set_task_resources(ti_key2, num_ranks, num_threads, num_gpus)
         assert ti_key2 in slurm_hook.task_resource_requests
-        slots = slurm_hook.find_available_slots([ti_key1, ti_key2])
+        ti_list = [ti_key1, ti_key2]
+        tis, slots = slurm_hook.find_available_slots(ti_list)
         assert len(slots) == 2
         assert slots[1].hostname == "nid000123"
         assert [core.index for core in slots[1].cores] == list(range(8, 16))
+        assert tis == ti_list
 
         # Ask for resources for three tasks
         slurm_hook.set_task_resources(ti_key3, num_ranks, num_threads, num_gpus)
         assert ti_key3 in slurm_hook.task_resource_requests
-        slots = slurm_hook.find_available_slots([ti_key1, ti_key2, ti_key3])
+        ti_list = [ti_key1, ti_key2, ti_key3]
+        tis, slots = slurm_hook.find_available_slots(ti_list)
         assert len(slots) == 3
         assert slots[2].hostname == "nid000456"
         assert [core.index for core in slots[2].cores] == list(range(8))
+        assert tis == ti_list
 
         # Ask for resources for four tasks
         slurm_hook.set_task_resources(ti_key4, num_ranks, num_threads, num_gpus)
         assert ti_key4 in slurm_hook.task_resource_requests
-        slots = slurm_hook.find_available_slots([ti_key1, ti_key2, ti_key3, ti_key4])
+        ti_list = [ti_key1, ti_key2, ti_key3, ti_key4]
+        tis, slots = slurm_hook.find_available_slots(ti_list)
         assert len(slots) == 4
         assert slots[3].hostname == "nid000456"
         assert [core.index for core in slots[3].cores] == list(range(8, 16))
+        assert tis == ti_list
 
         # Ask for resources for five tasks, but only four slots are available
         slurm_hook.set_task_resources(ti_key5, num_ranks, num_threads, num_gpus)
         assert ti_key5 in slurm_hook.task_resource_requests
-        slots = slurm_hook.find_available_slots(
-            [ti_key1, ti_key2, ti_key3, ti_key4, ti_key5]
-        )
+        ti_list = [ti_key1, ti_key2, ti_key3, ti_key4, ti_key5]
+        tis, slots = slurm_hook.find_available_slots(ti_list)
         assert len(slots) == 4
         assert slots[-1].hostname == "nid000456"
         assert [core.index for core in slots[-1].cores] == list(range(8, 16))
+        assert tis == ti_list[:-1]
 
 
 @pytest.mark.parametrize(
@@ -106,10 +113,11 @@ def test_find_available_slots_gpu(num_gpus, gpu_occupation, gpu_list):
         with gpu_list as gpu_expectation:
             slurm_hook.set_task_resources(ti_key, 4, 2, num_gpus)
             assert ti_key in slurm_hook.task_resource_requests
-            slots = slurm_hook.find_available_slots([ti_key])
+            ti, slots = slurm_hook.find_available_slots([ti_key])
             assert len(slots) == 1
             assert slots[0].hostname == "nid000123"
             assert [gpu.index for gpu in slots[0].gpus] == gpu_expectation
+            assert ti == [ti_key]
 
 
 @pytest.mark.parametrize(
@@ -135,11 +143,13 @@ def test_can_share_gpu(num_gpus, num_tasks, gpu_ids, node_list, node_id):
 
         for i, ti_key in enumerate(ti_keys):
             slurm_hook.set_task_resources(ti_key, num_ranks, num_threads, num_gpus[i])
-        slots = slurm_hook.find_available_slots(ti_keys)
+        tis, slots = slurm_hook.find_available_slots(ti_keys)
         assert len(slots) == num_tasks
+        assert len(tis) == num_tasks
         for i in range(num_tasks):
             assert slots[i].hostname == node_id[i]
             assert [gpu.index for gpu in slots[i].gpus] == [gpu_ids[i]]
+            assert tis[i] == ti_keys[i]
 
 
 @pytest.mark.parametrize(
@@ -197,3 +207,28 @@ def test_assign_task_resources():
         slurm_hook.set_task_resources(ti_key5, num_ranks, num_threads, num_gpus)
         assert slurm_hook.assign_task_resources(ti_key5) == False
         assert ti_key5 not in slurm_hook.slots_dict
+
+
+@pytest.mark.parametrize(
+    "resrouce_reqs, expected_task_ids",
+    [
+        ([(4, 2, 0), (2, 2, 0), (4, 2, 0), (1, 2, 0)], ["0", "1", "3"]),
+        ([(1, 1, 0), (8, 2, 0), (1, 1, 0)], ["0", "2"]),
+        ([(2, 2, 1), (4, 2, 1), (1, 1, 1), (1, 2, 0)], ["0", "1", "3"]),
+    ],
+)
+def test_ti_slots_order(resrouce_reqs, expected_task_ids):
+    with unittest.mock.patch("subprocess.run") as mock_run:
+        mock_run.return_value.stdout = "nid000123"
+        slurm_hook = SlurmHook()
+        ti_keys = [
+            TaskInstanceKey("dag_id", f"{i}", "run_id")
+            for i in range(len(resrouce_reqs))
+        ]
+        for i, ti_key in enumerate(ti_keys):
+            slurm_hook.set_task_resources(ti_key, *resrouce_reqs[i])
+
+        tis, slots = slurm_hook.find_available_slots(ti_keys)
+        assert len(slots) == len(expected_task_ids)
+        assert len(tis) == len(expected_task_ids)
+        assert [ti.task_id for ti in tis] == expected_task_ids

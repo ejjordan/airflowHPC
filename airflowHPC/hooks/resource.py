@@ -283,19 +283,23 @@ class NodeList:
 
             return slot
 
-    def find_available_slots(self, rr_list: List[RankRequirements]) -> List[Slot]:
+    def find_available_slots(
+        self, rr_list: List[RankRequirements]
+    ) -> List[Slot | None]:
         with self.__lock__:
             slots = list()
             for rr in rr_list:
+                slot = None
                 for node in self.nodes:
                     slot = self._find_slot(node, rr)
                     if slot:
-                        slots.append(slot)
                         self._allocate_slot(node, rr)
                         break
+                slots.append(slot)
 
             for slot in slots:
-                self.release_slot(slot)
+                if slot:
+                    self.release_slot(slot)
             return slots
 
     def allocate_slot(self, rr: RankRequirements) -> Slot | None:
