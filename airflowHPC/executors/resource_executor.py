@@ -364,9 +364,12 @@ class ResourceExecutor(BaseExecutor):
         num_running_tasks = len(self.running)
         num_queued_tasks = len(self.queued_tasks)
 
-        self.log.debug("%s running task instances", num_running_tasks)
-        self.log.debug("%s in queue", num_queued_tasks)
-        self.log.debug("%s open slots", open_slots)
+        if num_running_tasks > 0:
+            self.log.debug("%s running task instances", num_running_tasks)
+        if num_queued_tasks > 0:
+            self.log.debug("%s in queue", num_queued_tasks)
+        if open_slots > 0:
+            self.log.debug("%s open slots", open_slots)
 
         Stats.gauge(
             "executor.open_slots",
