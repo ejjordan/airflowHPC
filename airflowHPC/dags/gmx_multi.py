@@ -20,9 +20,15 @@ with DAG(
         "output_dir": "gmx_multi",
         "num_sims": 4,
         "inputs": {
-            "mdp": {"directory": "mdp", "filename": "basic_md.json"},
-            "gro": {"directory": "ensemble_md", "filename": "sys.gro"},
-            "top": {"directory": "ensemble_md", "filename": "sys.top"},
+            "mdp": {"directory": "mdp", "filename": "sim.json"},
+            "gro": {
+                "directory": "ala_pentapeptide",
+                "filename": "ala_penta_capped_solv.gro",
+            },
+            "top": {
+                "directory": "ala_pentapeptide",
+                "filename": "ala_penta_capped_solv.top",
+            },
         },
     },
 ) as gmx_multi:
@@ -60,7 +66,7 @@ with DAG(
     mdrun_result = ResourceGmxOperator.partial(
         task_id="mdrun",
         executor_config={
-            "mpi_ranks": 4,
+            "mpi_ranks": 1,
             "cpus_per_task": 2,
             "gpus": 0,
             "gpu_type": None,

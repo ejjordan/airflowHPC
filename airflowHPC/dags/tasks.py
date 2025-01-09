@@ -451,14 +451,16 @@ def add_to_dataset(
 ):
     import os
     import json
+    from threading import RLock
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     out_path = os.path.abspath(output_dir)
     output_file = os.path.join(out_path, output_fn)
     if os.path.exists(output_file):
-        with open(output_file, "r") as f:
-            data = json.load(f)
+        with RLock():
+            with open(output_file, "r") as f:
+                data = json.load(f)
     else:
         data = {}
 
@@ -472,8 +474,9 @@ def add_to_dataset(
     # Assign the new data to the final key
     nested_data[new_data_keys[-1]] = new_data
 
-    with open(output_file, "w") as f:
-        json.dump(data, f, indent=2, separators=(",", ": "))
+    with RLock():
+        with open(output_file, "w") as f:
+            json.dump(data, f, indent=2, separators=(",", ": "))
     dataset = Dataset(uri=output_file)
     return dataset
 
