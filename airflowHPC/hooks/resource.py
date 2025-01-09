@@ -316,18 +316,15 @@ class NodeList:
 
     def allocate_slot(self, rr: RankRequirements) -> Slot | None:
         self._assert_rr(rr)
-        slot = None
-        node = None
         for node in self.nodes:
             slot = self._find_slot(node, rr)
             if slot:
-                break
-        if slot:
-            self._allocate_slot(node, rr)
-        return slot
+                self._allocate_slot(node, rr)
+                return slot
+        return None
 
     def _allocate_slot(self, node: NodeResources, rr: RankRequirements) -> Slot:
-        slot = self.find_slot(rr)
+        slot = self._find_slot(node, rr)
         if slot is None:
             raise RuntimeError("could not allocate slot")
         with self.__lock__:
