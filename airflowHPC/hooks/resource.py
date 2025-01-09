@@ -212,11 +212,13 @@ class NodeList:
     def free_cores_list(self):
         free_cores = {}
         for node in self.nodes:
-            free_cores[node.hostname] = [
-                node.cores[i].index
-                for i in range(len(node.cores))
-                if node.cores[i].occupation == FREE
-            ]
+            free_cores[node.hostname] = len(
+                [
+                    node.cores[i].index
+                    for i in range(len(node.cores))
+                    if node.cores[i].occupation == FREE
+                ]
+            )
         return free_cores
 
     def find_slot(self, rr: RankRequirements) -> Slot | None:
@@ -314,13 +316,15 @@ class NodeList:
 
     def allocate_slot(self, rr: RankRequirements) -> Slot | None:
         self._assert_rr(rr)
-
+        slot = None
+        node = None
         for node in self.nodes:
             slot = self._find_slot(node, rr)
             if slot:
-                self._allocate_slot(node, rr)
-                return slot
-        return None
+                break
+        if slot:
+            self._allocate_slot(node, rr)
+        return slot
 
     def _allocate_slot(self, node: NodeResources, rr: RankRequirements) -> Slot:
         slot = self.find_slot(rr)
