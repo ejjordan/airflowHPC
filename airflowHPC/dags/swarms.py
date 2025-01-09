@@ -538,7 +538,7 @@ with DAG(
             title="MDP options",
             section="mdp_options",
         ),
-        "pull_force_constant": 400,
+        "pull_force_constant": 350,
         "convergence_threshold": 5,
         "output_files": Param(
             {

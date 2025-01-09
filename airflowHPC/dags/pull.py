@@ -270,7 +270,7 @@ with DAG(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 2,
+            "cpus_per_task": 4,
             "gpus": 0,
             "gpu_type": None,
         },
