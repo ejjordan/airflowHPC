@@ -366,6 +366,7 @@ class ResourceExecutor(BaseExecutor):
 
         if num_running_tasks > 0:
             self.log.info("%s running task instances", num_running_tasks)
+            self.log.info(f"Free cores: {self.slurm_hook.free_cores_list()}")
         if num_queued_tasks > 0:
             self.log.info("%s in queue", num_queued_tasks)
         if open_slots > 0:

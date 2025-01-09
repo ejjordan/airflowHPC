@@ -178,3 +178,6 @@ class SlurmHook(BaseHook):
             raise RuntimeError(f"Resource not allocated for task {task_instance_key}")
         self.nodes_list.release_slot(self.slots_dict[task_instance_key])
         del self.slots_dict[task_instance_key]
+
+    def free_cores_list(self):
+        return self.nodes_list.free_cores_list()

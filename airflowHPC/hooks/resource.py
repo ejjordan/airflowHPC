@@ -209,6 +209,16 @@ class NodeList:
         if requirement < 1:
             raise ValueError(f"invalid rank requirements: {rr}")
 
+    def free_cores_list(self):
+        free_cores = {}
+        for node in self.nodes:
+            free_cores[node.hostname] = [
+                node.cores[i].index
+                for i in range(len(node.cores))
+                if node.cores[i].occupation == FREE
+            ]
+        return free_cores
+
     def find_slot(self, rr: RankRequirements) -> Slot | None:
         self._assert_rr(rr)
 
