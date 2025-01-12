@@ -301,13 +301,12 @@ class NodeList:
         with self.__lock__:
             slots = list()
             for rr in rr_list:
-                slot = None
+                alloc_slot = None
                 for node in self.nodes:
-                    slot = self._find_slot(node, rr)
-                    if slot:
-                        self._allocate_slot(node, rr)
+                    if self._find_slot(node, rr):
+                        alloc_slot = self._allocate_slot(node, rr)
                         break
-                slots.append(slot)
+                slots.append(alloc_slot)
 
             for slot in slots:
                 if slot:
@@ -317,10 +316,9 @@ class NodeList:
     def allocate_slot(self, rr: RankRequirements) -> Slot | None:
         self._assert_rr(rr)
         for node in self.nodes:
-            slot = self._find_slot(node, rr)
-            if slot:
-                self._allocate_slot(node, rr)
-                return slot
+            if self._find_slot(node, rr):
+                alloc_slot = self._allocate_slot(node, rr)
+                return alloc_slot
         return None
 
     def _allocate_slot(self, node: NodeResources, rr: RankRequirements) -> Slot:

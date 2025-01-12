@@ -19,6 +19,7 @@ with DAG(
     params={
         "output_dir": "gmx_multi",
         "num_sims": 4,
+        "mdp_options": {"nsteps": 10000},
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "sim.json"},
             "gro": {
@@ -46,7 +47,7 @@ with DAG(
     )
     mdp_sim = update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_sim_update")(
         mdp_json_file_path=input_mdp,
-        update_dict={"nsteps": 10000},
+        update_dict="{{ params.mdp_options }}",
     )
     grompp_result = ResourceGmxOperator(
         task_id="grompp",
