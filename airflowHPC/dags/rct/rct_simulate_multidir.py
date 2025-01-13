@@ -10,10 +10,11 @@ from airflowHPC.dags.tasks import (
 )
 from airflowHPC.operators import ResourceBashOperator, ResourceRCTOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
-from gmxapi.commandline import cli_executable
 from airflow.models.param import Param
 
 try:
+    from gmxapi.commandline import cli_executable
+
     gmx_executable = cli_executable()
 except:
     gmx_executable = "gmx_mpi"
