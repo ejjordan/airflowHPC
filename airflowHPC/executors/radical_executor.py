@@ -41,7 +41,8 @@ if TYPE_CHECKING:
         Optional[str],
     ]
 
-PARALLELISM = os.environ.get('RCT_PARALLELISM', 64)
+PARALLELISM = int(os.environ.get("RCT_PARALLELISM", 64))
+
 
 class ResourceWorker(Process, LoggingMixin):
     """
@@ -99,7 +100,7 @@ class ResourceWorker(Process, LoggingMixin):
         self, command: CommandType, env
     ) -> TaskInstanceState:
         try:
-            print('=========== command: ', command)
+            print("=========== command: ", command)
             subprocess.run(
                 command,
                 stdin=None,
@@ -142,7 +143,6 @@ class RadicalExecutor(BaseExecutor):
     serve_logs: bool = True
 
     def __init__(self):
-
         self.log.info(f"RadicalExecutor: __init__ {PARALLELISM}")
 
         super().__init__(parallelism=PARALLELISM)
@@ -183,8 +183,8 @@ class RadicalExecutor(BaseExecutor):
         self._rct_tmgr = rp.TaskManager(session=self._rct_session)
 
         self._rct_server = ru.zmq.Server()
-        self._rct_server.register_request('submit', self._submit_task)
-        self._rct_server.register_request('check', self._check_task)
+        self._rct_server.register_request("submit", self._submit_task)
+        self._rct_server.register_request("check", self._check_task)
         self._rct_server.start()
         time.sleep(0.1)  # let zmq settle
 
@@ -194,27 +194,25 @@ class RadicalExecutor(BaseExecutor):
 
         pilot_json = os.environ.get("RCT_PILOT_CFG")
         if pilot_json:
-            self.log.debug('pilot_json: %s' % pilot_json)
+            self.log.debug("pilot_json: %s" % pilot_json)
             pd_dict = ru.read_json(pilot_json)
 
         else:
-            self.log.debug('pilot_resource: localhost')
-            pd_dict = {"resource": "local.localhost",
-                       "nodes": 128,
-                       "runtime": 1440}
+            self.log.debug("pilot_resource: localhost")
+            pd_dict = {"resource": "local.localhost", "nodes": 128, "runtime": 1440}
 
-        self.log.debug('pilot_description: %s' % pd_dict)
+        self.log.debug("pilot_description: %s" % pd_dict)
 
         pd = rp.PilotDescription(pd_dict)
         pilot = self._rct_pmgr.submit_pilots(pd)
 
         # let tasks run in the resource's native environment
-        pilot.prepare_env('bs0', {'type' : 'shell'})
+        pilot.prepare_env("bs0", {"type": "shell"})
         self._rct_tmgr.add_pilots(pilot)
 
         # wait for the pilot to become active (but don't stall on errors)
         pilot.wait(rp.FINAL + [rp.PMGR_ACTIVE])
-        self.log.debug('pilot state: %s' % pilot.state)
+        self.log.debug("pilot state: %s" % pilot.state)
         assert pilot.state == rp.PMGR_ACTIVE
 
         # rct is set up, zmq env is known - start the inherited local executor
@@ -248,7 +246,6 @@ class RadicalExecutor(BaseExecutor):
     ):
         """Queues command to task."""
         if task_instance.key not in self.queued_tasks:
-
             self.log.info(f"Adding to queue: {command}")
             if is_resource_operator(task_instance.operator_name):
                 assert task_instance.executor_config
