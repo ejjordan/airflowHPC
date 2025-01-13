@@ -36,9 +36,6 @@ if TYPE_CHECKING:
     ExecutorWorkType = Tuple[
         Optional[TaskInstanceKey],
         Optional[CommandType],
-        Optional[list[int]],
-        Optional[list[int]],
-        Optional[str],
     ]
 
 PARALLELISM = int(os.environ.get("RCT_PARALLELISM", 64))
@@ -313,12 +310,8 @@ class RadicalExecutor(BaseExecutor):
             tags={"status": "running", "name": self.__class__.__name__},
         )
 
-        self.log.debug("Calling the %s sync method", self.__class__)
-        self.sync()
-
         self.trigger_tasks(open_slots)
 
-        # why twice?
         self.log.debug("Calling the %s sync method", self.__class__)
         self.sync()
 

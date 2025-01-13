@@ -3,8 +3,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
-import pprint
-import threading as mt
+import threading
 from typing import TYPE_CHECKING, Sequence, Iterable
 
 from airflow.exceptions import AirflowException
@@ -50,7 +49,6 @@ class ResourceRCTOperator(BaseOperator):
     ) -> None:
         self._uuid = str(uuid.uuid4())
         self.log.info(f"=== ResourceRCTOperator: __init__ {kwargs}")
-        # kwargs.update({"cwd": output_dir})
         super().__init__(**kwargs)
         if (
             self.executor_config
@@ -78,7 +76,7 @@ class ResourceRCTOperator(BaseOperator):
         self.input_files = input_files
         self.output_files = output_files
         self.output_dir = output_dir
-        self._rct_event = mt.Event()
+        self._rct_event = threading.Event()
         self.show_return_value_in_logs = show_return_value_in_logs
 
     def check_add_args(self, arg: str, value: str):
@@ -93,7 +91,6 @@ class ResourceRCTOperator(BaseOperator):
         self.gmx_arguments.extend([arg, value])
 
     def execute(self, context: Context):
-
         server_addr = os.environ.get("RCT_SERVER_URL")
         assert server_addr is not None, "RCT_SERVER_URL is not set"
 
@@ -141,23 +138,20 @@ class ResourceRCTOperator(BaseOperator):
                 "arguments": args,
                 "ranks": self.mpi_ranks,
                 "cores_per_rank": self.cpus_per_task,
-              # 'input_staging': input_files_paths,
-              # "pre_exec": ['. ~/scalems/.env.task'],
                 "output_staging": sds,
-              # "named_env": "bs0"
             }
         )
 
         self.log.info("====================== submit td %d" % os.getpid())
-        uid = rct_client.request('submit', td.as_dict())
+        uid = rct_client.request("submit", td.as_dict())
         self.log.info("=== submitted %s" % uid)
 
         # timeout to avoid zombie tasks?
         timeout = 60 * 60  # FIXME
         start = time.time()
-        task = None
+        state, exit_code = None, None
         while time.time() - start < timeout:
-            state, exit_code = rct_client.request('check', uid)
+            state, exit_code = rct_client.request("check", uid)
             self.log.info("=== check %s: %s" % (uid, state))
             if state in rp.FINAL:
                 break
@@ -166,13 +160,6 @@ class ResourceRCTOperator(BaseOperator):
         self.log.info("=== task completed")
         if state in [rp.FAILED, rp.CANCELED]:
             raise AirflowException(f"Command failed with a state {state}.")
-
-        # NOTE: skip_on_exit_code is not available on the BaseOperator.  Do we
-        #       need it here?
-        # if result.exit_code in self.skip_on_exit_code:
-        #     raise AirflowSkipException(
-        #         f"Bash command returned exit code {result.exit_code}. Skipping."
-        #     )
 
         if exit_code != 0:
             raise AirflowException(
