@@ -170,6 +170,7 @@ class ResourceExecutor(BaseExecutor):
         )
         if self.parallelism < 0:
             raise AirflowException("parallelism must be bigger than or equal to 0")
+        self.log.info(f"{self.__class__.__name__} parallelism: {self.parallelism}")
         self.manager = Manager()
         self.result_queue: Queue[TaskInstanceStateType] = self.manager.Queue()
         self.task_queue: Queue[ExecutorWorkType] = self.manager.Queue()
@@ -178,7 +179,7 @@ class ResourceExecutor(BaseExecutor):
     def start(self) -> None:
         """Start the executor."""
         old_proctitle = getproctitle()
-        setproctitle("airflow executor -- ResourceExecutor")
+        setproctitle(f"airflow executor -- {self.__class__.__name__}")
         setproctitle(old_proctitle)
         self.workers = []
         self.workers_active = 0
@@ -418,7 +419,7 @@ class ResourceExecutor(BaseExecutor):
             assert self.manager
 
         self.log.info(
-            "Shutting down ResourceExecutor"
+            f"Shutting down {self.__class__.__name__}"
             "; waiting for running tasks to finish.  Signal again if you don't want to wait."
         )
         for _ in self.workers:
