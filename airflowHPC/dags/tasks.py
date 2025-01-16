@@ -1,6 +1,6 @@
 from airflow import Dataset
 from airflow.decorators import task, task_group
-from airflow.exceptions import AirflowSkipException, AirflowException
+from airflow.exceptions import AirflowException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.operators.empty import EmptyOperator
 from dataclasses import dataclass

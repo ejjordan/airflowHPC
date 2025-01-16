@@ -1,8 +1,11 @@
 from airflow import DAG
 from airflow.decorators import task
+from sympy import timed
+
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
+from airflow.utils.timezone import datetime
 
 
 @task
@@ -14,7 +17,8 @@ def outputs_list(**context):
 
 with DAG(
     "gmx_multi",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2024, 1, 1),
     catchup=False,
     params={
         "output_dir": "gmx_multi",

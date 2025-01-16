@@ -5,6 +5,7 @@ import os
 import subprocess
 from multiprocessing import Manager, Process
 from queue import Empty
+from time import sleep
 from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 from setproctitle import getproctitle, setproctitle
 
@@ -424,9 +425,16 @@ class ResourceExecutor(BaseExecutor):
             self.task_queue.put((None, None, None, None, None))
 
         # Wait for commands to finish
-        self.task_queue.join()
-        self.result_queue.join()
+        sleep(1)  # give results a little time to come in
         self.sync()
+        if self.result_queue.qsize() > 0:
+            self.log.info(
+                f"{self.__class__.__name__} shut down with {self.result_queue.qsize()} results in queue"
+            )
+        if self.task_queue.qsize() > 0:
+            self.log.info(
+                f"{self.__class__.__name__} shut down with {self.task_queue.qsize()} tasks in queue"
+            )
         self.manager.shutdown()
 
     def terminate(self):
