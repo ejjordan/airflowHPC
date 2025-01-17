@@ -97,7 +97,6 @@ class ResourceWorker(Process, LoggingMixin):
         self, command: CommandType, env
     ) -> TaskInstanceState:
         try:
-            print("=========== command: ", command)
             subprocess.run(
                 command,
                 stdin=None,

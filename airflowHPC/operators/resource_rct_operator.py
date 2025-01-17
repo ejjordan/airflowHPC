@@ -48,7 +48,7 @@ class ResourceRCTOperator(BaseOperator):
         **kwargs,
     ) -> None:
         self._uuid = str(uuid.uuid4())
-        self.log.info(f"=== ResourceRCTOperator: __init__ {kwargs}")
+        self.log.info(f"{self.__class__.__name__}: __init__ {kwargs}")
         super().__init__(**kwargs)
         if (
             self.executor_config
@@ -91,10 +91,14 @@ class ResourceRCTOperator(BaseOperator):
         self.gmx_arguments.extend([arg, value])
 
     def execute(self, context: Context):
+        self.log.warning(
+            "\033[1;91mThis operator may not work well for running multiple 'gmx_mpi mdrun' "
+            "tasks simultaneously\033[0m"
+        )
         server_addr = os.environ.get("RCT_SERVER_URL")
         assert server_addr is not None, "RCT_SERVER_URL is not set"
 
-        self.log.info(f"======= SERVERURL: {server_addr}")
+        self.log.debug(f"RCT SERVER URL: {server_addr}")
         rct_client = ru.zmq.Client(url=server_addr)
 
         if not os.path.exists(self.output_dir):
@@ -142,9 +146,9 @@ class ResourceRCTOperator(BaseOperator):
             }
         )
 
-        self.log.info("====================== submit td %d" % os.getpid())
+        self.log.debug(f"submitting task description {td.as_dict()}")
         uid = rct_client.request("submit", td.as_dict())
-        self.log.info("=== submitted %s" % uid)
+        self.log.info(f"submitted {uid}")
 
         # timeout to avoid zombie tasks?
         timeout = 60 * 60  # FIXME
@@ -152,12 +156,12 @@ class ResourceRCTOperator(BaseOperator):
         state, exit_code = None, None
         while time.time() - start < timeout:
             state, exit_code = rct_client.request("check", uid)
-            self.log.info("=== check %s: %s" % (uid, state))
+            self.log.info(f"{uid} status: {state}")
             if state in rp.FINAL:
                 break
             time.sleep(1)
 
-        self.log.info("=== task completed")
+        self.log.info("RCT task finished")
         if state in [rp.FAILED, rp.CANCELED]:
             raise AirflowException(f"Command failed with a state {state}.")
 
@@ -194,8 +198,6 @@ class ResourceRCTOperatorDataclass(ResourceRCTOperator):
         self.input_data = input_data
 
     def execute(self, context: Context):
-        self.log.info("=== Dataclass operator executing")
-
         from dataclasses import asdict
 
         run_output = super().execute(context)
