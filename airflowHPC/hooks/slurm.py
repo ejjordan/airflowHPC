@@ -77,11 +77,6 @@ class SlurmHook(BaseHook):
             )
             for i in range(self.num_nodes)
         ]
-        with open('/tmp/test.txt', 'w') as f:
-            import pprint
-            f.write(pprint.pformat(nodes))
-            f.write('\n')
-            f.flush()
 
         self.nodes_list = NodeList(nodes=nodes)
 
