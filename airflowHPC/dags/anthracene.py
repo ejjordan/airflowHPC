@@ -261,8 +261,10 @@ def TI(
         state_uncertainties.append((state, states[i + 1], neighbor_uncertainty))
 
     # Plotting
-    ax = plot_ti_dhdl(ti, labels=["VDW"], colors="r")
-    ax.figure.savefig(os.path.join(output_dir, "dhdl_TI.png"))
+    # TODO: This package is broken: AttributeError: 'Legend' object has no attribute 'legendHandles'
+    # If the package is updated, uncomment these lines
+    # ax = plot_ti_dhdl(ti, labels=["VDW"], colors="r")
+    # ax.figure.savefig(os.path.join(output_dir, "dhdl_TI.png"))
 
     # Perform error analysis to choose new states:
     dHdl = combined_dhdl_data

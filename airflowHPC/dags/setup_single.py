@@ -31,7 +31,7 @@ with DAG(
             "inputs": {
                 "pdb": {
                     "directory": "ala_pentapeptide",
-                    "filename": "ala_capped_pentapeptide.pdb",
+                    "filename": "ala_penta_capped.pdb",
                 }
             },
             "box_size": 3.2,

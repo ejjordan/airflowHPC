@@ -204,7 +204,8 @@ def get_execution_date(_, context):
 
 with DAG(
     "gmx_triggerer",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     render_template_as_native_obj=True,
     params={
         "output_dir": "dynamic",

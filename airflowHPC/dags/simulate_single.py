@@ -108,7 +108,8 @@ with DAG(
 
 with DAG(
     dag_id="simulate_no_cpt",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params={

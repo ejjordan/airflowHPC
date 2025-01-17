@@ -207,6 +207,7 @@ with DAG(
             "top": {
                 "directory": "ala_pentapeptide",
                 "filename": "ala_penta_capped_solv.top",
+                "ref_data": True,
             },
         },
         "output_dir": "pulling",
@@ -239,6 +240,7 @@ with DAG(
     input_top = get_file.override(task_id="get_top")(
         input_dir="{{ params.inputs.top.directory }}",
         file_name="{{ params.inputs.top.filename }}",
+        use_ref_data="{{ params.inputs.top.ref_data }}",
     )
     input_mdp = get_file.override(task_id="get_mdp")(
         input_dir="{{ params.inputs.mdp.directory }}",

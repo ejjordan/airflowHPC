@@ -219,10 +219,12 @@ with DAG(
             "gro": {
                 "directory": "{{ params.output_dir }}/{{ params.minimize_dir }}",
                 "filename": "em.gro",
+                "ref_data": False,
             },
             "top": {
                 "directory": "{{ params.output_dir }}/{{ params.setup_dir }}",
                 "filename": "system_prepared.top",
+                "ref_data": False,
             },
         },
         "output_dir": "{{ params.output_dir }}/{{ params.nvt_equil_dir }}",
@@ -238,10 +240,12 @@ with DAG(
             "gro": {
                 "directory": "{{ params.output_dir }}/{{ params.nvt_equil_dir }}",
                 "filename": "nvt.gro",
+                "ref_data": False,
             },
             "top": {
                 "directory": "{{ params.output_dir }}/{{ params.setup_dir }}",
                 "filename": "system_prepared.top",
+                "ref_data": False,
             },
         },
         "mdp_options": "{{ params.mdp_options }}",

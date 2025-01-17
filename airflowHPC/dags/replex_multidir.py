@@ -54,10 +54,15 @@ with DAG(
     nvt_params = {
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "nvt.json"},
-            "gro": {"directory": "{{ params.output_dir }}/em", "filename": "em.gro"},
+            "gro": {
+                "directory": "{{ params.output_dir }}/em",
+                "filename": "em.gro",
+                "ref_data": False,
+            },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
                 "filename": "system_prepared.top",
+                "ref_data": False,
             },
         },
         "output_dir": "{{ params.output_dir }}/nvt_equil",
@@ -73,10 +78,12 @@ with DAG(
             "gro": {
                 "directory": "{{ params.output_dir }}/nvt_equil",
                 "filename": "nvt.gro",
+                "ref_data": False,
             },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
                 "filename": "system_prepared.top",
+                "ref_data": False,
             },
         },
         "mdp_options": "{{ params.mdp_options }}",
@@ -101,14 +108,17 @@ with DAG(
             "gro": {
                 "directory": "{{ params.output_dir }}/npt_equil",
                 "filename": "npt.gro",
+                "ref_data": False,
             },
             "cpt": {
                 "directory": "{{ params.output_dir }}/npt_equil",
                 "filename": "npt.cpt",
+                "ref_data": False,
             },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
                 "filename": "system_prepared.top",
+                "use_ref_data": False,
             },
         },
         "mdp_options": "{{ params.mdp_options }}",
