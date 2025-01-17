@@ -1,7 +1,7 @@
 from airflow import DAG
 from airflow.decorators import task
-from airflow.utils import timezone
 from airflow.models.param import Param
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import (
     get_file,
     dataset_from_xcom_dicts,
@@ -35,7 +35,8 @@ def prepare_output(mdrun, grompp):
 
 with DAG(
     dag_id="simulate_expand_uniform",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params={
@@ -101,6 +102,7 @@ with DAG(
             "gpus": 0,
             "gpu_type": None,
         },
+        gmx_executable="gmx_mpi",
         gmx_arguments=["grompp"],
         input_files={"-f": mdp, "-c": gro, "-p": top},
         output_files={"-o": "{{ params.expected_output | replace('.gro', '.tpr') }}"},

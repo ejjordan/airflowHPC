@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+import subprocess
 
 from functools import cached_property
 from radical.utils import get_hostlist
@@ -31,9 +32,31 @@ class SlurmHook(BaseHook):
             os.environ.get("SLURM_CPUS_PER_TASK", self.threads_per_core)
         )
         self.num_nodes = int(os.environ.get("SLURM_NNODES", 1))
-        nodelist = os.environ.get("SLURM_JOB_NODELIST")
-        if nodelist:
+        if "SLURM_JOB_NODELIST" in os.environ:
+            self.node_names = get_hostlist(os.environ.get("SLURM_JOB_NODELIST"))
+            self.num_nodes = len(self.node_names)
+        elif "SLURM_JOB_ID" in os.environ:
+            # needed for interactive sessions
+            # sacct --noheader -X -P -oNodeList --jobs=$SLURM_JOB_ID
+            result = subprocess.run(
+                [
+                    "sacct",
+                    "--noheader",
+                    "-X",
+                    "-P",
+                    "-oNodeList",
+                    f"--jobs={os.environ['SLURM_JOB_ID']}",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            nodelist = result.stdout.strip()
             self.node_names = get_hostlist(nodelist)
+            self.num_nodes = len(self.node_names)
+            self.log.info(
+                f"SLURM_JOB_NODELIST not set, using sacct to determine node names: {self.node_names}"
+            )
         else:
             if self.num_nodes > 1:
                 raise ValueError("SLURM_JOB_NODELIST not set and SLURM_NNODES > 1")
@@ -111,12 +134,19 @@ class SlurmHook(BaseHook):
         task_instance_key: TaskInstanceKey,
         num_ranks: int,
         num_threads: int,
-        num_gpus: int,
+        num_gpus: int | float,
     ):
+        # Keep gpu_occupation out of the function signature
+        if num_gpus > 0 and num_gpus < 1:
+            gpu_occupation = num_gpus
+            num_gpus = 1
+        else:
+            gpu_occupation = 1.0
         resource_request = RankRequirements(
             num_ranks=num_ranks,
             num_threads=num_threads,
             num_gpus=num_gpus,
+            gpu_occupation=gpu_occupation,
         )
         # This will raise if the request cannot be satisfied
         self.nodes_list.find_slot(resource_request)
@@ -139,10 +169,16 @@ class SlurmHook(BaseHook):
             assert ti_key in self.task_resource_requests
             resource_requests.append(self.task_resource_requests[ti_key])
         slots = self.nodes_list.find_available_slots(resource_requests)
-        return slots
+        assert len(slots) == len(task_instance_keys)
+        ret_slots = [slot for slot in slots if slot]
+        tis = [task_instance_keys[i] for i, slot in enumerate(slots) if slot]
+        return tis, ret_slots
 
     def release_task_resources(self, task_instance_key: TaskInstanceKey):
         if task_instance_key not in self.slots_dict:
             raise RuntimeError(f"Resource not allocated for task {task_instance_key}")
         self.nodes_list.release_slot(self.slots_dict[task_instance_key])
         del self.slots_dict[task_instance_key]
+
+    def free_cores_list(self):
+        return self.nodes_list.free_cores_list()

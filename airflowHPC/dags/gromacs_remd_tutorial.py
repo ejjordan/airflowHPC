@@ -1,7 +1,7 @@
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from airflow.utils import timezone
+from airflow.utils.timezone import datetime
 
 from airflowHPC.dags.tasks import (
     get_file,
@@ -156,7 +156,8 @@ def reverse_condition(condition):
 
 with DAG(
     dag_id="remd_demo",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
@@ -218,10 +219,12 @@ with DAG(
             "gro": {
                 "directory": "{{ params.output_dir }}/{{ params.minimize_dir }}",
                 "filename": "em.gro",
+                "ref_data": False,
             },
             "top": {
                 "directory": "{{ params.output_dir }}/{{ params.setup_dir }}",
                 "filename": "system_prepared.top",
+                "ref_data": False,
             },
         },
         "output_dir": "{{ params.output_dir }}/{{ params.nvt_equil_dir }}",
@@ -237,10 +240,12 @@ with DAG(
             "gro": {
                 "directory": "{{ params.output_dir }}/{{ params.nvt_equil_dir }}",
                 "filename": "nvt.gro",
+                "ref_data": False,
             },
             "top": {
                 "directory": "{{ params.output_dir }}/{{ params.setup_dir }}",
                 "filename": "system_prepared.top",
+                "ref_data": False,
             },
         },
         "mdp_options": "{{ params.mdp_options }}",

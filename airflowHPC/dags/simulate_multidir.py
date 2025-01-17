@@ -1,7 +1,6 @@
-import os
 from airflow import DAG
-from airflow.utils import timezone
-
+from airflow.utils.timezone import datetime
+from os.path import curdir
 from airflowHPC.dags.tasks import (
     get_file,
     prepare_gmx_input,
@@ -22,7 +21,8 @@ except:
 
 with DAG(
     dag_id="simulate_multidir",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
@@ -123,6 +123,6 @@ with DAG(
             "gpus": 0,
             "gpu_type": None,
         },
-        cwd=os.path.curdir,
+        cwd=curdir,
     )
     grompp_sim >> mdrun_sim

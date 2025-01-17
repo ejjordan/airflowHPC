@@ -1,9 +1,10 @@
-import datetime
+from datetime import timedelta
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.exceptions import AirflowException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.models.param import Param
+from airflow.utils.timezone import datetime
 
 from airflowHPC.dags.tasks import (
     json_from_dataset_path,
@@ -82,27 +83,44 @@ def pull_params(
     iteration,
     force_constant,
     expected_output,
+    point_idx,
     **context,
 ):
+    import ast
     import logging
 
     logging.info(f"phi_psi: {phi_psi}")
     phi = phi_psi[0]
     psi = phi_psi[1]
+    if iteration > 1:
+        point = iter_params["inputs"]["point"][point_idx]
+        if type(point) == str:
+            point = ast.literal_eval(point)
+        assert phi_psi == point
     ti = context["ti"]
     map_index = ti.map_index
     output_dir = f"{output_path}/iteration_{iteration}/{map_index}/pull"
-    gro_path = iter_params["inputs"]["gro"]["directory"]
-    gro_fn = iter_params["inputs"]["gro"]["filename"]
-    ref_data = iter_params["inputs"]["gro"]["ref_data"]
-    gro = {"directory": gro_path, "filename": gro_fn, "ref_data": ref_data}
+    # Use output from previous iteration, if available
+    if iteration > 1:
+        gro_path = iter_params["inputs"]["gro"]["directory"][point_idx]
+        gro_fn = iter_params["inputs"]["gro"]["filename"][point_idx]
+        ref_data = False
+    else:
+        gro_path = iter_params["inputs"]["gro"]["directory"]
+        gro_fn = iter_params["inputs"]["gro"]["filename"]
+        ref_data = True
+    inputs = {
+        "gro": {"directory": gro_path, "filename": gro_fn, "ref_data": ref_data},
+        "top": iter_params["inputs"]["top"],
+        "mdp": iter_params["inputs"]["mdp"],
+    }
     return {
         "phi_angle": phi,
         "psi_angle": psi,
         "force_constant": force_constant,
         "output_dir": output_dir,
         "expected_output": expected_output,
-        "gro": gro,
+        "inputs": inputs,
         "mdp_options": iter_params["mdp_options"]["pull"],
     }
 
@@ -203,6 +221,7 @@ def step(
         iteration=iteration,
         force_constant=force_constant,
         expected_output=pull_expected_output,
+        point_idx="{{ task_instance.map_index }}",
     )
     trigger_pull_dag = TriggerDagRunOperator(
         task_id="trigger_pull_dag",
@@ -212,9 +231,9 @@ def step(
         poke_interval=1,
         trigger_rule="none_failed",
         conf=pull_dag_params,
-        max_active_tis_per_dagrun=4,
-        retries=4,
-        retry_delay=datetime.timedelta(seconds=0),
+        max_active_tis_per_dagrun=512,  # Setting this lower can be useful for debugging
+        retries=4,  # Pull can crash; can mean bad luck or the force constant is too high
+        retry_delay=timedelta(seconds=0),
     )
     pull_dag_params >> trigger_pull_dag
     pull_info = json_from_dataset_path_parts.override(task_id="pull_results")(
@@ -238,9 +257,9 @@ def step(
         poke_interval=1,
         trigger_rule="none_failed",
         conf=next_params["params"],
-        max_active_tis_per_dagrun=4,
+        max_active_tis_per_dagrun=512,  # Setting this lower can be useful for debugging
         retries=2,
-        retry_delay=datetime.timedelta(seconds=0),
+        retry_delay=timedelta(seconds=0),
     )
     sim_info = json_from_dataset_path_parts.override(task_id="extract_sim_info")(
         dataset_path_parts=[
@@ -250,6 +269,8 @@ def step(
             f"{sim_expected_output}.json",
         ],
     )
+    # TODO: move this out of this task_group so that it is only called once per step invocation.
+    # Currently this task must be executed serially to prevent data write conflicts.
     add_sim_info = add_to_dataset.override(task_id="add_sim_info")(
         output_dir=output_dir,
         output_fn=swarm_expected_output,
@@ -499,7 +520,8 @@ def swarms_done(iteration, max_iterations, convergence_threshold, convergence):
 
 with DAG(
     dag_id="swarms",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params={
@@ -538,7 +560,7 @@ with DAG(
             title="MDP options",
             section="mdp_options",
         ),
-        "pull_force_constant": 400,
+        "pull_force_constant": 350,
         "convergence_threshold": 5,
         "output_files": Param(
             {

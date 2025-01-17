@@ -1,4 +1,5 @@
 from airflow import DAG
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import (
     get_file,
     add_to_dataset,
@@ -192,7 +193,8 @@ def trajectory_dihedral(tpr, xtc, output_dir, phi_angle, psi_angle, plot=True):
 
 with DAG(
     "pull",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     params={
         "inputs": {
@@ -205,6 +207,7 @@ with DAG(
             "top": {
                 "directory": "ala_pentapeptide",
                 "filename": "ala_penta_capped_solv.top",
+                "ref_data": True,
             },
         },
         "output_dir": "pulling",
@@ -237,6 +240,7 @@ with DAG(
     input_top = get_file.override(task_id="get_top")(
         input_dir="{{ params.inputs.top.directory }}",
         file_name="{{ params.inputs.top.filename }}",
+        use_ref_data="{{ params.inputs.top.ref_data }}",
     )
     input_mdp = get_file.override(task_id="get_mdp")(
         input_dir="{{ params.inputs.mdp.directory }}",
@@ -270,7 +274,7 @@ with DAG(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 2,
+            "cpus_per_task": 4,
             "gpus": 0,
             "gpu_type": None,
         },

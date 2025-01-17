@@ -1,5 +1,6 @@
 from airflow import DAG
 from airflow.decorators import task
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.swarms_tasks import iterations_completed
 from airflowHPC.dags.tasks import (
     json_from_dataset_path,
@@ -23,6 +24,7 @@ def get_sim_cvs(data, num_completed_iters):
     for iteration in iterations_to_use:
         iteration_data = data[iteration]
         iteration_data.pop("params")
+        iteration_data.pop("convergence")
         swarms = {}
         for swarm_idx, swarm_info in iteration_data.items():
             phi_psi_point = np.round(swarm_info["phi_psi"], 2).tolist()
@@ -380,7 +382,8 @@ def plot_convergence_angles(cv_info, iteration_num, output_dir):
 
 with DAG(
     dag_id="swarms_postprocessing",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params={

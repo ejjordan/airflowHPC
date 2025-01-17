@@ -128,10 +128,14 @@ def update_write_mdp_json_as_mdp(mdp_data, update_dict, output_file: str = None)
 
 @task
 def update_write_mdp_json_as_mdp_from_file(
-    mdp_json_file_path, update_dict: dict = {}, output_file: str = None
+    mdp_json_file_path, update_dict: dict | str = None, output_file: str = None
 ):
     import json
     import logging
+    import ast
+
+    if isinstance(update_dict, str):
+        update_dict = ast.literal_eval(update_dict)
 
     # Enforce underscore format for keys
     for key in list(update_dict):

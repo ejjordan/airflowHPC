@@ -1,9 +1,10 @@
 from airflow import DAG
 from airflow.decorators import task
-from airflow.utils import timezone
+
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
+from airflow.utils.timezone import datetime
 
 
 @task
@@ -15,15 +16,23 @@ def outputs_list(**context):
 
 with DAG(
     "gmx_multi",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     params={
         "output_dir": "gmx_multi",
         "num_sims": 4,
+        "mdp_options": {"nsteps": 10000},
         "inputs": {
-            "mdp": {"directory": "mdp", "filename": "basic_md.json"},
-            "gro": {"directory": "ensemble_md", "filename": "sys.gro"},
-            "top": {"directory": "ensemble_md", "filename": "sys.top"},
+            "mdp": {"directory": "mdp", "filename": "sim.json"},
+            "gro": {
+                "directory": "ala_pentapeptide",
+                "filename": "ala_penta_capped_solv.gro",
+            },
+            "top": {
+                "directory": "ala_pentapeptide",
+                "filename": "ala_penta_capped_solv.top",
+            },
         },
     },
 ) as gmx_multi:
@@ -41,7 +50,7 @@ with DAG(
     )
     mdp_sim = update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_sim_update")(
         mdp_json_file_path=input_mdp,
-        update_dict={"nsteps": 10000},
+        update_dict="{{ params.mdp_options }}",
     )
     grompp_result = ResourceGmxOperator(
         task_id="grompp",
@@ -61,7 +70,7 @@ with DAG(
     mdrun_result = ResourceGmxOperator.partial(
         task_id="mdrun",
         executor_config={
-            "mpi_ranks": 4,
+            "mpi_ranks": 1,
             "cpus_per_task": 2,
             "gpus": 0,
             "gpu_type": None,
@@ -71,25 +80,4 @@ with DAG(
         input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
         output_files={"-c": "result.gro", "-x": "result.xtc"},
     ).expand(output_dir=outputs_dirs)
-    """
-    from airflowHPC.operators.mpi_bash_operator import MPIBashOperator
-    mdrun_result = MPIBashOperator.partial(
-        task_id="mdrun",
-        mpi_ranks=4,
-        cpus_per_task=2,
-        bash_command=f"gmx_mpi mdrun -ntomp 2 -s {grompp_result['-o']} -c result.gro -x result.xtc",
-    ).expand(cwd=outputs_dirs)
-    """
-    """
-    from airflowHPC.operators.mpi_gmx_bash_operator import MPIGmxBashOperator
-    mdrun_result = MPIGmxBashOperator.partial(
-        task_id="mdrun",
-        mpi_ranks=4,
-        cpus_per_task=2,
-        gmx_executable="gmx_mpi",
-        gmx_arguments=["mdrun", "-ntomp", "2"],
-        input_files={"-s": grompp_result["-o"]},
-        output_files={"-c": "result.gro", "-x": "result.xtc"},
-    ).expand(output_dir=outputs_dirs)
-    """
     grompp_result >> mdrun_result

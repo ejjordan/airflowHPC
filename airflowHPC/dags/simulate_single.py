@@ -1,6 +1,5 @@
 from airflow import DAG
-from airflow.utils import timezone
-
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -9,7 +8,8 @@ from airflow.models.param import Param
 
 with DAG(
     dag_id="simulate_cpt",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params={
@@ -108,7 +108,8 @@ with DAG(
 
 with DAG(
     dag_id="simulate_no_cpt",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params={
