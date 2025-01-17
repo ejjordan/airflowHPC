@@ -1,4 +1,4 @@
-PREFIX=/cfs/klemming/projects/supr/scale-ms
+PREFIX=$HOME
 source $PREFIX/spack/share/spack/setup-env.sh
 spack load postgresql
 source $PREFIX/python_venv/bin/activate
