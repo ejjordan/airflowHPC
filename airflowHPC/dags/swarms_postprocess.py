@@ -24,6 +24,7 @@ def get_sim_cvs(data, num_completed_iters):
     for iteration in iterations_to_use:
         iteration_data = data[iteration]
         iteration_data.pop("params")
+        iteration_data.pop("convergence")
         swarms = {}
         for swarm_idx, swarm_info in iteration_data.items():
             phi_psi_point = np.round(swarm_info["phi_psi"], 2).tolist()
