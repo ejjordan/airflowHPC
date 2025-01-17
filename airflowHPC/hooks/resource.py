@@ -11,7 +11,10 @@ from threading import RLock
 @dataclass
 class ResourceOccupation:
     index: int = 0
-    occupation: float = 0.0
+    occupation: float = 1.0
+
+    def __repr__(self) -> str:
+        return f"{self.index}:{self.occupation}"
 
 
 @dataclass
@@ -38,12 +41,77 @@ DOWN = None
 
 @dataclass
 class RankRequirements:
-    num_ranks: int = 1
-    num_threads: int = 1
-    num_gpus: int = 0
-    core_occupation: float = 1.0
-    gpu_occupation: float = 1.0
+    num_ranks: int
+    num_threads: int
+    num_gpus: int
+    gpu_occupation: float
     mem: int = 0
+    _num_ranks: int = field(default=1, init=False, repr=False)
+    _num_threads: int = field(default=1, init=False, repr=False)
+    _gpu_occupation: float = field(default=1.0, init=False, repr=False)
+    _num_gpus: int = field(default=0, init=False, repr=False)
+    core_occupation: float = field(default=1.0, init=False, repr=False)
+
+    @property
+    def num_ranks(self) -> int:
+        return self._num_ranks
+
+    @num_ranks.setter
+    def num_ranks(self, value: int) -> None:
+        if type(value) is property:
+            # Use the default value if not specified
+            value = RankRequirements._num_ranks
+        check_value = float(value)
+        if check_value <= 0 or check_value.as_integer_ratio()[1] != 1:
+            raise ValueError(f"num_threads: {value} must be a positive integer")
+        self._num_ranks = int(value)
+
+    @property
+    def num_threads(self) -> int:
+        return self._num_threads
+
+    @num_threads.setter
+    def num_threads(self, value: int) -> None:
+        if type(value) is property:
+            # Use the default value if not specified
+            value = RankRequirements._num_threads
+        check_value = float(value)
+        if check_value <= 0 or check_value.as_integer_ratio()[1] != 1:
+            raise ValueError(f"num_threads: {value} must be a positive integer")
+        self._num_threads = int(value)
+
+    @property
+    def num_gpus(self) -> int:
+        return self._num_gpus
+
+    @num_gpus.setter
+    def num_gpus(self, value: int) -> None:
+        if type(value) is property:
+            # Use the default value if not specified
+            value = RankRequirements._num_gpus
+        check_value = float(value)
+        if check_value < 0 or check_value.as_integer_ratio()[1] != 1:
+            raise ValueError(f"num_gpus: {value} must be a non-negative integer")
+        self._num_gpus = int(value)
+
+    @property
+    def gpu_occupation(self) -> float:
+        return self._gpu_occupation
+
+    @gpu_occupation.setter
+    def gpu_occupation(self, value: float) -> None:
+        if type(value) is property:
+            # Use the default value if not specified
+            value = RankRequirements._gpu_occupation
+        value = float(value)
+        allowed_values = [0.25, 0.5, 1.0]
+        if value not in allowed_values:
+            raise ValueError(f"gpu_occupation: {value} not in {allowed_values}")
+        if self.num_gpus > 1 and value != 1.0:
+            msg = f"gpu_occupation is {value}, which is only allowed for a single GPU. "
+            msg += f"It must be 1.0 for {self.num_gpus} GPUs"
+            raise ValueError(msg)
+        self._gpu_occupation = value
 
     def __eq__(self, other: RankRequirements) -> bool:
         if not isinstance(other, RankRequirements):
@@ -92,6 +160,7 @@ class NodeList:
 
         self.verify()
 
+    # TODO: remove this property
     @cached_property
     @providers_configuration_loaded
     def allow_dispersed_cores(self) -> bool:
@@ -141,6 +210,18 @@ class NodeList:
         if requirement < 1:
             raise ValueError(f"invalid rank requirements: {rr}")
 
+    def free_cores_list(self):
+        free_cores = {}
+        for node in self.nodes:
+            free_cores[node.hostname] = len(
+                [
+                    node.cores[i].index
+                    for i in range(len(node.cores))
+                    if node.cores[i].occupation == FREE
+                ]
+            )
+        return free_cores
+
     def find_slot(self, rr: RankRequirements) -> Slot | None:
         self._assert_rr(rr)
 
@@ -187,8 +268,9 @@ class NodeList:
             # TODO: It might make sense to ensure GPUs are contiguous, but more important would be to ensure they are on the same NUMA node
             if rr.num_gpus:
                 for i in range(len(node.gpus) - rr.num_gpus + 1):
-                    if all(
-                        node.gpus[i + j].occupation == FREE for j in range(rr.num_gpus)
+                    if any(
+                        1 - node.gpus[i + j].occupation >= rr.gpu_occupation
+                        for j in range(rr.num_gpus)
                     ):
                         gpus = [
                             ResourceOccupation(
@@ -214,45 +296,34 @@ class NodeList:
 
             return slot
 
-    def find_available_slots(self, rr_list: List[RankRequirements]) -> List[Slot]:
-        slots = list()
-        # TODO: this will not work if more than one node is requested
-        for node in self.nodes:
-            node_slots = self._find_available_slots(node, rr_list)
-            if node_slots:
-                slots.extend(node_slots)
-            else:
-                break
-        return slots
-
-    def _find_available_slots(
-        self, node: NodeResources, rr_list: List[RankRequirements]
-    ) -> List[Slot]:
+    def find_available_slots(
+        self, rr_list: List[RankRequirements]
+    ) -> List[Slot | None]:
         with self.__lock__:
             slots = list()
             for rr in rr_list:
-                slot = self._find_slot(node, rr)
-                if slot:
-                    slots.append(slot)
-                    self._allocate_slot(node, rr)
-                else:
-                    break
+                alloc_slot = None
+                for node in self.nodes:
+                    if self._find_slot(node, rr):
+                        alloc_slot = self._allocate_slot(node, rr)
+                        break
+                slots.append(alloc_slot)
+
             for slot in slots:
-                self._release_slot(node, slot)
+                if slot:
+                    self.release_slot(slot)
             return slots
 
     def allocate_slot(self, rr: RankRequirements) -> Slot | None:
         self._assert_rr(rr)
-
         for node in self.nodes:
-            slot = self._find_slot(node, rr)
-            if slot:
-                self._allocate_slot(node, rr)
-                return slot
+            if self._find_slot(node, rr):
+                alloc_slot = self._allocate_slot(node, rr)
+                return alloc_slot
         return None
 
     def _allocate_slot(self, node: NodeResources, rr: RankRequirements) -> Slot:
-        slot = self.find_slot(rr)
+        slot = self._find_slot(node, rr)
         if slot is None:
             raise RuntimeError("could not allocate slot")
         with self.__lock__:
@@ -267,9 +338,6 @@ class NodeList:
 
     def release_slot(self, slot: Slot) -> None:
         node = self.nodes[slot.node_index]
-        self._release_slot(node, slot)
-
-    def _release_slot(self, node: NodeResources, slot: Slot) -> None:
         with self.__lock__:
             for ro in slot.cores:
                 node.cores[ro.index].occupation -= ro.occupation

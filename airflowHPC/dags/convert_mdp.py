@@ -1,12 +1,11 @@
 from airflow import DAG
-from airflow.utils import timezone
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.utils.mdp2json import validate_convert_mdp
 
 
 with DAG(
     dag_id="convert_mdp",
-    start_date=timezone.utcnow(),
+    schedule=None,
     catchup=False,
     params={
         "mdp": {"directory": "anthracene", "filename": "dg.mdp"},

@@ -1,13 +1,14 @@
-import os
+from os.path import abspath
 from airflow import DAG
-from airflow.utils import timezone
+from airflow.utils.timezone import datetime
 
 from airflowHPC.dags.replex import read_counter
 from airflowHPC.dags.tasks import run_if_false, get_file, evaluate_template_truth
 
 with DAG(
     "REXEE_runner",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
@@ -25,7 +26,7 @@ with DAG(
 ) as dag:
     dag.doc = """This is a DAG for running iterations of a REXEE simulation."""
 
-    output_dir_abs = os.path.abspath(
+    output_dir_abs = abspath(
         "{{ params.output_dir }}"
     )  # to ensure the trigger DAGs are run in the same folder
 
