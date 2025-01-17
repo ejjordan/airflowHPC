@@ -69,6 +69,6 @@ with DAG(
         gmx_executable="gmx_mpi",
         gmx_arguments=["mdrun"],
         input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
-        output_files={"-c": "result.gro", "-x": "result.xtc"},
+        output_files={"-c": "result.gro", "-x": "result.xtc", "-g": "md.log"},
     ).expand(output_dir=outputs_dirs)
     grompp_result >> mdrun_result

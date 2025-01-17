@@ -17,7 +17,7 @@ from airflow.utils.state import TaskInstanceState
 from airflow.models.taskinstance import TaskInstance
 from airflow.stats import Stats
 
-from airflowHPC.operators import is_resource_operator
+from airflowHPC.operators import is_resource_rct_operator
 
 import radical.pilot as rp
 import radical.utils as ru
@@ -65,7 +65,7 @@ class ResourceWorker(Process, LoggingMixin):
         # We know we've just started a new process, so lets disconnect from the metadata db now
         settings.engine.pool.dispose()
         settings.engine.dispose()
-        setproctitle("airflow worker -- ResourceExecutor")
+        setproctitle(f"airflow worker -- {self.__class__.__name__}")
         return super().run()
 
     def execute_work(
@@ -83,7 +83,7 @@ class ResourceWorker(Process, LoggingMixin):
             return
 
         self.log.info("%s running %s", self.__class__.__name__, command)
-        setproctitle(f"airflow worker -- ResourceExecutor: {command}")
+        setproctitle(f"airflow worker -- {self.__class__.__name__}: {command}")
         env = os.environ.copy()
         state = self._execute_work_in_subprocess(command, env)
         self.result_queue.put((key, state))
@@ -91,7 +91,7 @@ class ResourceWorker(Process, LoggingMixin):
             f"Task {key.task_id}.{key.map_index} finished with state {state} on {self.name}"
         )
         # Remove the command since the worker is done executing the task
-        setproctitle("airflow worker -- ResourceExecutor")
+        setproctitle(f"airflow worker -- {self.__class__.__name__}")
 
     def _execute_work_in_subprocess(
         self, command: CommandType, env
@@ -140,7 +140,7 @@ class RadicalExecutor(BaseExecutor):
     serve_logs: bool = True
 
     def __init__(self):
-        self.log.info(f"RadicalExecutor: __init__ {PARALLELISM}")
+        self.log.info(f"{self.__class__.__name__}: __init__ {PARALLELISM}")
 
         super().__init__(parallelism=PARALLELISM)
 
@@ -173,7 +173,7 @@ class RadicalExecutor(BaseExecutor):
     def start(self) -> None:
         """Start the executor."""
 
-        self.log.info("RadicalExecutor: start")
+        self.log.info("{self.__class__.__name__}: start")
 
         self._rct_session = rp.Session()
         self._rct_pmgr = rp.PilotManager(session=self._rct_session)
@@ -215,11 +215,11 @@ class RadicalExecutor(BaseExecutor):
         # rct is set up, zmq env is known - start the inherited local executor
         super().start()
 
-        self.log.info("RadicalExecutor: start ok")
+        self.log.info(f"{self.__class__.__name__}: start ok")
 
         # pilot is up, also run Joe's executor workers.
         old_proctitle = getproctitle()
-        setproctitle("airflow executor -- ResourceExecutor")
+        setproctitle(f"airflow executor -- {self.__class__.__name__}")
         setproctitle(old_proctitle)
         self.workers = []
 
@@ -244,7 +244,7 @@ class RadicalExecutor(BaseExecutor):
         """Queues command to task."""
         if task_instance.key not in self.queued_tasks:
             self.log.info(f"Adding to queue: {command}")
-            if is_resource_operator(task_instance.operator_name):
+            if is_resource_rct_operator(task_instance.operator_name):
                 assert task_instance.executor_config
                 assert "mpi_ranks" in task_instance.executor_config
 
@@ -331,16 +331,22 @@ class RadicalExecutor(BaseExecutor):
             assert self.manager
 
         self.log.info(
-            "Shutting down ResourceExecutor"
+            f"Shutting down {self.__class__.__name__}"
             "; waiting for running tasks to finish.  Signal again if you don't want to wait."
         )
         for _ in self.workers:
             self.task_queue.put((None, None))
 
         # Wait for commands to finish
-        self.task_queue.join()
-        self.result_queue.join()
         self.sync()
+        if self.result_queue.qsize() > 0:
+            self.log.info(
+                f"{self.__class__.__name__} shut down with {self.result_queue.qsize()} results in queue"
+            )
+        if self.task_queue.qsize() > 0:
+            self.log.info(
+                f"{self.__class__.__name__} shut down with {self.task_queue.qsize()} tasks in queue"
+            )
         self.manager.shutdown()
 
         self._rct_session.close()

@@ -8,9 +8,18 @@ resource_operators = [
     "ResourceGmxOperatorDataclass",
 ]
 
+resource_rct_operators = [
+    "ResourceRCTOperator",
+    "ResourceRCTOperatorDataclass",
+]
+
 
 def is_resource_operator(operator_name: str):
     return operator_name in resource_operators
+
+
+def is_resource_rct_operator(operator_name: str):
+    return operator_name in resource_rct_operators
 
 
 __all__ = [
@@ -20,4 +29,5 @@ __all__ = [
     "ResourceRCTOperator",
     "ResourceRCTOperatorDataclass",
     "is_resource_operator",
+    "is_resource_rct_operator",
 ]
