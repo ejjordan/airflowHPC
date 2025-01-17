@@ -1,11 +1,12 @@
 from airflow import DAG
-from airflow.utils import timezone
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceRCTOperator
 
 with DAG(
     "rct_run_gmx",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     params={"output_dir": "rct_run_gmx"},
 ) as dag:
@@ -43,7 +44,7 @@ with DAG(
         gmx_executable="gmx_mpi",
         gmx_arguments=["mdrun"],
         input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
-        output_files={"-c": "result.gro", "-x": "result.xtc"},
+        output_files={"-c": "result.gro", "-x": "result.xtc", "-g": "md.log"},
         output_dir="{{ params.output_dir }}",
     )
     grompp_result >> mdrun_result

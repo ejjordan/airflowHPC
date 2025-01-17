@@ -174,6 +174,9 @@ class RadicalExecutor(BaseExecutor):
         """Start the executor."""
 
         self.log.info("{self.__class__.__name__}: start")
+        self.log.warning(
+            "\033[1;91mThis executor is experimental. It may result in large numbers of zombie processes.\033[0m"
+        )
 
         self._rct_session = rp.Session()
         self._rct_pmgr = rp.PilotManager(session=self._rct_session)

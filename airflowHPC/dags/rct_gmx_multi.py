@@ -1,6 +1,7 @@
 from airflow import DAG
 from airflow.decorators import task
-from airflow.utils import timezone
+from airflow.utils.timezone import datetime
+
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceRCTOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -15,15 +16,23 @@ def outputs_list(**context):
 
 with DAG(
     "rct_gmx_multi",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     params={
         "output_dir": "rct_gmx_multi",
         "num_sims": 4,
+        "mdp_options": {"nsteps": 10000},
         "inputs": {
-            "mdp": {"directory": "mdp", "filename": "basic_md.json"},
-            "gro": {"directory": "ensemble_md", "filename": "sys.gro"},
-            "top": {"directory": "ensemble_md", "filename": "sys.top"},
+            "mdp": {"directory": "mdp", "filename": "sim.json"},
+            "gro": {
+                "directory": "ala_pentapeptide",
+                "filename": "ala_penta_capped_solv.gro",
+            },
+            "top": {
+                "directory": "ala_pentapeptide",
+                "filename": "ala_penta_capped_solv.top",
+            },
         },
     },
 ) as rct_gmx_multi:
@@ -41,7 +50,7 @@ with DAG(
     )
     mdp_sim = update_write_mdp_json_as_mdp_from_file.override(task_id="mdp_sim_update")(
         mdp_json_file_path=input_mdp,
-        update_dict={"nsteps": 1000},
+        update_dict="{{ params.mdp_options }}",
     )
     grompp_result = ResourceRCTOperator(
         task_id="grompp",
