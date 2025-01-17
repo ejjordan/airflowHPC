@@ -2,13 +2,15 @@ import tempfile
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
+from airflow.utils.timezone import datetime
 from airflowHPC.operators import ResourceBashOperator
 from airflowHPC.dags.tasks import get_file
 
 
 with DAG(
     "test_mpi_omp",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
 ) as dag:
     fn = "hello_mpi_omp"

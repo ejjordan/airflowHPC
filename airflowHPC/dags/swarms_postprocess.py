@@ -1,5 +1,6 @@
 from airflow import DAG
 from airflow.decorators import task
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.swarms_tasks import iterations_completed
 from airflowHPC.dags.tasks import (
     json_from_dataset_path,
@@ -380,7 +381,8 @@ def plot_convergence_angles(cv_info, iteration_num, output_dir):
 
 with DAG(
     dag_id="swarms_postprocessing",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params={

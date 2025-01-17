@@ -17,7 +17,7 @@ def outputs_list(**context):
 with DAG(
     "gmx_multi",
     schedule="@once",
-    start_date=datetime(2024, 1, 1),
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     params={
         "output_dir": "gmx_multi",

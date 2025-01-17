@@ -4,6 +4,7 @@ from airflow.decorators import task, task_group
 from airflow.exceptions import AirflowException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.models.param import Param
+from airflow.utils.dates import datetime
 
 from airflowHPC.dags.tasks import (
     json_from_dataset_path,
@@ -499,7 +500,8 @@ def swarms_done(iteration, max_iterations, convergence_threshold, convergence):
 
 with DAG(
     dag_id="swarms",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params={

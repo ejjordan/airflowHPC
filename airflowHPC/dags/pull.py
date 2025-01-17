@@ -1,4 +1,5 @@
 from airflow import DAG
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import (
     get_file,
     add_to_dataset,
@@ -192,7 +193,8 @@ def trajectory_dihedral(tpr, xtc, output_dir, phi_angle, psi_angle, plot=True):
 
 with DAG(
     "pull",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     params={
         "inputs": {

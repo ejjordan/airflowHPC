@@ -1,6 +1,6 @@
-import os
 from airflow import DAG
 from airflow.decorators import task
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import run_if_needed, run_if_false
 
 
@@ -8,6 +8,7 @@ from airflowHPC.dags.tasks import run_if_needed, run_if_false
 def verify_files(input_dir, filename):
     """Workaround for steps where multiple files are expected."""
     import logging
+    import os
 
     input_file = f"{input_dir}/{filename}"
 
@@ -19,7 +20,8 @@ def verify_files(input_dir, filename):
 
 with DAG(
     dag_id="setup_single",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,

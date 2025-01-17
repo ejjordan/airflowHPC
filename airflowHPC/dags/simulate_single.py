@@ -1,5 +1,5 @@
 from airflow import DAG
-
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import get_file
 from airflowHPC.operators import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
@@ -8,7 +8,8 @@ from airflow.models.param import Param
 
 with DAG(
     dag_id="simulate_cpt",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params={

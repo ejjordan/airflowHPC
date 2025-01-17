@@ -1,5 +1,6 @@
 from airflow import DAG
 from airflow.models.param import Param
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import (
     prepare_gmx_input,
     update_gmx_input,
@@ -11,7 +12,8 @@ from airflowHPC.operators import ResourceGmxOperatorDataclass
 
 with DAG(
     "grompp_mdrun",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,

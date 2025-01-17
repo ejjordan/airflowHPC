@@ -1,5 +1,6 @@
 from airflow import DAG
 from airflow.models.param import Param
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import (
     get_file,
     prepare_gmx_input,
@@ -13,7 +14,8 @@ from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 with DAG(
     dag_id="simulate_expand",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params={
