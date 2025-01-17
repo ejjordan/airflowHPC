@@ -136,6 +136,7 @@ class SlurmHook(BaseHook):
         num_threads: int,
         num_gpus: int | float,
     ):
+        # Keep gpu_occupation out of the function signature
         if num_gpus > 0 and num_gpus < 1:
             gpu_occupation = num_gpus
             num_gpus = 1

@@ -83,27 +83,44 @@ def pull_params(
     iteration,
     force_constant,
     expected_output,
+    point_idx,
     **context,
 ):
+    import ast
     import logging
 
     logging.info(f"phi_psi: {phi_psi}")
     phi = phi_psi[0]
     psi = phi_psi[1]
+    if iteration > 1:
+        point = iter_params["inputs"]["point"][point_idx]
+        if type(point) == str:
+            point = ast.literal_eval(point)
+        assert phi_psi == point
     ti = context["ti"]
     map_index = ti.map_index
     output_dir = f"{output_path}/iteration_{iteration}/{map_index}/pull"
-    gro_path = iter_params["inputs"]["gro"]["directory"]
-    gro_fn = iter_params["inputs"]["gro"]["filename"]
-    ref_data = iter_params["inputs"]["gro"]["ref_data"]
-    gro = {"directory": gro_path, "filename": gro_fn, "ref_data": ref_data}
+    # Use output from previous iteration, if available
+    if iteration > 1:
+        gro_path = iter_params["inputs"]["gro"]["directory"][point_idx]
+        gro_fn = iter_params["inputs"]["gro"]["filename"][point_idx]
+        ref_data = False
+    else:
+        gro_path = iter_params["inputs"]["gro"]["directory"]
+        gro_fn = iter_params["inputs"]["gro"]["filename"]
+        ref_data = True
+    inputs = {
+        "gro": {"directory": gro_path, "filename": gro_fn, "ref_data": ref_data},
+        "top": iter_params["inputs"]["top"],
+        "mdp": iter_params["inputs"]["mdp"],
+    }
     return {
         "phi_angle": phi,
         "psi_angle": psi,
         "force_constant": force_constant,
         "output_dir": output_dir,
         "expected_output": expected_output,
-        "gro": gro,
+        "inputs": inputs,
         "mdp_options": iter_params["mdp_options"]["pull"],
     }
 
@@ -204,6 +221,7 @@ def step(
         iteration=iteration,
         force_constant=force_constant,
         expected_output=pull_expected_output,
+        point_idx="{{ task_instance.map_index }}",
     )
     trigger_pull_dag = TriggerDagRunOperator(
         task_id="trigger_pull_dag",

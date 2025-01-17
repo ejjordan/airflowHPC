@@ -160,6 +160,7 @@ class NodeList:
 
         self.verify()
 
+    # TODO: remove this property
     @cached_property
     @providers_configuration_loaded
     def allow_dispersed_cores(self) -> bool:

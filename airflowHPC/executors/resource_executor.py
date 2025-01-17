@@ -281,7 +281,10 @@ class ResourceExecutor(BaseExecutor):
 
     def trigger_tasks(self, ti_keys: List[TaskInstanceKey]) -> None:
         """
-        Initiate async execution of the queued tasks, up to the number of available slots.
+        Initiate async execution of the queued tasks.
+
+        This executor sends the tasks to execute while the BaseExecutor sends the number of tasks.
+        This is needed so that only tasks with available resources are sent to the workers.
 
         :param ti_keys: List of TaskInstanceKey to trigger
         """
@@ -290,14 +293,14 @@ class ResourceExecutor(BaseExecutor):
         for key in ti_keys:
             (command, _, queue, ti) = self.queued_tasks[key]
             if self.slurm_hook.assign_task_resources(key):
-                if self.log.level == 0:  # DEBUG
+                if self.log.level == 10:  # DEBUG
                     msg = f"ALLOCATED task {key.task_id}.{key.map_index} using cores: "
                     msg += f"{self.slurm_hook.get_core_ids(key)} and rank IDs: "
                     msg += f"{self.slurm_hook.get_rank_ids(key)} on {self.slurm_hook.get_hostname(key)}"
                     num_gpus = self.slurm_hook.get_gpu_ids(key)
                     if num_gpus:
                         msg += f" and GPU IDs: {num_gpus}"
-                    self.log.info(f"\033[1;93m{msg}\033[0m")
+                    self.log.debug(f"\033[1;93m{msg}\033[0m")
                 # If a task makes it here but is still understood by the executor
                 # to be running, it generally means that the task has been killed
                 # externally and not yet been marked as failed.
@@ -350,7 +353,7 @@ class ResourceExecutor(BaseExecutor):
         )
         open_slots = len(slots)
         if open_slots > 0:
-            self.log.info(
+            self.log.debug(
                 f"Queued tasks: {[(task.dag_id, task.task_id, task.map_index) for task in self.queued_tasks]}"
             )
             self.log.debug(
@@ -359,7 +362,7 @@ class ResourceExecutor(BaseExecutor):
             self.log.debug(
                 f"SLOTS: {[[ro.index for ro in slot.cores] for slot in slots]}"
             )
-            self.log.info(
+            self.log.debug(
                 f"\033[1;95mSlot: {[(slot.hostname, [core.index for core in slot.cores]) for slot in slots]}\033[0m"
             )
 
@@ -367,12 +370,12 @@ class ResourceExecutor(BaseExecutor):
         num_queued_tasks = len(self.queued_tasks)
 
         if num_running_tasks > 0:
-            self.log.info("%s running task instances", num_running_tasks)
-            self.log.info(f"Free cores: {self.slurm_hook.free_cores_list()}")
+            self.log.debug("%s running task instances", num_running_tasks)
+            self.log.debug(f"Free cores: {self.slurm_hook.free_cores_list()}")
         if num_queued_tasks > 0:
-            self.log.info("%s in queue", num_queued_tasks)
+            self.log.debug("%s in queue", num_queued_tasks)
         if open_slots > 0:
-            self.log.info("%s open slots", open_slots)
+            self.log.debug("%s open slots", open_slots)
 
         Stats.gauge(
             "executor.open_slots",
@@ -403,7 +406,7 @@ class ResourceExecutor(BaseExecutor):
                 try:
                     if state in {TaskInstanceState.SUCCESS, TaskInstanceState.FAILED}:
                         core_ids = self.slurm_hook.get_core_ids(key)
-                        self.log.info(
+                        self.log.debug(
                             f"\033[1;92mFREED task {key.task_id}.{key.map_index} using cores: {core_ids}\033[0m"
                         )
                         # TODO: The slurm hook should be connected to a DB backend so that allocate and free
