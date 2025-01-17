@@ -33,18 +33,6 @@ with DAG(
         output_files={"-o": "run.tpr"},
         output_dir="{{ params.output_dir }}",
     )
-    """
-    from airflowHPC.operators.mpi_gmx_bash_operator import MPIGmxBashOperator
-    mdrun_result = MPIGmxBashOperator(
-        task_id="mdrun",
-        mpi_ranks=4,
-        cpus_per_task=2,
-        gmx_arguments=["mdrun", "-ntomp", "2"],
-        input_files={"-s": grompp_result["-o"]},
-        output_files={"-c": "result.gro", "-x": "result.xtc"},
-        output_dir="{{ params.output_dir }}",
-    )
-    """
     mdrun_result = ResourceGmxOperator(
         task_id="mdrun",
         executor_config={
