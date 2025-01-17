@@ -213,8 +213,8 @@ def step(
         poke_interval=1,
         trigger_rule="none_failed",
         conf=pull_dag_params,
-        max_active_tis_per_dagrun=1000,
-        retries=4,
+        max_active_tis_per_dagrun=512,  # Setting this lower can be useful for debugging
+        retries=4,  # Pull can crash; can mean bad luck or the force constant is too high
         retry_delay=datetime.timedelta(seconds=0),
     )
     pull_dag_params >> trigger_pull_dag
@@ -239,7 +239,7 @@ def step(
         poke_interval=1,
         trigger_rule="none_failed",
         conf=next_params["params"],
-        max_active_tis_per_dagrun=1000,
+        max_active_tis_per_dagrun=512,  # Setting this lower can be useful for debugging
         retries=2,
         retry_delay=datetime.timedelta(seconds=0),
     )

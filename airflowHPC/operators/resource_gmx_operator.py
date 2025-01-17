@@ -199,7 +199,6 @@ class ResourceGmxOperator(ResourceBashOperator):
             if "srun" in mpi_executable:
                 host_flag = "--nodelist"
                 call.extend([host_flag, f"{self.hostname}"])
-                # call.append("--exact")
                 call.append("--overlap")
             else:
                 host_flag = "-host"

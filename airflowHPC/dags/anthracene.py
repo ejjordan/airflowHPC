@@ -112,7 +112,8 @@ def get_gro(param_name, input_dir):
 
 with DAG(
     dag_id="anthracene_simulation",
-    schedule=None,
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     params=dagrun_params,
