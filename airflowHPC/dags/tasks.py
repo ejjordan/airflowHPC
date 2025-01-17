@@ -445,7 +445,8 @@ def xcom_lookup(dag_id, task_id, key, **context):
     return xcom
 
 
-@task(max_active_tis_per_dagrun=1000)
+# TODO: Executing multiple instances of this task can lead to a race condition. Is there a better solution?
+@task(max_active_tis_per_dagrun=1)
 def add_to_dataset(
     output_dir: str, output_fn: str, new_data: dict, new_data_keys: list[str]
 ):

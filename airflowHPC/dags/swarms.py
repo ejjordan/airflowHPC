@@ -1,10 +1,10 @@
-import datetime
+from datetime import timedelta
 from airflow import DAG
 from airflow.decorators import task, task_group
 from airflow.exceptions import AirflowException
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.models.param import Param
-from airflow.utils.dates import datetime
+from airflow.utils.timezone import datetime
 
 from airflowHPC.dags.tasks import (
     json_from_dataset_path,
@@ -215,7 +215,7 @@ def step(
         conf=pull_dag_params,
         max_active_tis_per_dagrun=512,  # Setting this lower can be useful for debugging
         retries=4,  # Pull can crash; can mean bad luck or the force constant is too high
-        retry_delay=datetime.timedelta(seconds=0),
+        retry_delay=timedelta(seconds=0),
     )
     pull_dag_params >> trigger_pull_dag
     pull_info = json_from_dataset_path_parts.override(task_id="pull_results")(
@@ -241,7 +241,7 @@ def step(
         conf=next_params["params"],
         max_active_tis_per_dagrun=512,  # Setting this lower can be useful for debugging
         retries=2,
-        retry_delay=datetime.timedelta(seconds=0),
+        retry_delay=timedelta(seconds=0),
     )
     sim_info = json_from_dataset_path_parts.override(task_id="extract_sim_info")(
         dataset_path_parts=[
@@ -251,6 +251,8 @@ def step(
             f"{sim_expected_output}.json",
         ],
     )
+    # TODO: move this out of this task_group so that it is only called once per step invocation.
+    # Currently this task must be executed serially to prevent data write conflicts.
     add_sim_info = add_to_dataset.override(task_id="add_sim_info")(
         output_dir=output_dir,
         output_fn=swarm_expected_output,
