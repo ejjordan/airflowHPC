@@ -1,5 +1,3 @@
 alchemlyb
 ensemble_md
-#gmxapi
 mdanalysis
-pytest

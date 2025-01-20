@@ -14,8 +14,7 @@ dependencies = [
     "apache-airflow>=2.6",
     "radical.pilot",
     "numpy",
-    "scikit-learn",
-    "MDAnalysis"
+    "scikit-learn"
 ]
 [project.optional-dependencies]
 mysql = [
