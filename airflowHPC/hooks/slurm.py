@@ -77,6 +77,7 @@ class SlurmHook(BaseHook):
             )
             for i in range(self.num_nodes)
         ]
+        self.log.info(f'=== {self.num_nodes} {self.tasks_per_node} {self.cpus_per_task}')
 
         self.nodes_list = NodeList(nodes=nodes)
 
