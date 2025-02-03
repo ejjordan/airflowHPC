@@ -831,12 +831,16 @@ def dag_group(input_dir, file_name, dag_params, dag_id, display_name):
         >> anthracene_done_branch
         >> [anthracene_done, trigger_anthracene]
     )
+    return trigger_anthracene, anthracene_done
 
 
 @task_group
 def first_step(
-    input_dir, file_name, output_dir, idx_to_state, lambda_states_to_run: int = 11
+    input_dir, file_name, output_dir, idx_to_state, lambda_states_to_run: int | str = 11
 ):
+    """
+    If lambda_states_to_run is set too low on this first step, then TI or MBAR could fail.
+    """
     gro_init = get_file.override(task_id="get_gro_init")(
         input_dir=input_dir,
         use_ref_data=True,
@@ -919,6 +923,7 @@ with DAG(
         file_name="{{ params.inputs.gro.filename }}",
         output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}/inputs",
         idx_to_state=get_states["idx_to_state"],
+        lambda_states_to_run="{{ params.lambda_states_per_step }}",
     )
     prev_iter_datasets, next_step_mdp, copy_gro_continue = next_step(
         states=get_states,
@@ -942,7 +947,7 @@ with DAG(
         mdp_params_continue=next_step_mdp,
         vdw_lambda_states=get_states["idx_to_state"],
     )
-    is_done = dag_group(
+    trigger_anthracene, anthracene_done = dag_group(
         input_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}",
         file_name="{{ params.expected_output }}",
         dag_params=new_params,
@@ -972,4 +977,4 @@ with DAG(
         truth_value=do_next_iteration,
         wait_for_completion=False,
     )
-    new_params >> is_done >> do_next_iteration
+    new_params >> [trigger_anthracene, anthracene_done] >> do_next_iteration
