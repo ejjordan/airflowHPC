@@ -13,6 +13,8 @@ def outputs_list(**context):
     output_dir = context["task"].render_template("{{ params.output_dir }}", context)
     return [f"{output_dir}/sim_{i}" for i in range(num_sims)]
 
+import os
+num_tasks = os.getenv("SCALEMS_N_TASKS")
 
 with DAG(
     "rct_gmx_multi",
@@ -21,7 +23,7 @@ with DAG(
     catchup=False,
     params={
         "output_dir": "rct_gmx_multi",
-        "num_sims": 4,
+        "num_sims": num_tasks,
         "mdp_options": {"nsteps": 10000},
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "sim.json"},
