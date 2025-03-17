@@ -22,6 +22,8 @@ from airflowHPC.operators import is_resource_rct_operator
 import radical.pilot as rp
 import radical.utils as ru
 
+import threading as mt
+
 
 if TYPE_CHECKING:
     from queue import Queue
@@ -37,8 +39,6 @@ if TYPE_CHECKING:
         Optional[TaskInstanceKey],
         Optional[CommandType],
     ]
-
-PARALLELISM = int(os.environ.get("RCT_PARALLELISM", 64))
 
 
 class ResourceWorker(Process, LoggingMixin):
@@ -139,9 +139,10 @@ class RadicalExecutor(BaseExecutor):
     serve_logs: bool = True
 
     def __init__(self):
-        self.log.info(f"{self.__class__.__name__}: __init__ {PARALLELISM}")
+        self._slots = int(os.environ.get("RCT_PARALLELISM", 64))
+        self.log.info("%s: __init__ (%d)", self.__class__.__name__, self._slots)
 
-        super().__init__(parallelism=PARALLELISM)
+        super().__init__(parallelism=self._slots)
 
         if self.parallelism < 0:
             raise AirflowException("parallelism must be >= 0")
@@ -236,6 +237,27 @@ class RadicalExecutor(BaseExecutor):
         for worker in self.workers:
             worker.start()
 
+
+        # start an watcher thread to trigger termination upon reques
+        self._watcher = mt.Thread(target=self._watch)
+        self._watcher.daemon = True
+        self._watcher.start()
+
+
+    def _watch(self):
+
+        fname = '/tmp/airflow.term'
+
+        while True:
+            if not os.path.isfile(fname):
+                time.sleep(1)
+                continue
+
+            self.log.error('trigger termination')
+            self._rct_session.close()
+            os.remove(fname)
+
+
     def queue_command(
         self,
         task_instance: TaskInstance,
@@ -280,7 +302,7 @@ class RadicalExecutor(BaseExecutor):
         """Heartbeat sent to trigger new jobs."""
 
         # RP always has open slots
-        open_slots = PARALLELISM
+        open_slots = self._slots
 
         self.log.debug(
             f"Queued tasks: {[(task.task_id, task.map_index) for task in self.queued_tasks]}"
