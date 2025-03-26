@@ -4,7 +4,7 @@ from airflow.utils import timezone
 
 
 with DAG(
-    "test_resources",
+    "resource",
     start_date=timezone.utcnow(),
     catchup=False,
 ) as dag:

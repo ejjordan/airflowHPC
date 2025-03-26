@@ -89,7 +89,7 @@ with DAG(
     schedule="@once",
     start_date=datetime(2025, 1, 1),
     render_template_as_native_obj=True,
-    is_paused_upon_creation=False,
+    is_paused_upon_creation=True,
     params={
         "output_dir": "dynamic",
         "output_name": "sim",
