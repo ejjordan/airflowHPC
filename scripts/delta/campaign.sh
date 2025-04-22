@@ -34,7 +34,7 @@ GRANT ALL PRIVILEGES ON DATABASE airflow_db TO airflow_user;
 GRANT ALL ON SCHEMA public TO airflow_user;
 ALTER USER airflow_user SET search_path = public;
 EOT
-    
+
     export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow_user:airflow_pass@localhost/airflow_db"
 }
 
@@ -43,7 +43,7 @@ EOT
 #
 db_stop(){
     rm -f /tmp/.s.PGSQL*
-    
+
     killall -9 postgres
     pg_ctl -D $SCALEMS/postgresql_db/data/ stop
     rm -rf    $SCALEMS/postgresql_db/data/*
@@ -64,14 +64,14 @@ arflow_start(){
 
     # export AIRFLOW__CORE__EXECUTOR=airflowHPC.executors.radical_executor.RadicalExecutor
     export AIRFLOW__CORE__EXECUTOR=airflowHPC.executors.resource_executor.ResourceExecutor
-    
+
     # TODO: threads_per_core is not passed
     export AIRFLOW__HPC__CORES_PER_NODE=$cpn
     export AIRFLOW__HPC__GPUS_PER_NODE=$gpn
     export AIRFLOW__HPC__GPU_TYPE="nvidia"
     export AIRFLOW__HPC__MEM_PER_NODE=256
     export AIRFLOW__HPC__THREADS_PER_CORE=1
-    
+
     export AIRFLOW__CORE__PARALLELISM=$slots
     export AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG=$slots
     export AIRFLOW__CORE__PDAG_CONCURRENCY=$slots
@@ -79,11 +79,11 @@ arflow_start(){
 
     export AIRFLOW__CORE__LOAD_EXAMPLES=False
     export AIRFLOW__CORE__DAGS_FOLDER="$SCALEMS/airflowHPC/airflowHPC/dags/"
-    
+
     # TODO: check this setting
     export AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY=$slots
     export AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR=True
-    
+
     export RCT_PILOT_CFG=$SCALEMS/pilot_cfg.json
     export RCT_PARALLELISM=$slots
     export RADICAL_UTILS_NO_ATFORK=1
@@ -97,16 +97,16 @@ arflow_start(){
     #     max_active_runs=1
 
     echo "start scheduler"
-    airflow db migrate 
+    airflow db migrate
     airflow scheduler -D
-    
+
     airflow pools set default_pool $slots test
     airflow pools list
-    
+
     echo 'reparse dags'
     AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL=0 \
         airflow dag-processor -n 1 -S $SCALEMS/airflowHPC/airflowHPC/dags/$DAG.py
-    
+
     airflow dags unpause $DAG
   # airflow dags list
   # airflow dags list-import-errors
@@ -119,24 +119,24 @@ arflow_start(){
 # ------------------------------------------------------------------------------
 #
 airflow_stop() {
-    spid=$(cat ~/airflow/airflow-scheduler.pid) 
+    spid=$(cat ~/airflow/airflow-scheduler.pid)
     echo "kill scheduler $spid"
     kill $spid
     sleep 1
-    
+
     echo 'clean rp tasks'
     for pid in $(ps -ef | grep -e rp. | grep -v grep | grep merzky | cut -c 8-16)
     do ps h -ef -q $pid;
         kill -9 $pid
     done
-    
+
     echo 'clean airflow tasks'
     for pid in $(ps -ef | grep airflow | grep -v grep | cut -c 8-16)
     do
         kill -9 $pid
     done
     ps -ef | grep gunicorn | grep -v grep | cut -c 8-16 | xargs kill
-    
+
     echo 'clean log files etc.'
     # rm -rf rp.session.*
     # rm -rf ~/j/sbox/rp.session.*
@@ -217,12 +217,12 @@ run_exp weak 10 256 512
 # for n in 32 64 128 256 512; do
 #     run_exp weak 10 $n $n
 # done
-# 
+#
 # for n in 32 64 128 256 512; do
 #     run_exp strong_1 10 $n 512
 # done
-# 
+#
 # for n in 32 64 128 256 512; do
 #     run_exp strong_2 10 $n $((512 * 4))
 # done
-# 
+#
