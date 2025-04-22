@@ -49,6 +49,9 @@ class ResourceRCTOperator(BaseOperator):
     ) -> None:
         self._uuid = str(uuid.uuid4())
         self.log.info(f"{self.__class__.__name__}: __init__ {kwargs}")
+        slots = int(os.environ.get("RCT_PARALLELISM", 64))
+        self.log.info('=== slots: %d', slots)
+        kwargs.update({"pool_slots": slots})
         super().__init__(**kwargs)
         if (
             self.executor_config

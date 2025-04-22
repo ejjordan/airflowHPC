@@ -117,6 +117,7 @@ with DAG(
     catchup=False,
     render_template_as_native_obj=True,
     params=dagrun_params,
+    is_paused_upon_creation=False,
 ) as anthracene:
     gro = get_gro.override(group_id="get_gro")(
         param_name="{{ params.inputs.gro.filename }}",
@@ -916,6 +917,7 @@ with DAG(
     catchup=False,
     render_template_as_native_obj=True,
     params=dagrun_params,
+    is_paused_upon_creation=False,
 ) as anthacene_files:
     get_states = generate_lambda_states("{{ params.lambda_states_total }}")
     gro_init, copy_gro_init = first_step(
