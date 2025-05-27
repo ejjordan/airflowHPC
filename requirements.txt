@@ -1,3 +1,5 @@
 alchemlyb
 ensemble_md
 mdanalysis
+pytest
+jax
