@@ -22,6 +22,7 @@ __all__ = (
     "run_if_needed",
     "run_if_false",
     "unpack_inputs",
+    "verify_files",
 )
 
 
@@ -200,7 +201,7 @@ def prepare_gmx_input(
     inputHolderList = []
     output_dir = "/".join(output_path_parts)
 
-    for i in range(num_simulations):
+    for i in range(int(num_simulations)):
         inputs = deepcopy(input_files)
         for key, value in input_files.items():
             if isinstance(value, str) and os.path.exists(value):
