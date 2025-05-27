@@ -1,19 +1,40 @@
 from airflow import DAG
+from airflow.decorators import task
 from airflow.models.param import Param
 from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import (
     get_file,
-    prepare_gmx_input,
-    update_gmx_input,
-    unpack_mdp_options,
     dataset_from_xcom_dicts,
 )
-from airflowHPC.operators import ResourceGmxOperatorDataclass
+from airflowHPC.operators import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 
 
+@task
+def outputs_list(**context):
+    num_sims = int(context["task"].render_template("{{ params.num_sims }}", context))
+    output_dir = context["task"].render_template("{{ params.output_dir }}", context)
+    return [f"{output_dir}/sim_{i}" for i in range(num_sims)]
+
+
+@task
+def prepare_output(mdrun, grompp):
+    mdrun = [md for md in mdrun]
+    output = []
+    for i, data in enumerate(mdrun):
+        output.append(
+            {
+                "simulation_id": i,
+                "-c": data["-c"],
+                "-x": data["-x"],
+                "-s": grompp["-o"],
+            }
+        )
+    return output
+
+
 with DAG(
-    dag_id="simulate_expand",
+    dag_id="simulate_expand_uniform",
     schedule="@once",
     start_date=datetime(2025, 1, 1),
     catchup=False,
@@ -46,7 +67,7 @@ with DAG(
             },
             section="inputs",
         ),
-        "mdp_options": [{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}],
+        "mdp_options": {"ref_t": 300},
         "output_dir": "npt_equil",
         "expected_output": "npt.gro",
         "output_dataset_structure": {},
@@ -58,11 +79,9 @@ with DAG(
         input_dir="{{ params.inputs.mdp.directory }}",
         file_name="{{ params.inputs.mdp.filename }}",
     )
-    mdp_options = unpack_mdp_options()
-    mdp = (
-        update_write_mdp_json_as_mdp_from_file.override(task_id="write_mdp")
-        .partial(mdp_json_file_path=mdp_json)
-        .expand(update_dict=mdp_options)
+    mdp = update_write_mdp_json_as_mdp_from_file.override(task_id="write_mdp")(
+        mdp_json_file_path=mdp_json,
+        update_dict="{{ params.mdp_options }}",
     )
     top = get_file.override(task_id="get_top")(
         input_dir="{{ params.inputs.top.directory }}",
@@ -74,18 +93,8 @@ with DAG(
         input_dir="{{ params.inputs.gro.directory }}",
         use_ref_data="{{ params.inputs.gro.ref_data }}",
     )
-    grompp_input_list = prepare_gmx_input.override(task_id="grompp_input_list")(
-        args=["grompp"],
-        input_files={"-f": mdp, "-c": gro, "-p": top},
-        output_files={"-o": "{{ params.expected_output | replace('.gro', '.tpr') }}"},
-        output_path_parts=[
-            "{{ params.output_dir }}",
-            "sim_",
-        ],
-        num_simulations="{{ params.mdp_options | length }}",
-    )
 
-    grompp = ResourceGmxOperatorDataclass.partial(
+    grompp = ResourceGmxOperator(
         task_id="grompp",
         executor_config={
             "mpi_ranks": 1,
@@ -94,39 +103,35 @@ with DAG(
             "gpu_type": None,
         },
         gmx_executable="gmx_mpi",
-    ).expand(input_data=grompp_input_list)
-    grompp_input_list >> grompp
-
-    mdrun_input_list = (
-        update_gmx_input.override(task_id="mdrun_input_list")
-        .partial(
-            args=["mdrun"],
-            input_files_keys={"-s": "-o"},
-            output_files={
-                "-e": "ener.edr",
-                "-c": "{{ params.expected_output }}",
-                "-x": "{{ params.expected_output | replace('.gro', '.xtc') }}",
-                "-cpo": "{{ params.expected_output | replace('.gro', '.cpt') }}",
-            },
-        )
-        .expand(gmx_output=grompp.output)
+        gmx_arguments=["grompp"],
+        input_files={"-f": mdp, "-c": gro, "-p": top},
+        output_files={"-o": "{{ params.expected_output | replace('.gro', '.tpr') }}"},
+        output_dir="{{ params.output_dir }}",
     )
-    mdrun = ResourceGmxOperatorDataclass.partial(
+    outputs_dirs = outputs_list.override(task_id="get_output_dirs")()
+    mdrun = ResourceGmxOperator.partial(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 1,
-            "cpus_per_task": 1,
+            "cpus_per_task": 2,
             "gpus": 0,
             "gpu_type": None,
         },
         gmx_executable="gmx_mpi",
-    ).expand(input_data=mdrun_input_list)
-    grompp >> mdrun_input_list >> mdrun
+        gmx_arguments=["mdrun"],
+        input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
+        output_files={
+            "-c": "{{ params.expected_output }}",
+            "-x": "{{ params.expected_output | replace('.gro', '.xtc') }}",
+        },
+    ).expand(output_dir=outputs_dirs)
+    grompp >> mdrun
 
+    sims_data = prepare_output(mdrun.output, grompp.output)
     dataset_dict = dataset_from_xcom_dicts.override(task_id="make_dataset")(
         output_dir="{{ params.output_dir }}",
         output_fn="{{ params.expected_output | replace('.gro', '.json') }}",
-        list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun', key='return_value')}}",
+        list_of_dicts=sims_data,
         dataset_structure="{{ params.output_dataset_structure }}",
     )
-    mdrun >> dataset_dict
+    sims_data >> dataset_dict

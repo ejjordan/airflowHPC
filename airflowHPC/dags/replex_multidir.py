@@ -1,11 +1,12 @@
 from airflow import DAG
-from airflow.utils import timezone
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import run_if_needed, run_if_false, verify_files
 
 
 with DAG(
     dag_id="replex_multidir",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
@@ -53,10 +54,15 @@ with DAG(
     nvt_params = {
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "nvt.json"},
-            "gro": {"directory": "{{ params.output_dir }}/em", "filename": "em.gro"},
+            "gro": {
+                "directory": "{{ params.output_dir }}/em",
+                "filename": "em.gro",
+                "ref_data": False,
+            },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
                 "filename": "system_prepared.top",
+                "ref_data": False,
             },
         },
         "output_dir": "{{ params.output_dir }}/nvt_equil",
@@ -72,10 +78,12 @@ with DAG(
             "gro": {
                 "directory": "{{ params.output_dir }}/nvt_equil",
                 "filename": "nvt.gro",
+                "ref_data": False,
             },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
                 "filename": "system_prepared.top",
+                "ref_data": False,
             },
         },
         "mdp_options": "{{ params.mdp_options }}",
@@ -100,14 +108,17 @@ with DAG(
             "gro": {
                 "directory": "{{ params.output_dir }}/npt_equil",
                 "filename": "npt.gro",
+                "ref_data": False,
             },
             "cpt": {
                 "directory": "{{ params.output_dir }}/npt_equil",
                 "filename": "npt.cpt",
+                "ref_data": False,
             },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
                 "filename": "system_prepared.top",
+                "use_ref_data": False,
             },
         },
         "mdp_options": "{{ params.mdp_options }}",
