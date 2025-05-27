@@ -1,33 +1,19 @@
-import os
 from airflow import DAG
-from airflow.decorators import task
-from airflow.utils import timezone
-from airflowHPC.dags.tasks import run_if_needed, run_if_false
-
-
-@task(trigger_rule="none_failed")
-def verify_files(input_dir, filename, ref_t_list, step_number):
-    """Workaround for steps where multiple files are expected."""
-    import logging
-
-    input_files = [
-        f"{input_dir}/step_{step_number}/sim_{i}/{filename}"
-        for i in range(len(ref_t_list))
-    ]
-    for file in input_files:
-        logging.info(f"Checking if {file} exists: {os.path.exists(file)}")
-        if not os.path.exists(file):
-            return False
-    return True
+from airflow.utils.timezone import datetime
+from airflowHPC.dags.tasks import run_if_needed, run_if_false, verify_files
 
 
 with DAG(
-    dag_id="fs_peptide",
-    start_date=timezone.utcnow(),
+    dag_id="replex_multidir",
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
-    params={"ref_t_list": [300, 310, 320, 330], "output_dir": "fs_peptide"},
+    params={
+        "mdp_options": [{"ref_t": 300}, {"ref_t": 310}, {"ref_t": 320}, {"ref_t": 330}],
+        "output_dir": "replex_multidir",
+    },
 ) as fs_peptide:
     fs_peptide.doc = """Replica exchange simulation of a peptide in water."""
 
@@ -59,21 +45,32 @@ with DAG(
         "output_dir": "{{ params.output_dir }}/em",
         "expected_output": "em.gro",
     }
-    minimize = run_if_needed.override(group_id="minimize")("minimize", minimize_params)
+    minimize = run_if_needed.override(group_id="minimize")(
+        dag_id="simulate_no_cpt",
+        dag_params=minimize_params,
+        dag_display_name="minimize",
+    )
 
     nvt_params = {
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "nvt.json"},
-            "gro": {"directory": "{{ params.output_dir }}/em", "filename": "em.gro"},
+            "gro": {
+                "directory": "{{ params.output_dir }}/em",
+                "filename": "em.gro",
+                "ref_data": False,
+            },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
                 "filename": "system_prepared.top",
+                "ref_data": False,
             },
         },
         "output_dir": "{{ params.output_dir }}/nvt_equil",
         "expected_output": "nvt.gro",
     }
-    nvt_equil = run_if_needed.override(group_id="nvt_equil")("nvt_equil", nvt_params)
+    nvt_equil = run_if_needed.override(group_id="nvt_equil")(
+        dag_id="simulate_no_cpt", dag_params=nvt_params, dag_display_name="nvt_equil"
+    )
 
     npt_params = {
         "inputs": {
@@ -81,25 +78,28 @@ with DAG(
             "gro": {
                 "directory": "{{ params.output_dir }}/nvt_equil",
                 "filename": "nvt.gro",
+                "ref_data": False,
             },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
                 "filename": "system_prepared.top",
+                "ref_data": False,
             },
         },
-        "ref_t_list": "{{ params.ref_t_list }}",
-        "step_number": 0,
+        "mdp_options": "{{ params.mdp_options }}",
         "output_dir": "{{ params.output_dir }}/npt_equil",
         "expected_output": "npt.gro",
     }
     npt_equil_has_run = verify_files.override(task_id="npt_equil_has_run")(
         input_dir="{{ params.output_dir }}/npt_equil",
         filename="npt.gro",
-        ref_t_list="{{ params.ref_t_list }}",
-        step_number=0,
+        mdp_options="{{ params.mdp_options }}",
     )
     npt_equil = run_if_false.override(group_id="npt_equil")(
-        "npt_equil", npt_params, npt_equil_has_run
+        dag_id="simulate_expand",
+        dag_params=npt_params,
+        truth_value=npt_equil_has_run,
+        dag_display_name="npt_equil",
     )
 
     sim_params = {
@@ -108,29 +108,33 @@ with DAG(
             "gro": {
                 "directory": "{{ params.output_dir }}/npt_equil",
                 "filename": "npt.gro",
+                "ref_data": False,
             },
             "cpt": {
                 "directory": "{{ params.output_dir }}/npt_equil",
                 "filename": "npt.cpt",
+                "ref_data": False,
             },
             "top": {
                 "directory": "{{ params.output_dir }}/prep",
                 "filename": "system_prepared.top",
+                "use_ref_data": False,
             },
         },
-        "ref_t_list": "{{ params.ref_t_list }}",
-        "step_number": 0,
+        "mdp_options": "{{ params.mdp_options }}",
         "output_dir": "{{ params.output_dir }}/sim",
         "expected_output": "sim.gro",
     }
     sim_has_run = verify_files.override(task_id="sim_has_run")(
         input_dir="{{ params.output_dir }}/sim",
         filename="sim.gro",
-        ref_t_list="{{ params.ref_t_list }}",
-        step_number=0,
+        mdp_options="{{ params.mdp_options }}",
     )
     simulate = run_if_false.override(group_id="simulate")(
-        "simulate", sim_params, sim_has_run
+        dag_id="simulate_multidir",
+        dag_params=sim_params,
+        truth_value=sim_has_run,
+        dag_display_name="simulate",
     )
 
     (

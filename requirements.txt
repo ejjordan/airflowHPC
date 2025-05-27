@@ -1,6 +1,6 @@
 alchemlyb
-dill
-gmxapi
-h5py
+ensemble_md
+#gmxapi
 mdanalysis
-zmq
+pytest
+jax

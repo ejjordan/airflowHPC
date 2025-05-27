@@ -55,6 +55,14 @@ def get_provider_info():
                         "version_added": "0.0.0",
                         "sensitive": False,
                     },
+                    "allow_dispersed_cores": {
+                        "description": "Whether the cores for a task can be non-contiguous in a node",
+                        "type": "boolean",
+                        "default": "False",
+                        "example": "False",
+                        "version_added": "0.0.0",
+                        "sensitive": False,
+                    },
                 },
             },
         },
@@ -72,7 +80,6 @@ def get_provider_info():
         "executors": [
             "airflowHPC.executors.radical_local_executor.RadicalLocalExecutor",
             "airflowHPC.executors.radical_local_executor.RadicalExecutor",
-            "airflowHPC.executors.zmq_sequential_executor.ZMQSequentialExecutor",
             "airflowHPC.executors.test_executor.TestExecutor",
             "airflowHPC.executors.resource_executor.ResourceExecutor",
         ],

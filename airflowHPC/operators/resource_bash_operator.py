@@ -4,7 +4,7 @@ import os
 import shutil
 import warnings
 from functools import cached_property
-from typing import TYPE_CHECKING, Container, Sequence
+from typing import TYPE_CHECKING, Container, Sequence, Union
 
 from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.models.baseoperator import BaseOperator
@@ -86,7 +86,7 @@ class ResourceBashOperator(BaseOperator):
             if "cpus_per_task" in executor_config
             else 1
         )
-        self.gpus = int(executor_config["gpus"]) if "gpus" in executor_config else 0
+        self.gpus = float(executor_config["gpus"]) if "gpus" in executor_config else 0
         self.gpu_type = (
             executor_config["gpu_type"] if "gpu_type" in executor_config else None
         )
@@ -99,10 +99,14 @@ class ResourceBashOperator(BaseOperator):
                 ("mpiexec", "-np"),
                 ("srun", "-n"),
             ]:
-                if shutil.which(executable):
-                    self.mpi_executable = executable
+                if mpi := self._exec_check(executable, raise_on_error=False):
+                    self.mpi_executable = mpi
                     self.num_ranks_flag = num_ranks_flag
                     break
+            if not hasattr(self, "mpi_executable"):
+                raise ValueError(
+                    "Could not find mpirun, mpiexec, or srun in PATH. Please check that one is loaded."
+                )
         else:
             self.mpi_executable = mpi_executable
             if "srun" in mpi_executable:
@@ -134,6 +138,26 @@ class ResourceBashOperator(BaseOperator):
         # This is also set by the executor
         self.hostname = ""
 
+    def _exec_check(
+        self, executable: str, raise_on_error: bool = True
+    ) -> Union[str, None]:
+        """
+        In pydevd mode, the PATH cannot(?) be updated, so allow setting the executable
+        as an environment variable, e.g., `export mpiexec=/path/to/mpiexec`.
+        Note that if the full path is already specified, it will be used.
+        """
+        if shutil.which(executable):
+            return shutil.which(executable)
+        else:
+            if executable in os.environ and os.path.exists(os.environ[executable]):
+                return os.environ[executable]
+            elif raise_on_error:
+                raise ValueError(
+                    f"Could not find {executable} in PATH. Please check that it is loaded."
+                )
+            else:
+                return None
+
     def get_env(self, context):
         """Build the set of environment variables to be exposed for the bash command."""
         system_env = os.environ.copy()
@@ -151,6 +175,7 @@ class ResourceBashOperator(BaseOperator):
             " ".join(f"{k}={v!r}" for k, v in airflow_context_vars.items()),
         )
         env.update(airflow_context_vars)
+        assert self.cpus_per_task >= 1
         env.update({"OMP_NUM_THREADS": str(self.cpus_per_task)})
         if self.gpu_type == None:
             if self.gpus > 0:
@@ -173,6 +198,7 @@ class ResourceBashOperator(BaseOperator):
         if self.gpu_type == "nvidia":
             env.update({"CUDA_VISIBLE_DEVICES": ",".join(map(str, self.gpu_ids))})
         self.hostname = env.get(self.slurm_hook.hostname_env_var_name, "")
+        self.core_ids = env.get("CORE_IDS", "")
         return env
 
     @cached_property
@@ -189,6 +215,7 @@ class ResourceBashOperator(BaseOperator):
         bash_path = shutil.which("bash") or "bash"
         env = self.get_env(context)
 
+        assert shutil.which(self.mpi_executable) is not None
         self.log.info(f"mpi_executable: {self.mpi_executable}")
         self.log.info(f"mpi_ranks: {self.mpi_ranks}")
         self.log.info(f"cpus_per_task: {self.cpus_per_task}")

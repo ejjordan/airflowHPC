@@ -1,5 +1,5 @@
 from airflow import DAG
-from airflowHPC.operators.resource_bash_operator import ResourceBashOperator
+from airflowHPC.operators import ResourceBashOperator
 from airflow.utils import timezone
 
 

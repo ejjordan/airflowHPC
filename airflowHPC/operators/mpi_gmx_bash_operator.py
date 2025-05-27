@@ -87,7 +87,7 @@ class MPIGmxBashOperator(MPIBashOperator):
         self.log.info(f"gmx_arguments: {self.gmx_arguments}")
         self.log.info(f"input_files: {self.input_files}")
         self.log.info(f"output_files: {output_files_paths}")
-        self.bash_command = self.create_gmxapi_call(
+        self.bash_command = self.create_gmx_call(
             gmx_executable=self.gmx_executable,
             gmx_arguments=self.gmx_arguments,
             mpi_executable=self.mpi_executable,
@@ -122,7 +122,7 @@ class MPIGmxBashOperator(MPIBashOperator):
             else:
                 yield value
 
-    def create_gmxapi_call(
+    def create_gmx_call(
         self,
         gmx_executable: str,
         gmx_arguments: list | str | bytes,

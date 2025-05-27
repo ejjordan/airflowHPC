@@ -1,10 +1,10 @@
 from airflow import DAG
 from airflow.decorators import task
+from airflow.utils.timezone import datetime
 
 from airflowHPC.dags.tasks import get_file
-from airflowHPC.operators import ResourceGmxOperator
+from airflowHPC.operators import ResourceRCTOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
-from airflow.utils.timezone import datetime
 
 
 @task
@@ -15,12 +15,12 @@ def outputs_list(**context):
 
 
 with DAG(
-    "gmx_multi",
+    "rct_gmx_multi",
     schedule="@once",
     start_date=datetime(2025, 1, 1),
     catchup=False,
     params={
-        "output_dir": "gmx_multi",
+        "output_dir": "rct_gmx_multi",
         "num_sims": 4,
         "mdp_options": {"nsteps": 10000},
         "inputs": {
@@ -35,7 +35,7 @@ with DAG(
             },
         },
     },
-) as gmx_multi:
+) as rct_gmx_multi:
     input_gro = get_file.override(task_id="get_gro")(
         input_dir="{{ params.inputs.gro.directory }}",
         file_name="{{ params.inputs.gro.filename }}",
@@ -52,7 +52,7 @@ with DAG(
         mdp_json_file_path=input_mdp,
         update_dict="{{ params.mdp_options }}",
     )
-    grompp_result = ResourceGmxOperator(
+    grompp_result = ResourceRCTOperator(
         task_id="grompp",
         executor_config={
             "mpi_ranks": 1,
@@ -67,7 +67,7 @@ with DAG(
         output_dir="{{ params.output_dir }}",
     )
     outputs_dirs = outputs_list.override(task_id="get_output_dirs")()
-    mdrun_result = ResourceGmxOperator.partial(
+    mdrun_result = ResourceRCTOperator.partial(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 1,
@@ -78,6 +78,6 @@ with DAG(
         gmx_executable="gmx_mpi",
         gmx_arguments=["mdrun"],
         input_files={"-s": "{{ ti.xcom_pull(task_ids='grompp')['-o'] }}"},
-        output_files={"-c": "result.gro", "-x": "result.xtc"},
+        output_files={"-c": "result.gro", "-x": "result.xtc", "-g": "md.log"},
     ).expand(output_dir=outputs_dirs)
     grompp_result >> mdrun_result
