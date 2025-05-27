@@ -12,7 +12,13 @@ in particular complex molecular dynamics simulation workflows.
 git clone https://github.com/ejjordan/airflowHPC.git
 ```
 
-### Install the package in a virtual environment
+## Install the package 
+### new virtual environment
+
+It is generally a good idea to create a new virtual environment for each project.
+It is not required to install an editable version of the package,
+but it will make it easier to get the latest fixes and features.
+
 ```bash
 export AIRFLOW_HOME=$PWD/airflow_dir
 python3 -m venv airflowHPC_env
@@ -21,55 +27,26 @@ pip install --upgrade pip
 pip install -e airflowHPC/
 ```
 
-### Install the package requirements
-```bash
-pip install -r airflowHPC/requirements.txt
-```
+### existing virtual environment
 
-It may be necessary to first install gmxapi manually as described in the
-[gmxapi installation instructions](https://manual.gromacs.org/current/gmxapi/userguide/install.html).
-
-```bash
-gmxapi_ROOT=/path/to/gromacs pip install --no-cache-dir gmxapi
-```
-
-### Simplest demonstration
-This demo shows how to run grompp and mdrun in a simple Airflow DAG.
-It should complete in less than a minute.
+If you already have an existing virtual environment you would like to use,
+you can just source that environment and install the package.
+It is not required to install an editable version of the package,
+but it will make it easier to get the latest fixes and features.
 
 ```bash
-airflow users create --username admin --role Admin -f firstname -l lastname -e your.email@mail.org
-export AIRFLOW__CORE__EXECUTOR=airflowHPC.executors.resource_executor.ResourceExecutor
-export AIRFLOW__CORE__DAGS_FOLDER=airflowHPC/airflowHPC/dags/
-export AIRFLOW__CORE__LOAD_EXAMPLES=False
-export AIRFLOW__WEBSERVER__DAG_DEFAULT_VIEW="graph"
-airflow standalone
+source path/to/venv/bin/activate
+pip install -e airflowHPC/
 ```
 
-This will start a webserver on port 8080 where you can trigger airflow DAGs.
-The first command will prompt you to enter a password for the admin user.
-You will then use this username and password to log in to the webserver.
+## Setting up a database connection
 
-On the webserver, navigate to the `DAGs` tab and click `run_gmx` DAG.
-If you press the play button in the upper right corner, you can specify the
-output directory (or use the default value) and trigger the DAG.
-
-
-The output files are written by default to a directory called `outputs`, though this
-is a DAG parameter which can be changed in the browser before triggering the DAG.
-Note that if you run the `run_gmx` DAG multiple times with the same
-output directory, the files will be overwritten.
-The output directory will be located in the directory where you ran
-the `airflow standalone` command.
-
-### Setting up a database connection for more complex workflows
-On the webserver of the simple demonstration, you may have noticed warnings
-that you should not use the SequentialExecutor or SQLite database in production.
 There are detailed instructions for setting up a database connection in the Airflow 
 documentation 
-[here](https://airflow.apache.org/docs/apache-airflow/stable/howto/set-up-database.html).
+[here](https://airflow.apache.org/docs/apache-airflow/stable/howto/set-up-database.html),
+but the instructions below might be a little easier to follow.
 
-#### MySQL setup (suitable for local execution)
+### MySQL setup (suitable for local execution)
 MySQL is available from package managers such as apt or on Ubuntu.
 ```bash
 sudo apt install mysql-server
@@ -87,39 +64,51 @@ sudo mysql --user=root --password=root -e "FLUSH PRIVILEGES;"
 If you don't have root access, you can use the postgresql instructions below,
 which do not require root access.
 
-#### PostgreSQL setup (suitable for HPC resources)
+### PostgreSQL setup (suitable for HPC resources)
 It is possible to install PostgreSQL on HPC resources with spack.
+You can follow the commands below or simply run the `prepare_spack.sh` script in the
+`scripts` directory of the repository.
+
+##### Manual spack installation
+If you don't already have a spack installation, you can simply clone the repo.
+
+```bash
+git clone -c feature.manyFiles=true --depth=2 https://github.com/spack/spack.git
+```
+You can then install postgresql with the following command.
 ```bash
 spack install postgresql
 ```
-Now to set up the database, you can use the following commands.
+##### Setting up the postgres database
+The database can be set up manually with the commnads that follow,
+or you can run the `postgres_setup.sh` script in the `scripts` 
+directory of the repository.
+
+The `max_connections` flag is important for being able to run large number of tasks
+simultaneously, as it sets the maximum number of tasks.
+The `shared_buffers` flag ensures that the database has enough memory to run large
+numbers of tasks simultaneously.
+If you need to run on a port that is not the default (5432), for example because someone
+else is using that port, you can set the `port` flag to the desired port number
+by adding `--set port=myportnum` to the `initdb` command.
+If you don't have write permissions to `/tmp` or don't want you database PIDs to be
+visible on a shared system, you can use the `--set unix_socket_directories` flag to
+set the directory where the database PIDs will be stored.
+
 ```bash
 spack load postgresql
 mkdir postgresql_db
-initdb -D postgresql_db/data
-pg_ctl -D postgresql_db/data -l logfile start
+initdb -D postgresql_db/data --set listen_addresses='*' --set max_connections=512 --set shared_buffers="1024MB"
+pg_ctl -D postgresql_db/data -l postgresql_db/logfile start
 ```
-Note that you will need to run the `pg_ctl` command every time you want to use the database,
-for example after logging out and back in to the HPC resource.
 
 The airflow database can then be set up with the following commands.
 ```bash
 createdb -T template1 airflow_db
-psql airflow_db
+psql airflow_db -f airflowHPC/scripts/airflow_db.sql
 ```
-In the psql shell, you can then run the following commands.
-```sql
-CREATE USER airflow_user WITH PASSWORD 'airflow_pass';
-GRANT ALL PRIVILEGES ON DATABASE airflow_db TO airflow_user;
-GRANT ALL ON SCHEMA public TO airflow_user;
-ALTER USER airflow_user SET search_path = public;
-quit
-```
-You may also need to put the postgresql library in the `LD_LIBRARY_PATH`
-environment variable.
-```bash
-export LD_LIBRARY_PATH=/path/to/your/postgresql/lib:$LD_LIBRARY_PATH
-```
+
+### Finish the package installation
 
 Once you have a database set up and configured according to the instructions,
 you can install the airflowHPC postgresql requirements.
@@ -127,19 +116,51 @@ you can install the airflowHPC postgresql requirements.
 pip install airflowHPC[postgresql]
 ```
 
-You can then launch the standalone webserver with the `prepare_standalone.sh` script.
+### Install the package requirements
 
-This script will use the ResourceExecutor, which is vended by the function
-`get_provider_info()` in `airflowHPC/__init__.py`.
+There are a few python packages that are not required for installation,
+but are required for running the example DAGs.
+
 ```bash
-bash airflowHPC/scripts/prepare_standalone.sh
+pip install -r airflowHPC/requirements.txt
 ```
 
-Note that the script can be run from any directory, but it should not be moved
-from its original location in the repository.
-The script should work without needing to configure any environment variables,
-as they are set in the script itself and the help should provide enough information
-to run the script.
+### Simple DAG example
+This demo shows how to run grompp and mdrun in a simple Airflow DAG.
+It should complete in less than a minute.
+
+```bash
+airflow users create --username admin --role Admin -f firstname -l lastname -e your.email@mail.org
+airflow users reset-password --username admin --password admin
+export AIRFLOW__CORE__EXECUTOR=airflowHPC.executors.resource_executor.ResourceExecutor
+export AIRFLOW__CORE__DAGS_FOLDER=airflowHPC/airflowHPC/dags/
+export AIRFLOW__CORE__LOAD_EXAMPLES=False
+export AIRFLOW__WEBSERVER__DAG_DEFAULT_VIEW="graph"
+export AIRFLOW__SCHEDULER__USE_JOB_SCHEDULE=False
+export AIRFLOW__HPC__CORES_PER_NODE=16
+export AIRFLOW_HOME=$PWD/airflow
+export RADICAL_UTILS_NO_ATFORK=1
+airflow standalone
+```
+
+This will start a webserver on port 8080 where you can trigger airflow DAGs.
+If you need to run the webserver on a different port, you can set the
+AIRFLOW__WEBSERVER__WEB_SERVER_PORT environment variable.
+The first command will prompt you to enter a password for the admin user.
+You will then use this username and password to log in to the webserver.
+
+On the webserver, navigate to the `DAGs` tab and click `run_gmx` DAG.
+If you press the play button in the upper right corner, you can specify the
+output directory (or use the default value) and trigger the DAG.
+
+
+The output files are written by default to a directory called `run_gmx`, though this
+is a DAG parameter which can be changed in the browser before triggering the DAG.
+Note that if you run the `run_gmx` DAG multiple times with the same
+output directory, the files will be overwritten.
+The output directory will be located in the directory where you ran
+the `airflow standalone` command.
+
 
 ### Running from the command line
 
@@ -153,6 +174,26 @@ that the CLI can find the DAGs and the database.
 
 ```bash
 airflow dags backfill -s YYYY-MM-DD --reset-dagruns -y run_gmx
+```
+
+It is also possible to trigger a dag from the command line while running the 
+airflow scheduler (possibly in a different terminal).
+```bash
+airflow dags trigger run_gmx
+```
+```bash
+airflow scheduler
+```
+This is especially useful for interactive sessions on an HPC resource,
+whereas the backfill command is more useful for batch jobs, since it does not
+need a scheduler running. Note that the option specified above,
+`AIRFLOW__SCHEDULER__USE_JOB_SCHEDULE=False`, is set so that the scheduler
+does not run jobs automatically. This means it is also possible to set 
+the environment variable `export AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False`,
+which will unpause all the DAGs. Otherwise it is necessary to unpause the DAGs
+with the webserver or the CLI using the command
+```bash
+airflow dags unpause run_gmx
 ```
 
 ### Running on an HPC resources
@@ -207,3 +248,7 @@ Airflow ships with a command line tool for clearing the database.
 airflow db clean --clean-before-timestamp 'yyyy-mm-dd'
 ```
 The dag runs can also be deleted from the webserver.
+
+### extra stuff
+Note that you will need to run the `pg_ctl` command every time you want to use the database,
+for example after logging out and back in to the HPC resource.

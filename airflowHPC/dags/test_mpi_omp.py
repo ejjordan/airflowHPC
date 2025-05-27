@@ -27,16 +27,6 @@ with DAG(
         cwd="{{ task_instance.xcom_pull(task_ids='tempdir') }}",
     )
     compile_code.template_fields = ("bash_command", "cwd")
-    """
-    from airflowHPC.operators.mpi_bash_operator import MPIBashOperator
-    run_code = MPIBashOperator(
-        task_id="hello_mpi_omp",
-        bash_command="./hello_mpi_omp",
-        mpi_ranks=4,
-        cpus_per_task=2,
-        cwd="{{ task_instance.xcom_pull(task_ids='tempdir') }}",
-    )
-    """
     run_code = ResourceBashOperator(
         task_id="hello_mpi_omp",
         bash_command="./hello_mpi_omp",

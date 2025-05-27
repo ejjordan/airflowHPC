@@ -69,7 +69,7 @@ class ResourceWorker(Process, LoggingMixin):
         # We know we've just started a new process, so lets disconnect from the metadata db now
         settings.engine.pool.dispose()
         settings.engine.dispose()
-        setproctitle("airflow worker -- ResourceExecutor")
+        setproctitle(f"airflow worker -- {self.__class__.__name__}")
         return super().run()
 
     def execute_work(
@@ -93,7 +93,7 @@ class ResourceWorker(Process, LoggingMixin):
             return
 
         self.log.info("%s running %s", self.__class__.__name__, command)
-        setproctitle(f"airflow worker -- ResourceExecutor: {command}")
+        setproctitle(f"airflow worker -- {self.__class__.__name__}: {command}")
         env = os.environ.copy()
         if core_ids:
             self.log.debug(f"Using cores: {core_ids}")
@@ -111,7 +111,7 @@ class ResourceWorker(Process, LoggingMixin):
             f"Task {key.dag_id}.{key.task_id}.{key.map_index} finished with state {state} on {self.name}"
         )
         # Remove the command since the worker is done executing the task
-        setproctitle("airflow worker -- ResourceExecutor")
+        setproctitle(f"airflow worker -- {self.__class__.__name__}")
 
     def _execute_work_in_subprocess(
         self, command: CommandType, env
