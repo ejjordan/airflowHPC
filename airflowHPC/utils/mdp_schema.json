@@ -49,7 +49,11 @@
             "title": "Run control"
         },
         "mts": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Run control"
         },
         "mts-levels": {
@@ -196,7 +200,11 @@
             "title": "Neighbor searching"
         },
         "periodic-molecules": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Neighbor searching"
         },
         "verlet-buffer-tolerance": {
@@ -366,7 +374,8 @@
                 "nose-hoover",
                 "andersen",
                 "andersen-massive",
-                "v-rescale"
+                "v-rescale",
+                "no"
             ],
             "title": "Temperature coupling"
         },
@@ -379,7 +388,11 @@
             "title": "Temperature coupling"
         },
         "print-nose-hoover-chain-variables": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Temperature coupling"
         },
         "tc-grps": {
@@ -444,7 +457,11 @@
             "title": "Pressure coupling"
         },
         "gen-vel": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Velocity generation"
         },
         "gen-temp": {
@@ -475,7 +492,11 @@
             "title": "Bonds"
         },
         "continuation": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Bonds"
         },
         "shake-tol": {
@@ -495,7 +516,11 @@
             "title": "Bonds"
         },
         "morse": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Bonds"
         },
         "energygrp-excl": {
@@ -536,7 +561,11 @@
             "title": "Walls"
         },
         "pull": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "COM pulling"
         },
         "pull-cylinder-r": {
@@ -548,15 +577,27 @@
             "title": "COM pulling"
         },
         "pull-print-com": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "COM pulling"
         },
         "pull-print-ref-value": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "COM pulling"
         },
         "pull-print-components": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "COM pulling"
         },
         "pull-nstxout": {
@@ -564,15 +605,27 @@
             "title": "COM pulling"
         },
         "pull-pbc-ref-prev-step": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "COM pulling"
         },
         "pull-xout-average": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "COM pulling"
         },
         "pull-fout-average": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "COM pulling"
         },
         "pull-ngroups": {
@@ -643,7 +696,11 @@
             "title": "COM pulling"
         },
         "pull-coord1-start": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "COM pulling"
         },
         "pull-coord1-init": {
@@ -663,7 +720,11 @@
             "title": "COM pulling"
         },
         "awh": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "AWH adaptive biasing"
         },
         "awh-potential": {
@@ -675,7 +736,11 @@
             "title": "AWH adaptive biasing"
         },
         "awh-share-multisim": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "AWH adaptive biasing"
         },
         "awh-seed": {
@@ -715,7 +780,11 @@
             "title": "AWH adaptive biasing"
         },
         "awh1-equillibrate-histogram": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "AWH adaptive biasing"
         },
         "awh1-target": {
@@ -737,7 +806,11 @@
             "title": "AWH adaptive biasing"
         },
         "awh1-user-data": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "AWH adaptive biasing"
         },
         "awh1-share-group": {
@@ -749,7 +822,11 @@
             "title": "AWH adaptive biasing"
         },
         "awh1-target-metric-scaling": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "AWH adaptive biasing"
         },
         "awh1-target-metric-scaling-limit": {
@@ -793,11 +870,19 @@
             "title": "AWH adaptive biasing"
         },
         "free-energy": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Free energy calculation"
         },
         "expanded": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Free energy calculation"
         },
         "init-lambda": {
@@ -861,7 +946,11 @@
             "title": "Free energy calculation"
         },
         "sc-coul": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Free energy calculation"
         },
         "sc-power": {
@@ -909,7 +998,11 @@
             "title": "Free energy calculation"
         },
         "couple-intramol": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Free energy calculation"
         },
         "nstdhdl": {
@@ -917,15 +1010,27 @@
             "title": "Free energy calculation"
         },
         "dhdl-derivatives": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Free energy calculation"
         },
         "dhdl-print-energy": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Free energy calculation"
         },
         "separate-dhdl-file": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Free energy calculation"
         },
         "dh-hist-size": {
@@ -1003,7 +1108,11 @@
             "title": "Expanded ensemble calculations"
         },
         "symmetrized-transition-matrix": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Expanded ensemble calculations"
         },
         "minimum-var-min": {
@@ -1028,7 +1137,11 @@
             "title": "Expanded ensemble calculations"
         },
         "simulated-tempering": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Expanded ensemble calculations"
         },
         "sim-temp-low": {
@@ -1073,7 +1186,11 @@
             "title": "Non-equilibrium MD"
         },
         "deform-init-flow": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Non-equilibrium MD"
         },
         "electric-field-x": {
@@ -1093,7 +1210,11 @@
             "title": "Mixed quantum/classical molecular dynamics"
         },
         "QMMM": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Mixed quantum/classical molecular dynamics"
         },
         "swapcoords": {
@@ -1119,11 +1240,19 @@
             "title": "Computational Electrophysiology"
         },
         "massw-split0": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Computational Electrophysiology"
         },
         "massw-split1": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Computational Electrophysiology"
         },
         "solvent-group": {
@@ -1187,7 +1316,11 @@
             "title": "Computational Electrophysiology"
         },
         "density-guided-simulation-active": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Density-guided simulation"
         },
         "density-guided-simulation-group": {
@@ -1233,11 +1366,19 @@
             "title": "Density-guided simulation"
         },
         "density-guided-simulation-normalize-densities": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Density-guided simulation"
         },
         "density-guided-simulation-adaptive-force-scaling": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Density-guided simulation"
         },
         "density-guided-simulation-adaptive-force-scaling-time-constant": {
@@ -1253,7 +1394,11 @@
             "title": "Density-guided simulation"
         },
         "qmmm-cp2k-active": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "QM/MM simulations with CP2K Interface"
         },
         "qmmm-cp2k-qmgroup": {
@@ -1282,7 +1427,11 @@
             "title": "QM/MM simulations with CP2K Interface"
         },
         "colvars-active": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
+            "enum": [
+                "no",
+                "yes"
+            ],
             "title": "Collective variables (Colvars) module"
         },
         "colvars-configfile": {

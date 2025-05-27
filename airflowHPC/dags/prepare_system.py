@@ -1,15 +1,16 @@
-import os
+from os.path import curdir
 from airflow import DAG
 from airflow.operators.bash import BashOperator
-from airflow.utils import timezone
 from airflow.models.param import Param
+from airflow.utils.timezone import datetime
 from airflowHPC.dags.tasks import get_file, run_gmxapi, branch_task_template
 from airflowHPC.utils.mdp2json import write_mdp_json_as_mdp
 
 
 with DAG(
     "prepare_system",
-    start_date=timezone.utcnow(),
+    schedule="@once",
+    start_date=datetime(2025, 1, 1),
     catchup=False,
     render_template_as_native_obj=True,
     max_active_runs=1,
@@ -44,7 +45,12 @@ with DAG(
             },
             section="Data",
         ),
-        "box_size": 4,
+        "output_dir": "prep",
+        "box_size": Param(
+            4,
+            type="number",
+            title="Box size",
+        ),
         "force_field": "amber99sb-ildn",
         "water_model": "tip3p",
         "ion_concentration": Param(
@@ -75,7 +81,7 @@ with DAG(
     rename_pdb2gmx_top = BashOperator(
         task_id="rename_pdb2gmx_top",
         bash_command="cp {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.outputs.directory }}/pdb2gmx.top",
-        cwd=os.path.curdir,
+        cwd=curdir,
     )
 
     editconf = run_gmxapi.override(task_id="editconf")(
@@ -102,18 +108,19 @@ with DAG(
     rename_solvate_top = BashOperator(
         task_id="rename_solvate_top",
         bash_command="cp {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.outputs.directory }}/solvate.top",
-        cwd=os.path.curdir,
+        cwd=curdir,
     )
 
     rename_solvate_gro_output = BashOperator(
         task_id="rename_solvate_gro_output",
         bash_command="mv {{ params.outputs.directory }}/system_solv.gro {{ params.outputs.directory }}/{{ params.outputs.gro }}",
         cwd=os.path.curdir,
+        cwd=curdir,
     )
     rename_solvate_top_output = BashOperator(
         task_id="rename_solvate_top_output",
         bash_command="mv {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.outputs.directory }}/{{ params.outputs.top }}",
-        cwd=os.path.curdir,
+        cwd=curdir,
     )
 
     prepare_done_branch = branch_task_template.override(task_id="prepare_done_branch")(
@@ -147,12 +154,12 @@ with DAG(
     rename_genion_gro_output = BashOperator(
         task_id="rename_genion_gro_output",
         bash_command="mv {{ params.outputs.directory }}/system_solv_ions.gro {{ params.outputs.directory }}/{{ params.outputs.gro }}",
-        cwd=os.path.curdir,
+        cwd=curdir,
     )
     rename_genion_top_output = BashOperator(
         task_id="rename_genion_top_output",
         bash_command="mv {{ task_instance.xcom_pull(task_ids='pdb2gmx', key='-p') }} {{ params.outputs.directory }}/{{ params.outputs.top }}",
-        cwd=os.path.curdir,
+        cwd=curdir,
     )
 
     input_pdb >> pdb2gmx >> rename_pdb2gmx_top >> solvate
