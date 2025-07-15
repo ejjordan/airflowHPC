@@ -111,13 +111,13 @@ def get_gro(param_name, input_dir):
 
 
 with DAG(
-    dag_id="anthracene_simulation",
+    "anthracene_simulation",
     schedule="@once",
     start_date=datetime(2025, 1, 1),
-    catchup=False,
-    render_template_as_native_obj=True,
-    params=dagrun_params,
     is_paused_upon_creation=False,
+    catchup=False,
+    params=dagrun_params,
+  # render_template_as_native_obj=True,
 ) as anthracene:
     gro = get_gro.override(group_id="get_gro")(
         param_name="{{ params.inputs.gro.filename }}",
@@ -911,13 +911,13 @@ def next_step(states, output_dir, states_per_step, total_states, nsteps, new_gro
 
 
 with DAG(
-    dag_id="anthracene_runner",
+    "anthracene_runner",
     schedule="@once",
     start_date=datetime(2025, 1, 1),
-    catchup=False,
-    render_template_as_native_obj=True,
-    params=dagrun_params,
     is_paused_upon_creation=False,
+    catchup=False,
+    params=dagrun_params,
+  # render_template_as_native_obj=True,
 ) as anthacene_files:
     get_states = generate_lambda_states("{{ params.lambda_states_total }}")
     gro_init, copy_gro_init = first_step(
