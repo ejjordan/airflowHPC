@@ -60,7 +60,7 @@ GRANT ALL PRIVILEGES ON DATABASE airflow_db TO airflow_user;
 GRANT ALL ON SCHEMA public TO airflow_user;
 ALTER USER airflow_user SET search_path = public;
 EOT
-    
+
     export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow_user:airflow_pass@localhost/airflow_db"
 
     echo '========================== db start ok'
@@ -72,6 +72,8 @@ EOT
 db_stop(){
     echo '========================== db stop'
     
+    rm -f /tmp/.s.PGSQL*
+
     killall -9 postgres
     pg_ctl -D $SCALEMS/postgresql_db/data/ stop
 
@@ -121,7 +123,7 @@ airflow_start(){
     export AIRFLOW__HPC__GPU_TYPE="nvidia"
     export AIRFLOW__HPC__MEM_PER_NODE=256
     export AIRFLOW__HPC__THREADS_PER_CORE=1
-    
+
     export AIRFLOW__CORE__PARALLELISM=$slots
     export AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG=$slots
     export AIRFLOW__CORE__PDAG_CONCURRENCY=$slots
@@ -129,11 +131,11 @@ airflow_start(){
 
     export AIRFLOW__CORE__LOAD_EXAMPLES=False
     export AIRFLOW__CORE__DAGS_FOLDER="$SCALEMS/airflowHPC/airflowHPC/dags/"
-    
+
     # TODO: check this setting
     export AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY=$slots
     export AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR=True
-    
+
     export RCT_PILOT_CFG=$SCALEMS/pilot_cfg.json
     export RCT_PARALLELISM=$slots
     export RADICAL_UTILS_NO_ATFORK=1
@@ -159,7 +161,7 @@ airflow_start(){
     
     airflow pools set default_pool $slots test
     airflow pools list
-    
+
     echo 'reparse dags'
     AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL=0 \
         airflow dag-processor -n 1 -S $DAGF
@@ -189,13 +191,13 @@ airflow_stop() {
     echo "kill scheduler $spid"
     kill $spid
     sleep 1
-    
+
     echo 'clean rp tasks'
     for pid in $(ps -ef | grep -e rp. | grep -v grep | grep merzky | cut -c 8-16)
     do ps h -ef -q $pid;
         kill -9 $pid
     done
-    
+
     echo 'clean airflow tasks'
     for pid in $(ps -ef | grep airflow | grep -v grep | cut -c 8-16)
     do
@@ -207,6 +209,14 @@ airflow_stop() {
 
     echo '========================== airflow stop ok'
 
+    
+  # echo 'clean log files etc.'
+    # rm -rf rp.session.*
+    # rm -rf ~/j/sbox/rp.session.*
+    # rm -rf ~/airflow/*.{out,err,log,pid}
+    # rm -rf ~/airflow/logs/*
+  # rm -rf $SCALEMS/runs/*
+  # rm -rf $SCALEMS/tmp/{tmp,rp.ompi}*
 }
 
 
@@ -285,11 +295,11 @@ run_exp test_1 1  4 16
 # for n in 32 64 128 256 512; do
 #     run_exp weak 10 $n $n
 # done
-# 
+#
 # for n in 32 64 128 256 512; do
 #     run_exp strong_1 10 $n 512
 # done
-# 
+#
 # for n in 32 64 128 256 512; do
 #     run_exp strong_2 10 $n $((512 * 4))
 # done
