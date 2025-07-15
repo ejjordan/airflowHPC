@@ -8,11 +8,11 @@
 #
 # basic settings
 #
-MODE='no-rct'
+MODE='rct'
 
-DAG='gmx_multi'
 DAG='swarms'
 DAG='anthracene_runner'
+DAG='gmx_multi'
 
 
 
@@ -60,7 +60,7 @@ GRANT ALL PRIVILEGES ON DATABASE airflow_db TO airflow_user;
 GRANT ALL ON SCHEMA public TO airflow_user;
 ALTER USER airflow_user SET search_path = public;
 EOT
-
+    
     export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow_user:airflow_pass@localhost/airflow_db"
 
     echo '========================== db start ok'
@@ -72,8 +72,6 @@ EOT
 db_stop(){
     echo '========================== db stop'
     
-    rm -f /tmp/.s.PGSQL*
-
     killall -9 postgres
     pg_ctl -D $SCALEMS/postgresql_db/data/ stop
 
@@ -89,10 +87,15 @@ airflow_start(){
     # make sure we start from an empty slate
     airflow_stop
 
-    nodes=$1
-    slots=$2
-    cpn=$3
-    gpn=$4
+    name=$1
+    nodes=$2
+    slots=$3
+    cpn=$4
+    gpn=$5
+
+    N_STEPS=1000
+    N_SIMS=$slots
+    NAME=$name
 
     echo "=== start airflow ($slots slots)"
 
@@ -123,7 +126,7 @@ airflow_start(){
     export AIRFLOW__HPC__GPU_TYPE="nvidia"
     export AIRFLOW__HPC__MEM_PER_NODE=256
     export AIRFLOW__HPC__THREADS_PER_CORE=1
-
+    
     export AIRFLOW__CORE__PARALLELISM=$slots
     export AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG=$slots
     export AIRFLOW__CORE__PDAG_CONCURRENCY=$slots
@@ -131,11 +134,11 @@ airflow_start(){
 
     export AIRFLOW__CORE__LOAD_EXAMPLES=False
     export AIRFLOW__CORE__DAGS_FOLDER="$SCALEMS/airflowHPC/airflowHPC/dags/"
-
+    
     # TODO: check this setting
     export AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY=$slots
     export AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR=True
-
+    
     export RCT_PILOT_CFG=$SCALEMS/pilot_cfg.json
     export RCT_PARALLELISM=$slots
     export RADICAL_UTILS_NO_ATFORK=1
@@ -148,6 +151,8 @@ airflow_start(){
     #     concurrency=$slots
     #     max_active_runs=1
 
+    echo "=========================="
+    module list
     echo "start scheduler"
     airflow db init
     airflow db migrate 
@@ -155,13 +160,17 @@ airflow_start(){
     echo "==== DB PREP DONE"
     date
 
+    module list
+
+    /sw/spack/deltas11-2023-03/apps/linux-rhel8-zen3/gcc-11.4.0/openmpi-4.1.6-lranp74/bin/mpirun -np 1 -host cn025:1 --cpu-set 0 /u/merzky/scalems/gromacs-2024.4/install/bin/gmx_mpi grompp -f /u/merzky/scalems/t.mdp -c /u/merzky/scalems/airflowHPC/airflowHPC/data/ala_pentapeptide/ala_penta_capped_solv.gro -p /u/merzky/scalems/airflowHPC/airflowHPC/data/ala_pentapeptide/ala_penta_capped_solv.top -o /u/merzky/scalems/runs/gmx_multi/run.tpr
+
     airflow scheduler -D
     echo "==== SCHED STARTED"
     date
     
     airflow pools set default_pool $slots test
     airflow pools list
-
+    
     echo 'reparse dags'
     AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL=0 \
         airflow dag-processor -n 1 -S $DAGF
@@ -172,11 +181,20 @@ airflow_start(){
     airflow dags list
     echo "list errors"
     airflow dags list-import-errors
- 
+    
+    CFG="$(cat <<EOT
+    {"num_sims"   :  $N_SIMS, 
+     "output_dir" :  "$NAME", 
+     "mdp_options": {"nsteps": $N_STEPS}}
+EOT
+)"
+
+
     echo 'trigger anthracene_runner'
-    airflow dags trigger -v $DAG
-  # airflow dags backfill --reset-dagruns -y -s '2025-01-01' \
-  #                       --conf="{\"output_dir\" : \"$RUNS\"}" "$DAG"
+    echo "cfg: $CFG"
+  # airflow dags trigger -v $DAG
+    airflow dags backfill --reset-dagruns -y -s '2025-01-01' \
+        --conf="$CFG" "$DAG"
     echo '========================== airflow start ok'
     date
 
@@ -191,17 +209,19 @@ airflow_stop() {
     echo "kill scheduler $spid"
     kill $spid
     sleep 1
-
+    
     echo 'clean rp tasks'
     for pid in $(ps -ef | grep -e rp. | grep -v grep | grep merzky | cut -c 8-16)
     do ps h -ef -q $pid;
         kill -9 $pid
     done
 
+    sleep 1
+    
     echo 'clean airflow tasks'
     for pid in $(ps -ef | grep airflow | grep -v grep | cut -c 8-16)
     do
-        kill -9 $pid
+        kill -9 $pid 2>&1 > /dev/null
     done
     ps -ef | grep gunicorn | grep -v grep | cut -c 8-16 | xargs kill
     
@@ -209,14 +229,6 @@ airflow_stop() {
 
     echo '========================== airflow stop ok'
 
-    
-  # echo 'clean log files etc.'
-    # rm -rf rp.session.*
-    # rm -rf ~/j/sbox/rp.session.*
-    # rm -rf ~/airflow/*.{out,err,log,pid}
-    # rm -rf ~/airflow/logs/*
-  # rm -rf $SCALEMS/runs/*
-  # rm -rf $SCALEMS/tmp/{tmp,rp.ompi}*
 }
 
 
@@ -244,7 +256,7 @@ run_exp(){
         return
     fi
 
-    airflow_start $SCALEMS_N_NODES $SCALEMS_N_SLOTS 128 0
+    airflow_start $SCALEMS_EXPERIMENT $SCALEMS_N_NODES $SCALEMS_N_SLOTS 128 0
 
     while true
     do
@@ -288,18 +300,21 @@ run_exp(){
     echo '========================== exp_run ok [$@]'
 }
 
-run_exp test_1 1  4 16
+# run_exp experiment nodes slots tasks
+
+run_exp gmx_multi4 1  4 16
+
 # run_exp test_2 1 16 16
 # 
 # # weak scaling
 # for n in 32 64 128 256 512; do
 #     run_exp weak 10 $n $n
 # done
-#
+# 
 # for n in 32 64 128 256 512; do
 #     run_exp strong_1 10 $n 512
 # done
-#
+# 
 # for n in 32 64 128 256 512; do
 #     run_exp strong_2 10 $n $((512 * 4))
 # done
