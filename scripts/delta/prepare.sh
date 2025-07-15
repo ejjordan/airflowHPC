@@ -1,5 +1,6 @@
 
 module load anaconda3_cpu openmpi
+. ~/.bashrc.conda
 
 export SCALEMS="$HOME/scalems"
 
