@@ -16,17 +16,17 @@ DAG='gmx_multi'
 
 
 
-DAGF=$(grep -l "\"$DAG\"" /u/merzky/scalems/airflowHPC/airflowHPC/dags/*py)
-
-echo "DAGF: $DAGF"
-
-test -z "$DAGF" && DAGF="$DAG"
-
 if test "$MODE" == 'rct'; then
     DAG="rct_$DAG"
 fi
 
-echo "=== DAG: $DAG"
+DAGF=$(grep -l "\"$DAG\"" /u/merzky/scalems/airflowHPC/airflowHPC/dags/*py)
+
+
+test -z "$DAGF" && DAGF="$DAG"
+
+echo "=== DAG : $DAG"
+echo "=== DAGF: $DAGF"
 
 
 export SCALEMS="$HOME/scalems"
@@ -192,9 +192,9 @@ EOT
 
     echo 'trigger anthracene_runner'
     echo "cfg: $CFG"
-  # airflow dags trigger -v $DAG
-    airflow dags backfill --reset-dagruns -y -s '2025-01-01' \
-        --conf="$CFG" "$DAG"
+    airflow dags trigger --conf="$CFG" -v "$DAG"
+  # airflow dags backfill --reset-dagruns -y -s '2025-01-01' \
+  #     --conf="$CFG" "$DAG"
     echo '========================== airflow start ok'
     date
 
