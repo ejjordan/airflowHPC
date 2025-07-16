@@ -1,5 +1,9 @@
 #!/bin/bash
 
+exec > >(tee campaign.log) 2>&1
+
+
+
 # load modules, spack, python env
 . ./prepare.sh > prepare.log 2>&1
 
@@ -162,8 +166,6 @@ airflow_start(){
 
     module list
 
-    /sw/spack/deltas11-2023-03/apps/linux-rhel8-zen3/gcc-11.4.0/openmpi-4.1.6-lranp74/bin/mpirun -np 1 -host cn025:1 --cpu-set 0 /u/merzky/scalems/gromacs-2024.4/install/bin/gmx_mpi grompp -f /u/merzky/scalems/t.mdp -c /u/merzky/scalems/airflowHPC/airflowHPC/data/ala_pentapeptide/ala_penta_capped_solv.gro -p /u/merzky/scalems/airflowHPC/airflowHPC/data/ala_pentapeptide/ala_penta_capped_solv.top -o /u/merzky/scalems/runs/gmx_multi/run.tpr
-
     airflow scheduler -D
     echo "==== SCHED STARTED"
     date
@@ -192,11 +194,28 @@ EOT
 
     echo 'trigger anthracene_runner'
     echo "cfg: $CFG"
-    airflow dags trigger --conf="$CFG" -v "$DAG"
-  # airflow dags backfill --reset-dagruns -y -s '2025-01-01' \
-  #     --conf="$CFG" "$DAG"
+  # airflow dags trigger --conf="$CFG" -v "$DAG"
+    airflow dags backfill --reset-dagruns -y -s '2025-01-01' \
+        --conf="$CFG" "$DAG"
     echo '========================== airflow start ok'
     date
+
+    sleep 1
+    airflow dags list-runs -d $DAG
+    exec_date=$(airflow dags list-runs -d $DAG --output json | jq -r '.[0].execution_date')
+
+    while true; do
+      airflow dags list-runs -d $DAG --output json
+      STATE=$(airflow dags list-runs -d $DAG --output json | jq -r '.[0].state')
+      echo "DAG state: $STATE"
+      if [ "$STATE" = "success" ] || [ "$STATE" = "failed" ]; then
+          echo "DAG done : $STATE"
+            break
+      fi
+      sleep 5
+    done
+
+    echo "===================== after run"
 
 }
 
@@ -261,12 +280,12 @@ run_exp(){
     while true
     do
         line=$(grep 'DagRun Finished' $AIRFLOW/airflow-scheduler.log)
-        if test -z "$line"
-        then
-            echo -n .
-            sleep 10
-            continue
-        fi
+      # if test -z "$line"
+      # then
+      #     echo -n .
+      #     sleep 10
+      #     continue
+      # fi
 
         echo "==== completion: $line"
 
