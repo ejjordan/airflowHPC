@@ -1,5 +1,22 @@
 #!/bin/bash
 
+DAG=$1
+MODE=$2
+
+if test -z "$DAG"; then
+    echo "no DAG"
+    exit 1
+fi
+
+if test -z "$MODE"; then
+    MODE=Resource
+fi
+
+echo "========================================="
+echo "MODE: $DAG $MODE"
+echo "========================================="
+
+
 exec > >(tee campaign.log) 2>&1
 
 
@@ -12,13 +29,9 @@ exec > >(tee campaign.log) 2>&1
 #
 # basic settings
 #
-MODE='rct'
-
 DAG='swarms'
 DAG='anthracene_runner'
 DAG='gmx_multi'
-
-
 
 if test "$MODE" == 'rct'; then
     DAG="rct_$DAG"
@@ -91,17 +104,16 @@ airflow_start(){
     # make sure we start from an empty slate
     airflow_stop
 
-    name=$1
-    nodes=$2
-    slots=$3
-    cpn=$4
-    gpn=$5
+    NAME=$1
+    NODES=$2
+    SLOTS=$3
+    CPN=$4
+    GPN=$5
 
-    N_STEPS=1000
-    N_SIMS=$slots
-    NAME=$name
+    N_STEPS=2000
+    N_SIMS=$SLOTS
 
-    echo "=== start airflow ($slots slots)"
+    echo "=== start airflow ($SLOTS slots)"
 
     echo 'clean log files etc.'
     rm -rf rp.session.*
@@ -125,34 +137,34 @@ airflow_start(){
 
     
     # TODO: threads_per_core is not passed
-    export AIRFLOW__HPC__CORES_PER_NODE=$cpn
-    export AIRFLOW__HPC__GPUS_PER_NODE=$gpn
+    export AIRFLOW__HPC__CORES_PER_NODE=$CPN
+    export AIRFLOW__HPC__GPUS_PER_NODE=$GPN
     export AIRFLOW__HPC__GPU_TYPE="nvidia"
     export AIRFLOW__HPC__MEM_PER_NODE=256
     export AIRFLOW__HPC__THREADS_PER_CORE=1
     
-    export AIRFLOW__CORE__PARALLELISM=$slots
-    export AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG=$slots
-    export AIRFLOW__CORE__PDAG_CONCURRENCY=$slots
+    export AIRFLOW__CORE__PARALLELISM=$SLOTS
+    export AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG=$SLOTS
+    export AIRFLOW__CORE__PDAG_CONCURRENCY=$SLOTS
     export AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG=1
 
     export AIRFLOW__CORE__LOAD_EXAMPLES=False
     export AIRFLOW__CORE__DAGS_FOLDER="$SCALEMS/airflowHPC/airflowHPC/dags/"
     
     # TODO: check this setting
-    export AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY=$slots
+    export AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY=$SLOTS
     export AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR=True
     
     export RCT_PILOT_CFG=$SCALEMS/pilot_cfg.json
-    export RCT_PARALLELISM=$slots
+    export RCT_PARALLELISM=$SLOTS
     export RADICAL_UTILS_NO_ATFORK=1
 
     export SLURM_TASKS_PER_NODE=128
     export SLURM_CPUS_PER_TASK=1
 
     # dag level settings:
-    #     max_active_tasks=$slots
-    #     concurrency=$slots
+    #     max_active_tasks=$SLOTS
+    #     concurrency=$SLOTS
     #     max_active_runs=1
 
     echo "=========================="
@@ -166,11 +178,11 @@ airflow_start(){
 
     module list
 
-    airflow scheduler -D
+  # airflow scheduler -D
     echo "==== SCHED STARTED"
     date
     
-    airflow pools set default_pool $slots test
+    airflow pools set default_pool $SLOTS test
     airflow pools list
     
     echo 'reparse dags'
@@ -186,7 +198,7 @@ airflow_start(){
     
     CFG="$(cat <<EOT
     {"num_sims"   :  $N_SIMS, 
-     "output_dir" :  "$NAME", 
+     "output_dir" :  "runs/$NAME", 
      "mdp_options": {"nsteps": $N_STEPS}}
 EOT
 )"
@@ -255,7 +267,7 @@ airflow_stop() {
 #
 run_exp(){
 
-    echo '========================== exp_run [$@]'
+    echo "========================== exp_run [$@]"
 
     export SCALEMS_EXPERIMENT=$1
     export SCALEMS_N_NODES=$2
@@ -298,7 +310,7 @@ run_exp(){
         mkdir -p "$sbox"
         cp *log "$sbox"
         cp -r "$AIRFLOW/" "$sbox"
-        cp -r runs "$sbox"
+        cp -r $RUNS "$sbox"
 
         sid=$(ls -rtd rp.session* | tail -n 1)
         if test -z "$sid"
@@ -311,6 +323,13 @@ run_exp(){
             mv $HOME/j/sbox/$sid $sbox/$sid.pilot
             mv campaign.log $sbox/
         fi
+
+        rm -rf $sid
+        rm -rf ~/j/sbox/$sid
+        rm -rf $AIRFLOW/*.{out,err,log,pid}
+        rm -rf $AIRFLOW/logs/*
+        rm -rf $SCALEMS/tmp/{tmp,rp.ompi}*
+        rm -rf $RUNS/*
 
         break
     done
