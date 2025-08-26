@@ -1,37 +1,36 @@
 #!/bin/bash
 
-DAG=$1
-MODE=$2
-
-if test -z "$DAG"; then
-    echo "no DAG"
-    exit 1
-fi
-
-if test -z "$MODE"; then
-    MODE=Resource
-fi
+NAME=$1
+DAG=$2
+NODES=$3
+SLOTS=$4
+TASKS=$5
+MODE=$6
 
 echo "========================================="
-echo "MODE: $DAG $MODE"
+echo "NAME   : $NAME"
+echo "DAG    : $DAG"
+echo "NODES  : $NODES"
+echo "SLOTS  : $SLOTS"
+echo "TASKS  : $TASKS"
+echo "MODE   : $MODE"
 echo "========================================="
 
+test -z "$NAME"   && echo "missing NAME " && exit 1
+test -z "$DAG"    && echo "missing DAG  " && exit 1
+test -z "$NODES"  && echo "missing NODES" && exit 1
+test -z "$SLOTS"  && echo "missing SLOTS" && exit 1
+test -z "$TASKS"  && echo "missing TASKS" && exit 1
+test -z "$MODE"   && echo "missing MODE " && exit 1
 
 exec > >(tee campaign.log) 2>&1
 
-
-
-# load modules, spack, python env
-. ./prepare.sh > prepare.log 2>&1
 
 
 # ------------------------------------------------------------------------------
 #
 # basic settings
 #
-DAG='swarms'
-DAG='anthracene_runner'
-DAG='gmx_multi'
 
 if test "$MODE" == 'rct'; then
     DAG="rct_$DAG"
@@ -56,6 +55,11 @@ export RUNS=$SCALEMS/runs
 cd $SCALEMS
 mkdir -p $RUNS 
 mkdir -p $TMPDIR
+
+
+# load modules, spack, python env
+. ./prepare.sh > prepare.log 2>&1
+
 
 
 # ------------------------------------------------------------------------------
@@ -109,6 +113,7 @@ airflow_start(){
     SLOTS=$3
     CPN=$4
     GPN=$5
+    SBOX=$6
 
     N_STEPS=2000
     N_SIMS=$SLOTS
@@ -135,12 +140,11 @@ airflow_start(){
         export AIRFLOW__CORE__EXECUTOR=airflowHPC.executors.resource_executor.ResourceExecutor
     fi
 
-    
-    # TODO: threads_per_core is not passed
     export AIRFLOW__HPC__CORES_PER_NODE=$CPN
     export AIRFLOW__HPC__GPUS_PER_NODE=$GPN
     export AIRFLOW__HPC__GPU_TYPE="nvidia"
     export AIRFLOW__HPC__MEM_PER_NODE=256
+    # TODO: MK: check 2 cpn
     export AIRFLOW__HPC__THREADS_PER_CORE=1
     
     export AIRFLOW__CORE__PARALLELISM=$SLOTS
@@ -151,7 +155,6 @@ airflow_start(){
     export AIRFLOW__CORE__LOAD_EXAMPLES=False
     export AIRFLOW__CORE__DAGS_FOLDER="$SCALEMS/airflowHPC/airflowHPC/dags/"
     
-    # TODO: check this setting
     export AIRFLOW__SCHEDULER__MAX_TIS_PER_QUERY=$SLOTS
     export AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR=True
     
@@ -204,29 +207,52 @@ EOT
 )"
 
 
-    echo 'trigger anthracene_runner'
     echo "cfg: $CFG"
   # airflow dags trigger --conf="$CFG" -v "$DAG"
     airflow dags backfill --reset-dagruns -y -s '2025-01-01' \
         --conf="$CFG" "$DAG"
     echo '========================== airflow start ok'
-    date
 
-    sleep 1
     airflow dags list-runs -d $DAG
     exec_date=$(airflow dags list-runs -d $DAG --output json | jq -r '.[0].execution_date')
+    echo "exec_date: $exec_date"
 
+    forced=''
     while true; do
       airflow dags list-runs -d $DAG --output json
       STATE=$(airflow dags list-runs -d $DAG --output json | jq -r '.[0].state')
       echo "DAG state: $STATE"
       if [ "$STATE" = "success" ] || [ "$STATE" = "failed" ]; then
-          echo "DAG done : $STATE"
-            break
+          break
       fi
       sleep 5
+
+      # allow for an external termination trigger
+      if test -f "$SCALEMS/killme"
+      then
+          echo "=============== forced termination"
+          rm -f "$SCALEMS/killme"
+          forced=1
+          break
+      fi
+
     done
 
+    dur='-1.0'
+    if test -z "$forced"
+    then
+        start_date=$( airflow dags list-runs -d $DAG --output json | jq -r '.[0].start_date')
+        end_date=$(   airflow dags list-runs -d $DAG --output json | jq -r '.[0].end_date')
+
+        start=$(date --date="$start_date" +"%s")
+        end=$(date --date="$end_date" +"%s")
+        dur=$((end-start))
+    fi
+
+    echo "====================="
+    printf "%-10s  %-20s  %-10s  %5d  %5d  %5d  %10d  %s\n" \
+            $NAME  $DAG   $MODE  $NODES $SLOTS $TASKS $dur $sbox \
+          | tee -a results.dat
     echo "===================== after run"
 
 }
@@ -239,7 +265,6 @@ airflow_stop() {
     spid=$(cat $AIRFLOW/airflow-scheduler.pid) 
     echo "kill scheduler $spid"
     kill $spid
-    sleep 1
     
     echo 'clean rp tasks'
     for pid in $(ps -ef | grep -e rp. | grep -v grep | grep merzky | cut -c 8-16)
@@ -247,8 +272,6 @@ airflow_stop() {
         kill -9 $pid
     done
 
-    sleep 1
-    
     echo 'clean airflow tasks'
     for pid in $(ps -ef | grep airflow | grep -v grep | cut -c 8-16)
     do
@@ -274,45 +297,28 @@ run_exp(){
     export SCALEMS_N_SLOTS=$3
     export SCALEMS_N_TASKS=$4
 
-    sbox="sbox_${SCALEMS_EXPERIMENT}_${DAG}_${SCALEMS_N_NODES}_${SCALEMS_N_SLOTS}_${SCALEMS_N_TASKS}"
+    i=1
+    while true
+    do
+        sbox="sbox_${SCALEMS_EXPERIMENT}_${DAG}_${SCALEMS_N_NODES}_${SCALEMS_N_SLOTS}_${SCALEMS_N_TASKS}_${i}"
+        test -d "$sbox" || break
+        i=$((i+1))
+    done
 
     echo '---------------------------------------------------------------------'
     echo "run $SCALEMS_EXPERIMENT N:$SCALEMS_N_NODES S:$SCALEMS_N_SLOTS T:$SCALEMS_N_TASKS: "
     echo "use P:$RCT_PARALLELISM"
     echo "SBOX: $sbox"
 
-    if test -d $sbox
-    then
-        echo "sandbox exists - skip [$sbox]"
-        return
-    fi
+    airflow_start $SCALEMS_EXPERIMENT $SCALEMS_N_NODES $SCALEMS_N_SLOTS 128 0 $sbox
 
-    airflow_start $SCALEMS_EXPERIMENT $SCALEMS_N_NODES $SCALEMS_N_SLOTS 128 0
+    mkdir -p "$sbox"
+    cp *log "$sbox"
+    cp -r "$AIRFLOW/" "$sbox"
+    cp -r $RUNS "$sbox"
 
-    while true
-    do
-        line=$(grep 'DagRun Finished' $AIRFLOW/airflow-scheduler.log)
-      # if test -z "$line"
-      # then
-      #     echo -n .
-      #     sleep 10
-      #     continue
-      # fi
-
-        echo "==== completion: $line"
-
-        echo
-        duration=$(echo "$line" | sed -e 's/.*duration=//g' | cut -f 1 -d ,)
-        echo "ok  $SCALEMS_N_SLOTS  $SCALEMS_N_TASKS  $duration"
-        echo "$SCALEMS_N_SLOTS  $SCALEMS_N_TASKS  $duration" >> results_$SCALEMS_EXPERIMENT.dat
-
-
-        mkdir -p "$sbox"
-        cp *log "$sbox"
-        cp -r "$AIRFLOW/" "$sbox"
-        cp -r $RUNS "$sbox"
-
-        sid=$(ls -rtd rp.session* | tail -n 1)
+    if test "$MODE" == 'rct'; then
+        sid=$(ls -rtd rp.session* 2>/dev/null | tail -n 1)
         if test -z "$sid"
         then
             echo "no RP session"
@@ -323,16 +329,12 @@ run_exp(){
             mv $HOME/j/sbox/$sid $sbox/$sid.pilot
             mv campaign.log $sbox/
         fi
+    fi
 
-        rm -rf $sid
-        rm -rf ~/j/sbox/$sid
-        rm -rf $AIRFLOW/*.{out,err,log,pid}
-        rm -rf $AIRFLOW/logs/*
-        rm -rf $SCALEMS/tmp/{tmp,rp.ompi}*
-        rm -rf $RUNS/*
-
-        break
-    done
+    rm -rf $AIRFLOW/*.{out,err,log,pid}
+    rm -rf $AIRFLOW/logs/*
+    rm -rf $SCALEMS/tmp/{tmp,rp.ompi}*
+    rm -rf $RUNS/*
 
     airflow_stop
     echo '========================== exp_run ok [$@]'
@@ -340,7 +342,7 @@ run_exp(){
 
 # run_exp experiment nodes slots tasks
 
-run_exp gmx_multi4 1  4 16
+run_exp $NAME $NODES $SLOTS $TASKS
 
 # run_exp test_2 1 16 16
 # 

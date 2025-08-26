@@ -2,6 +2,6 @@
   "resource" : "ncsa.delta",
   "project"  : "bblj",
 # "queue"    : "GPU",
-  "nodes"    : 1,
+  "nodes"    : 2,
   "runtime"  : 10000
 }
