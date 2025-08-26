@@ -464,6 +464,7 @@ def generate_lambda_states(num_states: int | str):
     The keys are the state index and the values are the lambda value.
     The lambda values are uniformly spaced between 0 and 1, rounded to 2 decimal places.
     """
+    num_states = int(num_states)
     assert 1 <= num_states <= 101
     idx_to_state = {
         str(i): f"{round(i / (num_states - 1), 2):.2f}" for i in range(num_states)
@@ -633,6 +634,8 @@ def next_step_mdp_options(next_step_info, lambda_states, **context):
 def copy_gro_files(gro_fn, output_dir, states_dict, lambda_states_per_step):
     import logging, os, shutil
     import numpy as np
+
+    lambda_states_per_step = int(lambda_states_per_step)
 
     assert isinstance(output_dir, str)
     if not os.path.isabs(output_dir):
