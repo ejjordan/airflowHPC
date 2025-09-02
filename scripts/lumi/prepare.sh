@@ -4,6 +4,9 @@ module list
 
 export SCALEMS="/pfs/lustrep3/scratch/project_465001998/scalems"
 
+cd $SCALEMS
+. ./ve3/bin/activate
+
 # no idea why this is sometimes needed
 export PYTHONPATH=$SCALEMS/airflowHPC
 
