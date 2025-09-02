@@ -149,9 +149,9 @@ class MPIBashOperator(BaseOperator):
         self.bash_command = bash_command
         if mpi_executable is None:
             for executable, num_ranks_flag in [
+                ("srun", "-n"),
                 ("mpirun", "-np"),
                 ("mpiexec", "-np"),
-                ("srun", "-n"),
             ]:
                 if shutil.which(executable):
                     self.mpi_executable = executable

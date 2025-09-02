@@ -6,9 +6,6 @@ from airflowHPC.operators import ResourceGmxOperator
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflow.utils.timezone import datetime
 
-import os
-n_tasks = os.environ.get('SCALEMS_N_TASKS')
-
 @task
 def outputs_list(**context):
     num_sims = int(context["task"].render_template("{{ params.num_sims }}", context))
@@ -24,7 +21,7 @@ with DAG(
     catchup=False,
     params={
         "output_dir": "/u/merzky/scalems/runs/gmx_multi",
-        "num_sims": n_tasks,
+        "num_sims": "128",
         "mdp_options": {"nsteps": 10000},
         "inputs": {
             "mdp": {"directory": "mdp", "filename": "sim.json"},

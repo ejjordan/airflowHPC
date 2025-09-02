@@ -8,7 +8,7 @@ python3.10 -m venv ve3
 
 pip install --upgrade setuptools pip wheel
 pip install apache-airflow[postgres,api,auth]==2.10.4
-pip install fastapi graphviz
+pip install fastapi graphviz numpy
 cd airflowHPC/
 pip install -e .
 
