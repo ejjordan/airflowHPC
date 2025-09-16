@@ -73,6 +73,7 @@ db_start(){
     rm -f     $SCALEMS/postgresql_db/*.log
 
     initdb    $SCALEMS/postgresql_db/data
+    cp        $SCALEMS/postgresql.conf $SCALEMS/postgresql_db/data
     pg_ctl -D $SCALEMS/postgresql_db/data/ -l $SCALEMS/postgresql_db/server.log start
     createdb -T template1 airflow_db
     psql airflow_db <<EOT
@@ -115,8 +116,8 @@ airflow_start(){
     GPN=$5
     SBOX=$6
 
-    N_STEPS=2000
-    N_SIMS=$SLOTS
+    N_STEPS=2000  # FIXME: set to 10000 for measurements
+    N_SIMS=$TASKS
 
     echo "=== start airflow ($SLOTS slots)"
 
@@ -187,7 +188,18 @@ airflow_start(){
     
     airflow pools set default_pool $SLOTS test
     airflow pools list
-    
+
+    echo "==== START WEBSERVER"
+    airflow users create \
+          --username admin \
+          --password mysecret \
+          --firstname First \
+          --lastname Last \
+          --role Admin \
+          --email admin@example.com
+
+    airflow webserver --port 8080 &
+
     echo 'reparse dags'
     AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL=0 \
         airflow dag-processor -n 1 -S $DAGF
