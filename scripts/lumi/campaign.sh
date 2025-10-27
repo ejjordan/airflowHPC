@@ -45,20 +45,20 @@ echo "=== DAG : $DAG"
 echo "=== DAGF: $DAGF"
 
 
-export SCALEMS="/pfs/lustrep3/scratch/project_465001998/scalems"
+export SCALEMS="/pfs/lustrep3/scratch/project_465001666/pekasson"
 export AIRFLOW="$HOME/airflow"
 
 export OMP_PLACES=cores
 export TMPDIR=$SCALEMS/tmp
 export RUNS=$SCALEMS/runs
 
+# load modules, spack, python env
+. ./prepare.sh > prepare.log 2>&1
+
 cd $SCALEMS
 mkdir -p $RUNS 
 mkdir -p $TMPDIR
 
-
-# load modules, spack, python env
-. ./prepare.sh > prepare.log 2>&1
 
 
 
@@ -183,6 +183,7 @@ airflow_start(){
     module list
 
   # airflow scheduler -D
+    airflow scheduler &
     echo "==== SCHED STARTED"
     date
     
