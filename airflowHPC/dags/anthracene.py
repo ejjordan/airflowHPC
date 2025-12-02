@@ -109,6 +109,10 @@ def get_gro(param_name, input_dir):
     )
     return gro
 
+@task
+def get_rets(task_ids, **context):
+    task_instance = context["task_instance"]
+    return task_instance.xcom_pull(task_ids=task_ids, key='return_value')
 
 with DAG(
     "anthracene_simulation",
@@ -182,7 +186,8 @@ with DAG(
     dataset = dataset_from_xcom_dicts.override(task_id="make_dataset")(
         output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}",
         output_fn="{{ params.output_name }}.json",
-        list_of_dicts="list({{task_instance.xcom_pull(task_ids='mdrun', key='return_value')}})",
+        #list_of_dicts="{{ list(task_instance.xcom_pull(task_ids='mdrun', key='return_value')) }}",
+        list_of_dicts=get_rets(task_ids='mdrun'),
         dataset_structure="{{ params.output_dataset_structure }}",
     )
     update_data = add_lambdas_to_dataset.override(task_id="update_data")(

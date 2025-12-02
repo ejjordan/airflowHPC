@@ -355,8 +355,7 @@ def dataset_from_xcom_dicts(
         dataset_structure = ast.literal_eval(dataset_structure)
     logging.info(dataset_structure)
     logging.info(list_of_dicts)
-    parsed_list = context["task"].render_template(list_of_dicts, context)
-    logging.info(parsed_list)
+    # list_of_lists = ast.literal_eval(list_of_lists)
     logging.info(type(list_of_dicts))
     for data_dict in list(list_of_dicts):
         data = dict()
