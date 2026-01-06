@@ -330,6 +330,7 @@ run_exp(){
     cp -r "$AIRFLOW/" "$sbox"
     cp -r $RUNS "$sbox"
 
+    sleep 600  # time to view logs
     if test "$MODE" == 'rct'; then
         sid=$(ls -rtd rp.session* 2>/dev/null | tail -n 1)
         if test -z "$sid"
