@@ -1,0 +1,16 @@
+
+spack install postgresql 
+spack install gromacs
+
+module load cray-python/3.10.10
+python3.10 -m venv ve3
+. ve3/bin/activate
+
+pip install --upgrade setuptools pip wheel
+pip install apache-airflow[postgres,api,auth]==2.10.4
+pip install fastapi graphviz numpy
+cd airflowHPC/
+pip install -e .
+
+airflow version
+

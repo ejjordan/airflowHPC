@@ -150,6 +150,7 @@ class ResourceGmxOperator(ResourceBashOperator):
             input_files=self.input_files,
             output_files=output_files_paths,
         )
+        self.log.info(f"=== command: {self.bash_command}")
         result = self.subprocess_hook.run_command(
             command=[bash_path, "-c", self.bash_command],
             stdin=self.stdin,

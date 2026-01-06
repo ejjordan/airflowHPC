@@ -339,18 +339,27 @@ def list_from_xcom(values):
 
 @task
 def dataset_from_xcom_dicts(
-    output_dir: str, output_fn: str, list_of_dicts, dataset_structure
+    output_dir: str, output_fn: str, list_of_dicts, dataset_structure, **context
 ):
     import os
     import json
+    import ast
+    import logging
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     out_path = os.path.abspath(output_dir)
     output_file = os.path.join(out_path, output_fn)
     output_data = list()
-    for data_dict in list_of_dicts:
+    if type(dataset_structure) is str:
+        dataset_structure = ast.literal_eval(dataset_structure)
+    logging.info(dataset_structure)
+    logging.info(list_of_dicts)
+    # list_of_lists = ast.literal_eval(list_of_lists)
+    logging.info(type(list_of_dicts))
+    for data_dict in list(list_of_dicts):
         data = dict()
+        logging.info(data_dict)
         for title, key_name in dataset_structure.items():
             if key_name in data_dict:
                 data[title] = data_dict[key_name]
@@ -481,8 +490,13 @@ def add_to_dataset(
 
 
 @task
-def unpack_param(param_name: str, **context):
-    return context["task"].render_template(param_name, context)
+def unpack_param(param_name, **context):
+    import logging
+    import ast
+    logging.info(param_name)
+    #return context["task"].render_template(param_name, context)
+    #return context["task"].expand(param_name)
+    return ast.literal_eval(param_name)
 
 
 @task
@@ -492,11 +506,15 @@ def unpack_mdp_options(param_name: str = "{{ params.mdp_options | list}}", **con
     Thus, this task handles dynamic sizing of mdp options.
     """
     import ast
-
+    import logging
+    logging.info(param_name)
     mdp_options = context["task"].render_template(param_name, context)
-    mdp_options_parsed = [
-        ast.literal_eval(opt) if type(opt) is str else opt for opt in mdp_options
-    ]
+    logging.info(mdp_options)
+    if type(mdp_options) is str:
+        mdp_options = ast.literal_eval(mdp_options)
+    for opt in mdp_options:
+        logging.info(opt)
+    mdp_options_parsed = [ast.literal_eval(opt) if type(opt) is str else opt for opt in mdp_options]
     return mdp_options_parsed
 
 

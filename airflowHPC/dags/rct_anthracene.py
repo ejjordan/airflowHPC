@@ -17,7 +17,7 @@ from airflowHPC.dags.tasks import (
     evaluate_template_truth,
     run_if_false,
 )
-from airflowHPC.operators import ResourceGmxOperatorDataclass
+from airflowHPC.operators import ResourceRCTOperatorDataclass
 from airflowHPC.utils.mdp2json import update_write_mdp_json_as_mdp_from_file
 from airflow.models.param import Param
 
@@ -29,7 +29,10 @@ dagrun_params = {
                 "directory": "anthracene",
                 "filename": "anthracene.gro",
             },
-            "top": {"directory": "anthracene", "filename": "anthracene.top"},
+            "top": {
+                "directory": "anthracene", 
+                "filename": "anthracene.top"
+            },
         },
         type=["object", "null"],
         title="Inputs list",
@@ -45,7 +48,7 @@ dagrun_params = {
         section="inputs",
     ),
     "mdp_options": [],
-    "num_steps": 10000,
+    "num_steps": 100001,
     "output_dir": "anthracene",
     "output_name": "anthra",
     "expected_output": "anthra.json",
@@ -109,19 +112,15 @@ def get_gro(param_name, input_dir):
     )
     return gro
 
-@task
-def get_rets(task_ids, **context):
-    task_instance = context["task_instance"]
-    return task_instance.xcom_pull(task_ids=task_ids, key='return_value')
 
 with DAG(
-    "anthracene_simulation",
+    dag_id="rct_anthracene_simulation",
     schedule="@once",
     start_date=datetime(2025, 1, 1),
-    is_paused_upon_creation=False,
     catchup=False,
+    render_template_as_native_obj=True,
     params=dagrun_params,
-  # render_template_as_native_obj=True,
+    is_paused_upon_creation=False,
 ) as anthracene:
     gro = get_gro.override(group_id="get_gro")(
         param_name="{{ params.inputs.gro.filename }}",
@@ -152,7 +151,7 @@ with DAG(
         ],
         names=lambda_dirs,
     )
-    grompp = ResourceGmxOperatorDataclass.partial(
+    grompp = ResourceRCTOperatorDataclass.partial(
         task_id="grompp",
         executor_config={
             "mpi_ranks": 1,
@@ -173,7 +172,7 @@ with DAG(
         )
         .expand(gmx_output=grompp.output)
     )
-    mdrun = ResourceGmxOperatorDataclass.partial(
+    mdrun = ResourceRCTOperatorDataclass.partial(
         task_id="mdrun",
         executor_config={
             "mpi_ranks": 1,
@@ -186,8 +185,7 @@ with DAG(
     dataset = dataset_from_xcom_dicts.override(task_id="make_dataset")(
         output_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}",
         output_fn="{{ params.output_name }}.json",
-        #list_of_dicts="{{ list(task_instance.xcom_pull(task_ids='mdrun', key='return_value')) }}",
-        list_of_dicts=get_rets(task_ids='mdrun'),
+        list_of_dicts="{{task_instance.xcom_pull(task_ids='mdrun', key='return_value')}}",
         dataset_structure="{{ params.output_dataset_structure }}",
     )
     update_data = add_lambdas_to_dataset.override(task_id="update_data")(
@@ -469,7 +467,6 @@ def generate_lambda_states(num_states: int | str):
     The keys are the state index and the values are the lambda value.
     The lambda values are uniformly spaced between 0 and 1, rounded to 2 decimal places.
     """
-    num_states = int(num_states)
     assert 1 <= num_states <= 101
     idx_to_state = {
         str(i): f"{round(i / (num_states - 1), 2):.2f}" for i in range(num_states)
@@ -639,8 +636,6 @@ def next_step_mdp_options(next_step_info, lambda_states, **context):
 def copy_gro_files(gro_fn, output_dir, states_dict, lambda_states_per_step):
     import logging, os, shutil
     import numpy as np
-
-    lambda_states_per_step = int(lambda_states_per_step)
 
     assert isinstance(output_dir, str)
     if not os.path.isabs(output_dir):
@@ -919,13 +914,13 @@ def next_step(states, output_dir, states_per_step, total_states, nsteps, new_gro
 
 
 with DAG(
-    "anthracene_runner",
+    dag_id="rct_anthracene_runner",
     schedule="@once",
     start_date=datetime(2025, 1, 1),
-    is_paused_upon_creation=False,
     catchup=False,
+    render_template_as_native_obj=True,
     params=dagrun_params,
-  # render_template_as_native_obj=True,
+    is_paused_upon_creation=False,
 ) as anthacene_files:
     get_states = generate_lambda_states("{{ params.lambda_states_total }}")
     gro_init, copy_gro_init = first_step(
@@ -961,8 +956,8 @@ with DAG(
         input_dir="{{ params.output_dir }}/iteration_{{ params.iteration }}",
         file_name="{{ params.expected_output }}",
         dag_params=new_params,
-        dag_id="anthracene_simulation",
-        display_name="anthracene",
+        dag_id="rct_anthracene_simulation",
+        display_name="rct_anthracene",
     )
 
     next_iteration_params = {
@@ -982,7 +977,7 @@ with DAG(
         statement="{{ params.iteration }} >= {{ params.max_iterations }}",
     )
     next_iteration = run_if_false.override(group_id="next_iteration")(
-        dag_id="anthracene_runner",
+        dag_id="rct_anthracene_runner",
         dag_params=next_iteration_params,
         truth_value=do_next_iteration,
         wait_for_completion=False,
